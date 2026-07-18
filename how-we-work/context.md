@@ -7,7 +7,8 @@
 
 ## What this project is
 
-HAIP is the **AI Forum**: an owner-driven brainstorming forum where hand-authored AI personas reply
+The **AI Forum** (forked 2026-07-18 from HAIP into `hevi-public/ai_forum`; direction shifting
+toward AI chat): an owner-driven brainstorming forum where hand-authored AI personas reply
 in a nested comment tree; per-branch context scoping is the differentiator. Single-user
 PoC — no auth layer, security hardening deliberately deferred (see the 2026-06 audit in
 `plan_docs/audit-remediation-tier1-tier2.md` / `audit-deferred-tier3-tier4.md`).
@@ -59,7 +60,7 @@ The cross-cutting ones a newcomer still needs:
   `plan_docs/local-model-reasoning-leak.md`.
 - A stale dev `bootRun` may hold port 8081 from a prior session — verify boots on a spare port
   (`--server.port=8085`). Prod runs `./gradlew bootRunProd` (persistent DB at
-  `~/.haip/data/aiforum.db`); `bootRun` stays the throwaway dev DB.
+  `~/.ai_forum/data/aiforum.db`); `bootRun` stays the throwaway dev DB.
 
 ## Feature state (2026-07-10)
 
@@ -82,7 +83,7 @@ create/edit (dials rendered as prose, not numbers); the router uses traits for d
 firewall — `escapeHtml` + `sanitizeUrls` with `data:` excluded (`plan_docs/markdown-rendering.md`).
 
 **Image attachments** (V13): caption-only LLM injection; `ImageDescriber` is the second IO port;
-content-addressed `ImageStore` under `~/.haip` (`plan_docs/image-attachments.md`).
+content-addressed `ImageStore` under `~/.ai_forum` (`plan_docs/image-attachments.md`).
 
 **Reply revisions** (V14): regenerate/edit creates revisions, lazy-materialised, ‹2/3› switcher;
 `comment.body` is the denormalised selected revision.
@@ -106,6 +107,12 @@ Tier-3/4 items deliberately deferred (single-user PoC): `plan_docs/audit-deferre
 holes closed (acceptance scenario floor, Node preflight, `mcp/` gated, compose runs `verifyAll`),
 skills re-synced to the four-port reality, this file + `CLAUDE.md` created, stale `HANDOVER.md`
 deleted.
+
+**2026-07-18 (fork):** repo forked from `hevi-public/HAIP` to `hevi-public/ai_forum` to pursue an
+AI-chat direction. First fork commit: origin repointed, MIT LICENSE adopted from the new repo's
+initial commit, data home renamed `~/.haip` → `~/.ai_forum` (prod DB, backups, image store — fresh
+DB unless you copy the old dir over), `aiforum.github.repo` now `hevi-public/ai_forum`, and the
+HAIP naming swept out of packages/launch configs/docs (`HAIP_design/` kept as the design source).
 
 ## Open threads / near-term
 

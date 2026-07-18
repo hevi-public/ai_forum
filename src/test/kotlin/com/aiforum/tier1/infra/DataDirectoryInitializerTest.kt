@@ -63,11 +63,11 @@ class DataDirectoryInitializerTest {
         val originalHome = System.getProperty("user.home")
         System.setProperty("user.home", tmp.toString())
         try {
-            runWith("jdbc:sqlite:~/.haip/data/aiforum.db?journal_mode=WAL")
+            runWith("jdbc:sqlite:~/.ai_forum/data/aiforum.db?journal_mode=WAL")
 
-            assertTrue(Files.isDirectory(tmp.resolve(".haip/data")), "expected the home-expanded parent dir")
-            // The headline guarantee: a literal `~/.haip/…` was NOT created relative to the cwd.
-            assertFalse(Files.exists(Path.of("~", ".haip")), "a literal ~ directory must never be created")
+            assertTrue(Files.isDirectory(tmp.resolve(".ai_forum/data")), "expected the home-expanded parent dir")
+            // The headline guarantee: a literal `~/.ai_forum/…` was NOT created relative to the cwd.
+            assertFalse(Files.exists(Path.of("~", ".ai_forum")), "a literal ~ directory must never be created")
         } finally {
             System.setProperty("user.home", originalHome)
         }
@@ -78,7 +78,7 @@ class DataDirectoryInitializerTest {
         val originalHome = System.getProperty("user.home")
         System.setProperty("user.home", tmp.toString())
         try {
-            val env = runReturningEnv("jdbc:sqlite:~/.haip/data/aiforum.db?journal_mode=WAL")
+            val env = runReturningEnv("jdbc:sqlite:~/.ai_forum/data/aiforum.db?journal_mode=WAL")
 
             val resolved = env.getProperty("spring.datasource.url")!!
             assertFalse(resolved.contains("~"), "the republished datasource url must contain no literal ~")

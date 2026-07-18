@@ -1,5 +1,5 @@
 /*
- * nav-core — pure tree-navigation model for HAIP vim-style keyboard nav.
+ * nav-core — pure tree-navigation model for AI Forum vim-style keyboard nav.
  *
  * NO DOM, NO globals: every function takes a `model` and returns ids (or null). This is the
  * unit-tested heart of the keyboard navigation (see src/test/js/nav-core.test.mjs). The DOM glue

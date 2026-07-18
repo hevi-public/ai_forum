@@ -2,21 +2,21 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "haip",
+      "name": "ai-forum",
       "runtimeExecutable": "./gradlew",
       "runtimeArgs": ["bootRun"],
       "port": 8081,
       "autoPort": false
     },
     {
-      "name": "haip-stub",
+      "name": "ai-forum-stub",
       "runtimeExecutable": "./gradlew",
       "runtimeArgs": ["bootRun", "--args=--spring.profiles.active=dev,stub"],
       "port": 8081,
       "autoPort": false
     },
     {
-      "name": "haip-8081",
+      "name": "ai-forum-8081",
       "runtimeExecutable": "./gradlew",
       "runtimeArgs": ["bootRun", "--args=--server.port=8081"],
       "port": 8081

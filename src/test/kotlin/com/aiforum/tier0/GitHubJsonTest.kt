@@ -18,13 +18,13 @@ class GitHubJsonTest {
     @Test
     fun `parseRepo pulls the summary fields including nested branch and counts`() {
         val json = """
-            {"nameWithOwner":"hevi-public/haip","description":"AI forum","url":"https://github.com/hevi-public/haip",
+            {"nameWithOwner":"hevi-public/ai_forum","description":"AI forum","url":"https://github.com/hevi-public/ai_forum",
              "defaultBranchRef":{"name":"main"},"stargazerCount":7,"issues":{"totalCount":3},"pullRequests":{"totalCount":2}}
         """.trimIndent()
         val repo = GitHubJson.parseRepo(json)
-        assertEquals("hevi-public/haip", repo.nameWithOwner)
+        assertEquals("hevi-public/ai_forum", repo.nameWithOwner)
         assertEquals("AI forum", repo.description)
-        assertEquals("https://github.com/hevi-public/haip", repo.url)
+        assertEquals("https://github.com/hevi-public/ai_forum", repo.url)
         assertEquals("main", repo.defaultBranch)
         assertEquals(7, repo.stars)
         assertEquals(3, repo.openIssues)

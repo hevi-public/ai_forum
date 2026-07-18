@@ -23,12 +23,12 @@ gg:
 
 aiforum:
   # WAL-safe SQLite snapshots (VACUUM INTO) — see com.aiforum.backup.SqliteBackup. Gated on `enabled`
-  # (and the !test profile), so a test run never writes into the real ~/.haip store. `dir` defaults to
-  # ~/.haip/backup (a leading ~ is expanded via SqlitePath, never reaching disk literally); `keep` is the
+  # (and the !test profile), so a test run never writes into the real ~/.ai_forum store. `dir` defaults to
+  # ~/.ai_forum/backup (a leading ~ is expanded via SqlitePath, never reaching disk literally); `keep` is the
   # retention count — older snapshots beyond the newest N are pruned each run.
   backups:
     enabled: true
-    dir: ~/.haip/backup
+    dir: ~/.ai_forum/backup
     keep: 7
   # Shortcut ticketing integration (https://shortcut.com) — READ-ONLY. Off by default; the forum behaves
   # exactly as before until you enable it. When on, three surfaces light up: a right-rail "Shortcut" box
@@ -48,11 +48,11 @@ aiforum:
     box-limit: 5                                     # stories shown in the right-rail box
     page-limit: 25                                   # stories shown on /shortcut (Shortcut caps a search page at 25)
   # Image attachments. Bytes live on disk under `dir` (content-addressed); only metadata is in SQLite.
-  # The prod path is the base default (~/.haip/data/images, sibling of the DB); dev/test override it to a
+  # The prod path is the base default (~/.ai_forum/data/images, sibling of the DB); dev/test override it to a
   # project-local / build dir (see application-{dev,test}.yml). ${user.home} is Spring-resolved, so a
   # literal `~` never reaches the filesystem.
   images:
-    dir: ${user.home}/.haip/data/images
+    dir: ${user.home}/.ai_forum/data/images
     max-bytes: 10485760        # 10 MiB; the ImageStore rejects anything larger after magic-byte sniffing
     # Vision captioning (MANUAL — the owner clicks "Describe"). The caption is injected into LLM context
     # as text; raw bytes never reach generation models (caption-only design). Enabled by default, but it
@@ -81,7 +81,7 @@ aiforum:
   # path and does NOT use the gh-readonly MCP server (that one is for LLM tool-callers).
   github:
     enabled: true              # true => fetch live data from `gh` (needs `gh` installed + `gh auth login`); false => off state
-    repo: "hevi-public/HAIP"   # "OWNER/REPO" pinned so it works regardless of cwd (a git worktree's .git is a
+    repo: "hevi-public/ai_forum"   # "OWNER/REPO" pinned so it works regardless of cwd (a git worktree's .git is a
                                # pointer file, so `gh` repo-inference there is unreliable); blank => infer from cwd
     command: gh                # the gh binary on PATH
     list-limit: 10             # max open PRs / issues to list (clamped 1..100)

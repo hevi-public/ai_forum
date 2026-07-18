@@ -27,16 +27,16 @@ confusingly. Highest value first.
   `application-dev.yml`, is asserted off under test by `ProfileGuard.kt:24`, and is *exposed* by
   `DiagnosticsController.kt:19` — but **no code performs a backup** (no `VACUUM INTO`, `@Scheduled`,
   `Files.copy`). The flag implies protection that does not exist. The prod DB is a single file at
-  `~/.haip/data/aiforum.db` with WAL and no snapshot.
+  `~/.ai_forum/data/aiforum.db` with WAL and no snapshot.
 - **Supervisor decision (locked 2026-06-25): IMPLEMENT** (a snapshot is cheap and the data is the whole
-  point of the tool). Save directory: **`~/.haip/backup`** (singular).
+  point of the tool). Save directory: **`~/.ai_forum/backup`** (singular).
 - **Approach (implement):**
   - New `@Component` `SqliteBackup` in `com.aiforum.config` (or a new `backup` package). Gated on
     `@ConditionalOnProperty("aiforum.backups.enabled", havingValue = "true")` so it never wires under test
     (test sets it false; `ProfileGuard` already enforces that).
   - Mechanism: `VACUUM INTO '<dest>'` via `JdbcTemplate` — WAL-safe online snapshot producing a clean,
-    consistent single-file copy. Destination: **`~/.haip/backup/aiforum-<UTC-timestamp>.db`** (reuse
-    `SqlitePath` for `~` expansion; create the `~/.haip/backup` dir if absent). `VACUUM INTO` requires the
+    consistent single-file copy. Destination: **`~/.ai_forum/backup/aiforum-<UTC-timestamp>.db`** (reuse
+    `SqlitePath` for `~` expansion; create the `~/.ai_forum/backup` dir if absent). `VACUUM INTO` requires the
     dest path NOT already exist — timestamped names guarantee that.
   - Schedule: add `@EnableScheduling` (a small `@Configuration`), run on startup once + daily
     (`@Scheduled`). Use the injected `Clock` (do not call `Instant.now()` directly — the codebase injects
@@ -227,7 +227,7 @@ truth for how this codebase works; the Tier-1/2 changes introduce patterns they 
    T1.1 and T1.2 are the headline data-safety items — do them first. **T2.7 (skills) runs last**, after the
    code it documents has merged.
 2. **Decision gates (ask the supervisor before coding):**
-   - T1.1: **resolved — implement**, save dir `~/.haip/backup`. No further gate.
+   - T1.1: **resolved — implement**, save dir `~/.ai_forum/backup`. No further gate.
    - T1.2: report the final list of methods wrapped (esp. whether `retry` / the create path were included).
    - T2.5/T2.6: confirm the supervisor wants the optional migrations before adding schema.
 3. **Definition of done per task:** code + test at the correct tier + `docker compose run --rm build` green

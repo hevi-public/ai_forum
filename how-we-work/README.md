@@ -1,4 +1,4 @@
-# How we test & organise HAIP
+# How we test & organise the AI Forum
 
 > **Status:** ✅ written 2026-07-10 · **Owner:** Hevi · every number below was grep-derived and then
 > independently re-derived by a second pass; claims that didn't survive adversarial verification were

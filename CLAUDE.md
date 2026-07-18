@@ -1,8 +1,9 @@
-# HAIP — AI Forum
+# AI Forum
 
 An owner-driven brainstorming forum where hand-authored AI personas reply in a nested comment tree
 (per-branch context scoping is the differentiator). Spring Boot 4.1 + Kotlin, SQLite + Flyway, JTE
-SSR + htmx, Cucumber acceptance suite. Single-user PoC — no auth by design.
+SSR + htmx, Cucumber acceptance suite. Single-user PoC — no auth by design. Forked from HAIP on
+2026-07-18 (`hevi-public/ai_forum`); the product direction is shifting toward AI chat.
 
 This file is a router, not a doctrine dump. The doctrine lives where it's testable:
 

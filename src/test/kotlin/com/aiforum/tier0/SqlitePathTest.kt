@@ -20,9 +20,9 @@ class SqlitePathTest {
 
     @Test
     fun `expands a leading tilde-slash against the home dir`() {
-        val r = SqlitePath.expand("jdbc:sqlite:~/.haip/data/aiforum.db", home)!!
-        assertEquals("/home/tester/.haip/data/aiforum.db", r.filePath)
-        assertEquals("jdbc:sqlite:/home/tester/.haip/data/aiforum.db", r.url)
+        val r = SqlitePath.expand("jdbc:sqlite:~/.ai_forum/data/aiforum.db", home)!!
+        assertEquals("/home/tester/.ai_forum/data/aiforum.db", r.filePath)
+        assertEquals("jdbc:sqlite:/home/tester/.ai_forum/data/aiforum.db", r.url)
     }
 
     @Test
@@ -76,7 +76,7 @@ class SqlitePathTest {
     @Test
     fun `the resolved path and url never contain a leading tilde`() {
         // The core guarantee: whatever we hand back can never create a junk `~` directory.
-        val r = SqlitePath.expand("jdbc:sqlite:~/.haip/data/aiforum.db?foreign_keys=on", home)!!
+        val r = SqlitePath.expand("jdbc:sqlite:~/.ai_forum/data/aiforum.db?foreign_keys=on", home)!!
         assertFalse(r.filePath.startsWith("~"), "expanded file path must not start with ~")
         assertFalse(r.url.removePrefix("jdbc:sqlite:").startsWith("~"), "expanded url path must not start with ~")
     }

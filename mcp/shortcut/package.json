@@ -1,5 +1,5 @@
 {
-  "name": "@haip/shortcut-mcp",
+  "name": "@ai-forum/shortcut-mcp",
   "version": "0.1.0",
   "private": true,
   "description": "Read-only Model Context Protocol (MCP) server for the Shortcut ticketing system.",

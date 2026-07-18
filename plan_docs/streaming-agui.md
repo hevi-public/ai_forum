@@ -15,7 +15,7 @@ the `com.agui` dependency: AG-UI is pre-1.0 and its only JVM SDK is a *consumer*
 *producer*. The on-the-wire coupling is isolated to **one file** (`AguiWire`), so a spec bump — or a later
 decision to adopt the dependency — is a contained change pinned by a single Tier-0 golden test.
 
-(The protocol called "HAIP" at haiprotocol.com — despite this repo's name — was evaluated and rejected: a
+(The protocol called "HAIP" at haiprotocol.com — despite this repo's original name — was evaluated and rejected: a
 dormant solo project with no adoption. The name collision is coincidental.)
 
 ## Architecture
@@ -85,7 +85,7 @@ backend via `persona.model`; per-persona/per-request *backend* routing is deferr
 **Run it:**
 - `./gradlew bootRun` → dev profile, <http://localhost:8081> (throwaway project-local DB). `claude` must be
   on PATH and authenticated.
-- `./gradlew bootRunProd` → prod profile, <http://localhost:8080> (persistent DB at `~/.haip`).
+- `./gradlew bootRunProd` → prod profile, <http://localhost:8080> (persistent DB at `~/.ai_forum`).
 
 **Switch to an OpenAI-compatible server** (config, not a UI choice):
 

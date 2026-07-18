@@ -5,7 +5,7 @@ Feature: Discuss a GitHub PR in the forum
   team can discuss it. One PR maps to one thread; clicking Discuss again reuses it.
 
   Background:
-    Given the GitHub integration reports the repository "hevi-public/haip"
+    Given the GitHub integration reports the repository "hevi-public/ai_forum"
 
   Scenario: Discussing a PR opens a thread carrying the change and summons the room to summarise it
     Given a persona "Sol" exists

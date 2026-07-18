@@ -29,7 +29,7 @@ import java.time.format.DateTimeFormatter
  * Wiring:
  * - `@Profile("!test")` + `@ConditionalOnProperty(aiforum.backups.enabled=true)` — never wires under the
  *   test profile (which sets it false; [com.aiforum.config.ProfileGuard] enforces that), so a test run
- *   never writes into the real `~/.haip` store.
+ *   never writes into the real `~/.ai_forum` store.
  * - The injected [Clock] (see `ClockConfig`) is the only time source — no `Instant.now()` — so the
  *   filename timestamp is pinnable in tests.
  * - The destination dir reuses [SqlitePath.expandTilde] for `~` expansion (the second consumer the
@@ -53,7 +53,7 @@ class SqliteBackup(
     constructor(
         jdbc: JdbcTemplate,
         clock: Clock,
-        @Value("\${aiforum.backups.dir:~/.haip/backup}") dir: String,
+        @Value("\${aiforum.backups.dir:~/.ai_forum/backup}") dir: String,
         @Value("\${aiforum.backups.keep:7}") keep: Int,
     ) : this(
         jdbc,

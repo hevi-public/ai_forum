@@ -28,7 +28,7 @@ import javax.imageio.ImageIO
 class ImageStore(
     // ${user.home} is resolved by Spring before this sees it (same mechanism as the datasource URL), so a
     // literal `~` never reaches the filesystem. Tier-2 tests construct this directly with a temp dir.
-    @Value("\${aiforum.images.dir:\${user.home}/.haip/data/images}") dir: String,
+    @Value("\${aiforum.images.dir:\${user.home}/.ai_forum/data/images}") dir: String,
     @Value("\${aiforum.images.max-bytes:10485760}") private val maxBytes: Long,
 ) {
     private val root: Path = Path.of(dir).toAbsolutePath()

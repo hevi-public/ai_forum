@@ -37,7 +37,7 @@ aiforum:
   backups:
     enabled: true
     # Throwaway project-local snapshots for dev (mirrors the dev DB + images living under data/), so a
-    # `bootRun` dev session doesn't scatter snapshots into the real ~/.haip/backup store.
+    # `bootRun` dev session doesn't scatter snapshots into the real ~/.ai_forum/backup store.
     dir: data/backup-dev
   images:
     # Throwaway project-local image store for dev (mirrors the dev DB living under data/).

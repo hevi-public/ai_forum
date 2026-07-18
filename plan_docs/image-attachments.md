@@ -75,7 +75,7 @@ quote** — same XSS firewall as a body (`escapeHtml(true)`). The gallery (`frag
 ```yaml
 aiforum:
   images:
-    dir: ${user.home}/.haip/data/images   # prod; dev=data/images-dev, test=build/images-test (ProfileGuard-asserted)
+    dir: ${user.home}/.ai_forum/data/images   # prod; dev=data/images-dev, test=build/images-test (ProfileGuard-asserted)
     max-bytes: 10485760                    # 10 MiB
     describe:
       enabled: true                        # captioning on by default; needs a vision model served below
@@ -103,5 +103,5 @@ served, "Describe" surfaces a clear `FAILED` caption with a `WARN` log line rath
 
 Edit-time add/remove of images; server-side thumbnails; per-persona raw-image passthrough for genuinely
 vision-capable models; dedup-aware on-disk blob GC; captions in the **router** context (generation context
-has them, `PersonaRouter` does not yet). Backups must include `~/.haip/data/images` (the blobs live
+has them, `PersonaRouter` does not yet). Backups must include `~/.ai_forum/data/images` (the blobs live
 outside the SQLite file).

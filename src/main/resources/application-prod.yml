@@ -11,7 +11,7 @@ spring:
     # ${user.home} is resolved by Spring to an absolute path before xerial/the DataDirectoryInitializer
     # see it, so the SQLite driver never receives a literal `~` (which it would NOT expand). The
     # initializer also hardens against a literal `~` as a backstop.
-    url: jdbc:sqlite:${user.home}/.haip/data/aiforum.db?journal_mode=WAL&busy_timeout=5000&foreign_keys=on
+    url: jdbc:sqlite:${user.home}/.ai_forum/data/aiforum.db?journal_mode=WAL&busy_timeout=5000&foreign_keys=on
     driver-class-name: org.sqlite.JDBC
     hikari:
       maximum-pool-size: 5
@@ -32,7 +32,7 @@ aiforum:
     # Persistent home-directory snapshots, sibling of the prod DB. Pinned explicitly (rather than relying
     # on the SqliteBackup @Value defaults) so the prod backup target is legible here. ${user.home} is
     # Spring-resolved before the path is read, so no literal ~ reaches the filesystem.
-    dir: ${user.home}/.haip/backup
+    dir: ${user.home}/.ai_forum/backup
     keep: 7
   llm:
     # Personas reach the network in prod too.

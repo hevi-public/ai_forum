@@ -29,7 +29,7 @@ test('every tool builds a guarded read-only argv with minimal input', () => {
 
 test('issue_list composes filters into flags', () => {
   const argv = buildGhArgs('gh_issue_list', {
-    repo: 'hevi-public/haip',
+    repo: 'hevi-public/ai_forum',
     state: 'closed',
     limit: 5,
     labels: ['bug', 'p1'],
@@ -37,7 +37,7 @@ test('issue_list composes filters into flags', () => {
   });
   assert.deepEqual(argv, [
     'issue', 'list',
-    '--repo', 'hevi-public/haip',
+    '--repo', 'hevi-public/ai_forum',
     '--state', 'closed',
     '--limit', '5',
     '--label', 'bug',
@@ -53,11 +53,11 @@ test('search passes type and query positionally', () => {
 
 test('gh_api_get forces an explicit GET and maps params to query fields', () => {
   const argv = buildGhArgs('gh_api_get', {
-    endpoint: 'repos/hevi-public/haip/commits',
+    endpoint: 'repos/hevi-public/ai_forum/commits',
     params: { per_page: 50, sha: 'main' },
   });
   assert.deepEqual(argv, [
-    'api', '--method', 'GET', 'repos/hevi-public/haip/commits',
+    'api', '--method', 'GET', 'repos/hevi-public/ai_forum/commits',
     '-f', 'per_page=50',
     '-f', 'sha=main',
   ]);

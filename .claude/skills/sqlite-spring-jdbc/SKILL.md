@@ -134,7 +134,7 @@ aiforum:
 ```yaml
 spring:
   datasource:
-    url: jdbc:sqlite:${user.home}/.haip/data/aiforum.db?journal_mode=WAL&busy_timeout=5000&foreign_keys=on
+    url: jdbc:sqlite:${user.home}/.ai_forum/data/aiforum.db?journal_mode=WAL&busy_timeout=5000&foreign_keys=on
 ```
 
 Both have backups enabled. Launch prod with **`./gradlew bootRunProd`** (a `BootRun` task passing
@@ -205,10 +205,10 @@ about. `backup/SqliteBackup` closes that gap with **`VACUUM INTO '<dest>'`**, NO
 - **Gating mirrors the test-isolation rule.** The component is `@Component @Profile("!test")` +
   `@ConditionalOnProperty(prefix = "aiforum.backups", name = ["enabled"], havingValue = "true")`, so it
   **never wires under `test`** (which sets `enabled: false`, enforced by `ProfileGuard`) — a test run
-  can't write into the real `~/.haip` store. A sibling `SchedulingConfig` carries the *same* gate plus
+  can't write into the real `~/.ai_forum` store. A sibling `SchedulingConfig` carries the *same* gate plus
   `@EnableScheduling`, so the test context never even starts a scheduler thread.
 - **Reuses the shared path helper + injected `Clock`.** The destination dir
-  (`aiforum.backups.dir`, default `~/.haip/backup`) is `~`-expanded via `SqlitePath.expandTilde` (the
+  (`aiforum.backups.dir`, default `~/.ai_forum/backup`) is `~`-expanded via `SqlitePath.expandTilde` (the
   second consumer that helper was extracted for) and `Files.createDirectories`'d. The only time source
   is the injected `Clock` (no `Instant.now()`), so the filename timestamp is pinnable in tests — the
   same seam discipline as everywhere else.
@@ -224,7 +224,7 @@ about. `backup/SqliteBackup` closes that gap with **`VACUUM INTO '<dest>'`**, NO
 aiforum:
   backups:
     enabled: true
-    dir: ~/.haip/backup   # ~ expanded via SqlitePath.expandTilde, never reaching disk literally
+    dir: ~/.ai_forum/backup   # ~ expanded via SqlitePath.expandTilde, never reaching disk literally
     keep: 7               # newest N snapshots kept; older ones pruned each run
 ```
 
@@ -403,5 +403,5 @@ Cheapest reliable approach: `DELETE FROM` every table (children before parents, 
 - `tier0` runs `SqlitePathTest` (pure `~`-expansion); `tier1` runs `DataDirectoryInitializerTest`
   (dir-creation + `~`/republish) and `MigrationPipelineTest` (Flyway upgrades an *older* DB forward:
   migrate to V3, seed rows, migrate to latest, assert data survives + new-column DEFAULT/backfill).
-- `./gradlew bootRunProd` boots the prod profile against `~/.haip/data/aiforum.db` (persistent; created
+- `./gradlew bootRunProd` boots the prod profile against `~/.ai_forum/data/aiforum.db` (persistent; created
   on first run) — confirm no stray `~` dir appears in the project.

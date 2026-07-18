@@ -80,14 +80,14 @@ class GitHubControllerTest {
     @Test
     fun `an Ok snapshot becomes an available page with relativised timestamps`() {
         val overview = GitHubOverview(
-            repo = RepoSummary("hevi-public/haip", "AI forum", "https://x", "main", 7, 3, 2),
+            repo = RepoSummary("hevi-public/ai_forum", "AI forum", "https://x", "main", 7, 3, 2),
             pulls = listOf(PullRequest(12, "Add gh MCP", "octocat", "u", isDraft = true, createdAt = "2026-06-22T12:00:00Z")),
             issues = listOf(Issue(5, "Bug", "hubot", "u", createdAt = "2026-06-24T11:00:00Z")),
         )
         val page = render(GitHubResult.Ok(overview))
 
         assertTrue(page.available)
-        assertEquals("hevi-public/haip", page.repo?.nameWithOwner)
+        assertEquals("hevi-public/ai_forum", page.repo?.nameWithOwner)
         assertEquals(1, page.pulls.size)
         assertEquals(12, page.pulls.first().number)
         assertTrue(page.pulls.first().isDraft)

@@ -123,7 +123,7 @@ export function dismissToast(storage, id) {
 }
 
 // The key under which toasts persist.
-export const STORAGE_KEY = "haip.errorToasts";
+export const STORAGE_KEY = "ai_forum.errorToasts";
 
 /** Drop toasts whose createdAt is older than TOAST_TTL_MS relative to [now]. Missing createdAt = kept. */
 export function pruneExpired(toasts, now) {

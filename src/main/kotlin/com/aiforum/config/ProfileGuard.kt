@@ -22,7 +22,7 @@ class ProfileGuard(
                 "test profile must point at the test database, but datasource is: $datasourceUrl"
             }
             require(!backupsEnabled) { "backups must be disabled under the test profile" }
-            // Image blobs must land under build/, never the real ~/.haip store — same guard as the DB.
+            // Image blobs must land under build/, never the real ~/.ai_forum store — same guard as the DB.
             require("build" in imagesDir) {
                 "test profile must store images under build/, but images.dir is: $imagesDir"
             }

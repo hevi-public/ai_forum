@@ -12,7 +12,7 @@ aiforum:
     enabled: false
   images:
     # Image blobs go under build/ (like the test DB), asserted by ProfileGuard so a test run never writes
-    # into the real ~/.haip image store.
+    # into the real ~/.ai_forum image store.
     dir: build/images-test
   # Shortcut integration ON under test so the acceptance suite can drive the rail box, the /shortcut page,
   # and inline sc-N links. The real HttpShortcutClient is @Profile("!test"); a @Primary ScriptableShortcutClient

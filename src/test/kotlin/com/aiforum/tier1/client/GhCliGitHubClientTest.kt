@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test
 class GhCliGitHubClientTest {
 
     private val repoJson = """
-        {"nameWithOwner":"hevi-public/haip","description":"AI forum","url":"https://github.com/hevi-public/haip",
+        {"nameWithOwner":"hevi-public/ai_forum","description":"AI forum","url":"https://github.com/hevi-public/ai_forum",
          "defaultBranchRef":{"name":"main"},"stargazerCount":7,"issues":{"totalCount":3},"pullRequests":{"totalCount":2}}
     """.trimIndent()
     private val prJson = """[{"number":12,"title":"Add gh MCP","author":{"login":"octocat"},"url":"u","isDraft":false,"createdAt":"2026-06-20T10:00:00Z"}]"""
@@ -66,9 +66,9 @@ class GhCliGitHubClientTest {
 
     @Test
     fun `enabled composes repo summary plus open PRs and issues`() {
-        val result = FakeGh(enabled = true, repo = "hevi-public/haip").overview()
+        val result = FakeGh(enabled = true, repo = "hevi-public/ai_forum").overview()
         val ok = assertInstanceOf(GitHubResult.Ok::class.java, result)
-        assertEquals("hevi-public/haip", ok.overview.repo.nameWithOwner)
+        assertEquals("hevi-public/ai_forum", ok.overview.repo.nameWithOwner)
         assertEquals("main", ok.overview.repo.defaultBranch)
         assertEquals(1, ok.overview.pulls.size)
         assertEquals(12, ok.overview.pulls.first().number)
@@ -78,7 +78,7 @@ class GhCliGitHubClientTest {
 
     @Test
     fun `every gh invocation is one of the read-only commands, and a pinned repo is passed through`() {
-        val client = FakeGh(enabled = true, repo = "hevi-public/haip")
+        val client = FakeGh(enabled = true, repo = "hevi-public/ai_forum")
         client.overview()
         // Only repo view / pr list / issue list, never a mutating verb.
         val heads = client.argvs.map { it.take(2) }
@@ -87,8 +87,8 @@ class GhCliGitHubClientTest {
         assertTrue(heads.contains(listOf("issue", "list")))
         assertEquals(3, client.argvs.size)
         // repo view takes the repo positionally; pr/issue list take it via --repo.
-        assertTrue(client.argvs.first { it[0] == "repo" }.contains("hevi-public/haip"))
-        assertTrue(client.argvs.first { it[0] == "pr" }.containsAll(listOf("--repo", "hevi-public/haip", "--state", "open")))
+        assertTrue(client.argvs.first { it[0] == "repo" }.contains("hevi-public/ai_forum"))
+        assertTrue(client.argvs.first { it[0] == "pr" }.containsAll(listOf("--repo", "hevi-public/ai_forum", "--state", "open")))
     }
 
     @Test
@@ -131,15 +131,15 @@ class GhCliGitHubClientTest {
 
     @Test
     fun `pull builds only the read-only pr view and pr diff, passing a pinned repo through`() {
-        val client = FakeGh(enabled = true, repo = "hevi-public/haip")
+        val client = FakeGh(enabled = true, repo = "hevi-public/ai_forum")
         client.pull(42)
         val heads = client.argvs.map { it.take(2) }
         assertTrue(heads.contains(listOf("pr", "view")))
         assertTrue(heads.contains(listOf("pr", "diff")))
         assertEquals(2, client.argvs.size, "pull() makes exactly two reads — no version probe, no mutation")
         // The PR number is positional; the pinned repo rides --repo on both reads.
-        assertTrue(client.argvs.first { it.take(2) == listOf("pr", "view") }.containsAll(listOf("42", "--repo", "hevi-public/haip")))
-        assertTrue(client.argvs.first { it.take(2) == listOf("pr", "diff") }.containsAll(listOf("42", "--repo", "hevi-public/haip")))
+        assertTrue(client.argvs.first { it.take(2) == listOf("pr", "view") }.containsAll(listOf("42", "--repo", "hevi-public/ai_forum")))
+        assertTrue(client.argvs.first { it.take(2) == listOf("pr", "diff") }.containsAll(listOf("42", "--repo", "hevi-public/ai_forum")))
     }
 
     @Test
@@ -288,7 +288,7 @@ class GhCliGitHubClientTest {
     fun `the real spawn path maps a missing gh binary to Unavailable rather than throwing`() {
         // Uses the production exec() (no override) with a binary that doesn't exist, so the ProcessBuilder
         // IOException → Unavailable path is exercised hermetically — no real gh, no network.
-        val client = GhCliGitHubClient(enabled = true, repo = "o/r", command = "haip-nonexistent-gh-binary")
+        val client = GhCliGitHubClient(enabled = true, repo = "o/r", command = "ai-forum-nonexistent-gh-binary")
         val result = client.overview()
         val unavailable = assertInstanceOf(GitHubResult.Unavailable::class.java, result)
         assertTrue(unavailable.reason.contains("couldn't be launched"), unavailable.reason)

@@ -1,4 +1,4 @@
-# Keyboard navigation — vim-style ("HAIP vim mode")
+# Keyboard navigation — vim-style ("AI Forum vim mode")
 
 Status: **first cut = thread page only** (2026-06-21). Other pages roll out later via the same engine.
 

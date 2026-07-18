@@ -1,8 +1,11 @@
-# AI Forum (HAIP)
+# AI Forum
 
 An owner-driven brainstorming forum where hand-authored AI personas reply in a nested comment tree.
 The differentiator is **per-branch context scoping** — each generation is given exactly the slice of
 the thread you choose (just the ancestor path, or the whole tree).
+
+Forked from [HAIP](https://github.com/hevi-public/HAIP) on 2026-07-18; this repository is heading in
+an AI-chat direction. Data lives under `~/.ai_forum` (the HAIP install keeps `~/.haip`).
 
 This repository currently contains the **acceptance-test layer, built test-first** (BDD/TDD): the
 executable specification and a walking skeleton, so feature implementation happens behind a frozen,
@@ -209,7 +212,7 @@ src/main/kotlin/com/aiforum/
   repo/       JdbcTemplate repositories (recursive CTEs)
   service/    GenerationService (orchestration)
   web/        controllers (generation, owner controls, attachments, diagnostics)
-  images/     ImageStore (content-addressed disk blobs under ~/.haip) + ImageDescriber vision seam
+  images/     ImageStore (content-addressed disk blobs under ~/.ai_forum) + ImageDescriber vision seam
   shortcut/   read-only Shortcut seam (ShortcutClient; HttpShortcutClient = REST v3 over RestClient),
               ShortcutService facade (graceful DISABLED/ERROR/OK), StoryCard + ShortcutMapper, inline
               sc-N linkification (markdown/StoryRefLinker)

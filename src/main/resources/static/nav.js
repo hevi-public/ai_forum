@@ -1,5 +1,5 @@
 /*
- * nav.js — DOM glue for HAIP vim-style keyboard navigation (see plan_docs/keyboard-navigation.md).
+ * nav.js — DOM glue for AI Forum vim-style keyboard navigation (see plan_docs/keyboard-navigation.md).
  *
  * Pure progressive enhancement: builds a navigation model from the rendered comment tree, owns the
  * cursor (.is-current), and maps keystrokes onto moves + existing affordances (composers, +1). All the

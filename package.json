@@ -1,8 +1,8 @@
 {
-  "name": "haip-web",
+  "name": "ai-forum-web",
   "version": "0.0.0",
   "private": true,
-  "description": "Front-end JS for the AI Forum (HAIP). Pure ESM, no runtime deps; node:test for unit tests.",
+  "description": "Front-end JS for the AI Forum. Pure ESM, no runtime deps; node:test for unit tests.",
   "type": "module",
   "engines": {
     "node": ">=21"
