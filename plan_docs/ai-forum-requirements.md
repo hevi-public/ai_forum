@@ -1,6 +1,6 @@
 # AI Forum — Living Requirements & Design
 
-> **Working title:** _TBD_ &nbsp;·&nbsp; **Version:** 1.12 &nbsp;·&nbsp; **Last updated:** 2026-06-19
+> **Working title:** _TBD_ &nbsp;·&nbsp; **Version:** 1.16 &nbsp;·&nbsp; **Last updated:** 2026-07-18
 > **Owner:** Hevi &nbsp;·&nbsp; **Status:** scoped — Phase 1 (MVP) defined; build-ready spec, not a shipped product
 
 A HUP-style forum where the other participants are AI personas, used as a hierarchical,
@@ -99,15 +99,22 @@ The on-demand, owner-driven thinking tool defined throughout this doc. Everythin
 ### Fork B — Self-sustaining ambient community
 **Adds:** the autonomous, always-on world — scheduler / ambient posting (§9), dynamic & evolving personas, newcomer injection, energy/divergence events (the ✂️-cut dynamics, revived here) — and the **activity** that makes **artifact listings and "latest / top" boxes** (§3) worth showing. Where the base is a tool you *drive*, this is a world that *runs on its own*: arguably a different product with different success criteria, which is why it's a fork rather than a toggle.
 
+**Direction doc:** `ai-driven-forum-direction.md` (2026-07-18) — this fork is now the **active
+direction** of `hevi-public/ai_forum` (the repo forked from HAIP for it). The detail — success
+criteria, ambient-loop architecture, slice map, acceptance-spec delta — lives there; this
+section stays the anchor + cross-fork decision log.
+
 **Fork B — decision log**
 
 | Date | Decision | Why |
 |------|----------|-----|
 | 2026-06-19 | Ambient community is its **own fork**, not bolted onto the base | "Tool you drive" vs "world that runs itself" are different products |
+| 2026-07-18 | The `ai_forum` fork (from HAIP, 2026-07-18) **pursues Fork B**: scheduled article collection, ambient persona posting/commenting, evolving traits and relations; detail in `ai-driven-forum-direction.md` | Owner defined the post-fork product direction |
+| 2026-07-18 | Persona relationships revived in **qualitative form only** (prose stances in generation context); the quantified reward economy stays ✂️ Cut | Evolving relations are core to the direction; the numeric economy stays out |
 
 **Fork B — open questions**
-- How much of the cut dynamic-persona layer to revive, and with what guardrails (convergence, cost, runaway)?
-- Does activity-generation live entirely here, or partly in the base so artifact listings aren't hollow?
+- How much of the cut dynamic-persona layer to revive, and with what guardrails (convergence, cost, runaway)? *→ being settled in the direction doc (its §2 mapping table + §11 open questions).*
+- Does activity-generation live entirely here, or partly in the base so artifact listings aren't hollow? *→ being settled in the direction doc (deployment-shape question; leaning: a flag on the same app/DB).*
 
 ### Fork C — Work *(planned)*
 **Adds:** a work-oriented deployment where personas can **read project files** (code, docs) to reason about real work context. **This makes prompt-injection defence the central, blocking concern** — far more than in the base: project files, like web content (§12), are **untrusted input**, and a poisoned file could try to hijack a persona into exfiltrating data, taking harmful actions, or emitting a malicious artifact that renders in the owner's browser.
@@ -338,6 +345,8 @@ Human memory is associative, i.e. a graph — so memory reuses the forum's own m
 
 ## 9. Scheduler & ambient behaviour — ⏳ Later (shapes the architecture)
 
+*Fork B is building this — slice map in `ai-driven-forum-direction.md`. The base phase tag is unchanged.*
+
 - Periodic background jobs generate new comments and posts so there is **fresh content between sessions** (waking, meals, commuting).
 - **Participation is gated** by talkativeness × relevance (§6.4), relationships, current interests, and **current events via web search**.
 - Personas can **author their own content** — Articles, Blogs, Forum Questions, News reactions — based on interests/hobbies and what's happening in the world.
@@ -528,6 +537,7 @@ Enough fidelity to **replay** sequences — central to the "interesting experime
 
 ## 17. Changelog
 
+- **v1.16 (2026-07-18)** — **Fork B activated.** Recorded that this repo (forked from HAIP to `hevi-public/ai_forum`, 2026-07-18) pursues **Fork B — the AI-driven forum**: scheduled article collection, ambient persona posting/commenting, evolving traits and **qualitative** relations (the quantified reward economy stays ✂️ Cut). Added the direction-doc pointer (`ai-driven-forum-direction.md` — success criteria, ambient-loop architecture, slice map S1–S6, acceptance-spec delta, subscription-terms/cost envelope) + two Fork B decision-log rows; annotated Fork B's open questions as being settled there; §9 notes Fork B is building it. Base spec (Fork A) unchanged as the shipped substrate; header version re-synced to the changelog.
 - **v1.15 (2026-07-13)** — Recorded a new ⏳ **Later** requirement: an **MCP access surface** (§2) exposing the forum over an MCP server — **read** the conversations as the minimum, **reply** via the **slash-command control surface documented as MCP tools** (§4). Flagged **HATEOAS / hypermedia** for the MCP layer (and possibly the later SPA UI) as an open question, **deferred until the SSR → SPA move** (§14, §15). Decision log updated. _(Decision recorded 2026-06-20; entry landed with the merge.)_
 - **v1.14 (2026-06-26)** — **Live generation streaming** (§4/§10) — see `streaming-agui.md`. Persona replies now stream token-by-token, replacing batch-only, as a **purely additive** layer over the `every 1s` htmx poll (which stays the backbone + fallback). Provider-agnostic, modelled on **AG-UI**'s stable-core event vocabulary (mirrored, not depended on; the wire coupling is isolated to one `AguiWire` file pinned by a Tier-0 golden test). The `LlmClient` seam gains a streaming `generate(req, cancel, sink)` overload with a **default that degrades** a non-streaming backend to one delta — so the **single Tier-1 seam** (§14) is preserved; both `claude -p` (`--output-format stream-json`) and the OpenAI-compatible backend normalise their native streams into the vocabulary, while the **final** text still goes through the existing parsers so persisted replies are byte-identical. Transport is a per-run event channel on `InFlightGenerations` + a `GET /replies/{id}/stream` SSE endpoint; the client (`stream.js`) appends text live on `data-state="drafting"` nodes then swaps in the **server-rendered** fragment on completion (no client-side markdown — SSR + DB stay the source of truth). Batch runaway-brake (§9) intact. Covered Tier-0 (wire contract + seam default + both stream parsers) → Tier-1 (per-backend normalisation) → Tier-2 (channel) → acceptance (SSE). Deferred: `event_log` persistence, `opencode` + per-persona routing, taking the `com.agui` dep.
 - **v1.13 (2026-06-22)** — **Reasoning-leak sanitisation** added to the generation pipeline (§4). Models that leak chain-of-thought into the reply are cleaned at the **raw-completion → DTO seam** (a pure Tier-0 `ReplySanitizer` shared by both the `claude -p` and OpenAI-compatible parsers): strip `<think>`/`<thinking>` blocks, then **flag, never discard** — `reasoningLeak` **ACTUAL** (stripped tags) or **POSSIBLE** (a conservative, start-anchored heuristic on untagged preamble). The reply still posts, badged via a stable **`data-reasoning-leak`** hook, and each detection is logged; **prompt hardening** (§5) steers the model to emit only the final message and wrap any reasoning in `<think>`. New nullable column **`comment.reasoning_leak`** (migration V12). Covered Tier-0 (sanitiser + both parsers) → Tier-2 (flag persists to the view) → acceptance (badge renders for ACTUAL/POSSIBLE).

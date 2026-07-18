@@ -4,9 +4,9 @@ server:
   # stays deferred to T3.1.) Mirrors application-prod.yml; the test profile is left untouched (its
   # RANDOM_PORT / TestRestTemplate already use loopback).
   address: 127.0.0.1
-  # Dev runs on 8081 so it doesn't collide with a prod instance (prod keeps the 8080 default — no
-  # server.port override there). Change with `--server.port=` or SERVER_PORT if 8081 is also taken.
-  port: 8081
+  # Dev runs on 8020 so it doesn't collide with a prod instance (prod keeps the 8080 default — no
+  # server.port override there). Change with `--server.port=` or SERVER_PORT if 8020 is also taken.
+  port: 8020
 
 spring:
   datasource:

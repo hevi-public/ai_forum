@@ -83,7 +83,7 @@ Backend choice is **global** — one provider for the whole app. A persona may s
 backend via `persona.model`; per-persona/per-request *backend* routing is deferred.
 
 **Run it:**
-- `./gradlew bootRun` → dev profile, <http://localhost:8081> (throwaway project-local DB). `claude` must be
+- `./gradlew bootRun` → dev profile, <http://localhost:8020> (throwaway project-local DB). `claude` must be
   on PATH and authenticated.
 - `./gradlew bootRunProd` → prod profile, <http://localhost:8080> (persistent DB at `~/.ai_forum`).
 

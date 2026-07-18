@@ -3,13 +3,15 @@
 > **Contract:** this file is the on-repo copy of cross-session memory. Any session (or human) that
 > learns something durable — a convention, a gotcha, a feature landing — updates **this file**, not
 > just private session memory. Private memory may cache it; this file is the record a second human
-> can read. Convert relative dates to absolute. Last full sync: **2026-07-10**.
+> can read. Convert relative dates to absolute. Last full sync: **2026-07-18**.
 
 ## What this project is
 
-The **AI Forum** (forked 2026-07-18 from HAIP into `hevi-public/ai_forum`; direction shifting
-toward AI chat): an owner-driven brainstorming forum where hand-authored AI personas reply
-in a nested comment tree; per-branch context scoping is the differentiator. Single-user
+The **AI Forum** (forked 2026-07-18 from HAIP into `hevi-public/ai_forum`; direction: the
+**AI-driven forum** — spec Fork B, scheduled article collection + ambient persona activity;
+`plan_docs/ai-driven-forum-direction.md`): today an owner-driven brainstorming forum where
+hand-authored AI personas reply in a nested comment tree; per-branch context scoping is the
+differentiator. Single-user
 PoC — no auth layer, security hardening deliberately deferred (see the 2026-06 audit in
 `plan_docs/audit-remediation-tier1-tier2.md` / `audit-deferred-tier3-tier4.md`).
 
@@ -58,7 +60,7 @@ The cross-cutting ones a newcomer still needs:
 - **Local models via LM Studio:** avoid Gemma (leaks inline reasoning into replies); use
   **Qwen3.5 9B with thinking off**. Strip/flag pipeline + debug profile documented in
   `plan_docs/local-model-reasoning-leak.md`.
-- A stale dev `bootRun` may hold port 8081 from a prior session — verify boots on a spare port
+- A stale dev `bootRun` may hold port 8020 from a prior session — verify boots on a spare port
   (`--server.port=8085`). Prod runs `./gradlew bootRunProd` (persistent DB at
   `~/.ai_forum/data/aiforum.db`); `bootRun` stays the throwaway dev DB.
 
@@ -92,8 +94,9 @@ content-addressed `ImageStore` under `~/.ai_forum` (`plan_docs/image-attachments
 backlinks/selector-cone deferred (`plan_docs/comment-quotes.md`).
 
 **GitHub PR threads** (V19, "Discuss this PR"): PR → forum thread the room summarises; Slice 1
-built (mapping table, `gh` seam, `/github` Discuss button); Slice 2 (comment discussion) pending
-(`plan_docs/github-pr-threads.md`). `GitHubClient` is the fourth IO port.
+(mapping table, `gh` seam, `/github` Discuss button) and Slice 2 (discussion ingest, gh-tools
+for personas) both merged — PR #91 landed 2026-07-13 (`plan_docs/github-pr-threads.md`).
+`GitHubClient` is the fourth IO port.
 
 **AG-UI live token streaming** (2026-06-26): AG-UI-shaped SSE events, hybrid SSR+SSE additive over
 the existing poll; `AguiWire` is the single spec-coupling point; deferred: `event_log` persistence.
@@ -108,18 +111,33 @@ holes closed (acceptance scenario floor, Node preflight, `mcp/` gated, compose r
 skills re-synced to the four-port reality, this file + `CLAUDE.md` created, stale `HANDOVER.md`
 deleted.
 
-**2026-07-18 (fork):** repo forked from `hevi-public/HAIP` to `hevi-public/ai_forum` to pursue an
-AI-chat direction. First fork commit: origin repointed, MIT LICENSE adopted from the new repo's
+**2026-07-18 (fork):** repo forked from `hevi-public/HAIP` to `hevi-public/ai_forum` to pursue a
+new product direction. First fork commit: origin repointed, MIT LICENSE adopted from the new repo's
 initial commit, data home renamed `~/.haip` → `~/.ai_forum` (prod DB, backups, image store — fresh
 DB unless you copy the old dir over), `aiforum.github.repo` now `hevi-public/ai_forum`, and the
 HAIP naming swept out of packages/launch configs/docs (`HAIP_design/` kept as the design source).
 
+**2026-07-18 (direction defined):** the fork's purpose written down — the **AI-driven forum**
+(spec **Fork B** activated): on a schedule, personas collect interesting articles from the web,
+post them, and comment on each other's threads; traits + **qualitative** relations evolve over
+time; the owner participates as a peer. Direction doc: `plan_docs/ai-driven-forum-direction.md`
+(success criteria, ambient-loop architecture, `ArticleSource` as the fifth IO port, slice map
+S1–S6, acceptance-spec delta over the 45 features, subscription-terms/cost/caching envelope —
+ambient runs headless `claude -p` on the subscription, few ticks/day, stateless per-run calls).
+Spec bumped to v1.16 (Fork B decision-log rows + pointer; header version re-synced). Dev port
+moved **8081 → 8020** (`application-dev.yml` + `.claude/launch.json`; prod stays 8080).
+
 ## Open threads / near-term
 
+- **Ambient Slice 1** (`plan_docs/ai-driven-forum-direction.md` §9) — the next code deliverable:
+  `AmbientTickService` + `POST /admin/ambient/tick`, gated scheduler, stub `ArticleSource` (5th
+  port + scriptable fake), `thread.author_id` migration, `ambient_run` on `/admin`. Own plan
+  doc + worktree + PR; `ambient_tick.feature` written RED-first.
+- Docker jail for persona tool use (§10–§12) — still deferred, but **urgency raised**: ambient
+  web fetching is scheduled + unattended (direction doc §8); web-fetch note above applies.
 - Composer branch-context controls (`plan_docs/composer-branch-context-controls.md`) — designed,
   not built: surface the context-scope control + include-siblings toggle; settle sibling semantics.
-- GitHub PR threads Slice 2 (comment discussion).
 - Quote backlinks / selector-cone (deferred from V18).
-- Phase 1.5 headliner: **Artifacts** (spec §3/§15) — needs a design spike first (no settled
-  protocol for how `claude -p` signals an artifact; sandboxed render decision, §12).
-- Docker jail for persona tool use (§10–§12) — still deferred; web-fetch note above applies.
+- **Artifacts** (spec §3/§15) — still needs its design spike (claude -p emit protocol; sandboxed
+  render, §12), now re-framed: ambient activity (Fork B) is what makes artifact "latest/top"
+  listings meaningful, so Artifacts follows ambient S1/S2 rather than preceding them.
