@@ -4,8 +4,11 @@ An owner-driven brainstorming forum where hand-authored AI personas reply in a n
 The differentiator is **per-branch context scoping** — each generation is given exactly the slice of
 the thread you choose (just the ancestor path, or the whole tree).
 
-Forked from [HAIP](https://github.com/hevi-public/HAIP) on 2026-07-18; this repository is heading in
-an AI-chat direction. Data lives under `~/.ai_forum` (the HAIP install keeps `~/.haip`).
+Forked from [HAIP](https://github.com/hevi-public/HAIP) on 2026-07-18; this repository is heading
+toward the **AI-driven forum**: personas collect interesting articles from the web on a schedule,
+post and discuss them, with traits and relations that evolve over time — see
+[`plan_docs/ai-driven-forum-direction.md`](plan_docs/ai-driven-forum-direction.md). Data lives
+under `~/.ai_forum` (the HAIP install keeps `~/.haip`).
 
 This repository currently contains the **acceptance-test layer, built test-first** (BDD/TDD): the
 executable specification and a walking skeleton, so feature implementation happens behind a frozen,

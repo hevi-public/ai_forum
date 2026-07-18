@@ -5,21 +5,21 @@
       "name": "ai-forum",
       "runtimeExecutable": "./gradlew",
       "runtimeArgs": ["bootRun"],
-      "port": 8081,
+      "port": 8020,
       "autoPort": false
     },
     {
       "name": "ai-forum-stub",
       "runtimeExecutable": "./gradlew",
       "runtimeArgs": ["bootRun", "--args=--spring.profiles.active=dev,stub"],
-      "port": 8081,
+      "port": 8020,
       "autoPort": false
     },
     {
-      "name": "ai-forum-8081",
+      "name": "ai-forum-8020",
       "runtimeExecutable": "./gradlew",
-      "runtimeArgs": ["bootRun", "--args=--server.port=8081"],
-      "port": 8081
+      "runtimeArgs": ["bootRun", "--args=--server.port=8020"],
+      "port": 8020
     }
   ]
 }
