@@ -3,7 +3,7 @@
 > **Contract:** this file is the on-repo copy of cross-session memory. Any session (or human) that
 > learns something durable — a convention, a gotcha, a feature landing — updates **this file**, not
 > just private session memory. Private memory may cache it; this file is the record a second human
-> can read. Convert relative dates to absolute. Last full sync: **2026-07-18**.
+> can read. Convert relative dates to absolute. Last full sync: **2026-07-19**.
 
 ## What this project is
 
@@ -64,7 +64,7 @@ The cross-cutting ones a newcomer still needs:
   (`--server.port=8085`). Prod runs `./gradlew bootRunProd` (persistent DB at
   `~/.ai_forum/data/aiforum.db`); `bootRun` stays the throwaway dev DB.
 
-## Feature state (2026-07-10)
+## Feature state (2026-07-19)
 
 Everything below is merged to `main` and green under `verifyAll` unless marked otherwise.
 
@@ -127,12 +127,28 @@ ambient runs headless `claude -p` on the subscription, few ticks/day, stateless 
 Spec bumped to v1.16 (Fork B decision-log rows + pointer; header version re-synced). Dev port
 moved **8081 → 8020** (`application-dev.yml` + `.claude/launch.json`; prod stays 8080).
 
+**2026-07-19 (Ambient Slice 1, V20+V21):** the ambient skeleton is in
+(`plan_docs/ambient-slice-1.md`): `ArticleSource` is the **fifth IO port** (fixture
+`StubArticleSource` in prod, `ScriptableArticleSource` in test), `AmbientTickService` posts one
+persona-authored article thread per tick (OP = summary + link, **no LLM call of its own** — the
+auto-summon round is the discussion; round-robin author pick until S2's relevance gating),
+`POST /admin/ambient/tick` is the ungated manual trigger, the `@Scheduled` caller is gated
+`@Profile("!test")` + `aiforum.ambient.enabled` (**default off** — the flag kills only the
+scheduler, never the button). `thread.author_id` (V20) is a **plain attribution string, no FK**
+(the `comment.author_id` precedent — bylines survive persona deletion); `ambient_run` (V21) logs
+every tick (`thread_id` FK `ON DELETE SET NULL`, `cost_usd` NULL until per-run cost capture) and
+surfaces on `/admin` (ambient-runs / owner-threads / persona-threads tiles + `/admin/ambient`
+drill-down). `ambient_tick.feature` was written RED-first; suite now 168 scenarios. Note: the
+seeded roster is **seven** personas (Ducky + Quackers joined the original five).
+
 ## Open threads / near-term
 
-- **Ambient Slice 1** (`plan_docs/ai-driven-forum-direction.md` §9) — the next code deliverable:
-  `AmbientTickService` + `POST /admin/ambient/tick`, gated scheduler, stub `ArticleSource` (5th
-  port + scriptable fake), `thread.author_id` migration, `ambient_run` on `/admin`. Own plan
-  doc + worktree + PR; `ambient_tick.feature` written RED-first.
+- **Ambient Slice 2** (`plan_docs/ai-driven-forum-direction.md` §9) — next code deliverable:
+  ambient *commenting* on live threads, gated by talkativeness (new dial) × relevance, and the
+  **ambient fuel decision** (ambient threads stall at depth 0 under owner-only refuel — S2's
+  headline call). Also owns the deferred ambient lifecycle-parallel scenarios and the
+  persona-voice OP upgrade (S1 posts summary+link; the in-voice "take" needs an OP failure
+  lifecycle first).
 - Docker jail for persona tool use (§10–§12) — still deferred, but **urgency raised**: ambient
   web fetching is scheduled + unattended (direction doc §8); web-fetch note above applies.
 - Composer branch-context controls (`plan_docs/composer-branch-context-controls.md`) — designed,

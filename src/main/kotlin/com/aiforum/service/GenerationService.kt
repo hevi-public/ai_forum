@@ -473,7 +473,10 @@ class GenerationService(
         threads?.find(threadId)?.let { thread ->
             listOf(thread.title, thread.body).filter { it.isNotBlank() }.joinToString("\n\n")
                 .takeIf { it.isNotBlank() }
-                ?.let { Comment(threadId, threadId, null, OWNER_AUTHOR, it, GenerationState.POSTED, null, 0) }
+                // Attribute the OP node to its actual author: a persona for an ambient-opened thread (V20
+                // thread.author_id), the owner otherwise — so the dispatcher and summoned personas see the
+                // article OP as the persona's, not the owner's. The firewall is about VOTES, not the label.
+                ?.let { Comment(threadId, threadId, null, thread.authorId ?: OWNER_AUTHOR, it, GenerationState.POSTED, null, 0) }
         }
 
     /**

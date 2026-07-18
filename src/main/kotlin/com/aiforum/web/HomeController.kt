@@ -8,8 +8,9 @@ import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 
-/** View model for a single row on the front page. */
-data class ThreadRow(val id: String, val title: String, val unreadCount: Int)
+/** View model for a single row on the front page. [author] is the OP's persona attribution (V20), or
+ *  null for an owner-authored thread — the row emits its byline hook only when a persona authored it. */
+data class ThreadRow(val id: String, val title: String, val unreadCount: Int, val author: String? = null)
 
 /** A row in the right-rail "Active threads" box: thread + a compact "time ago" of its last activity. */
 data class ActiveThreadRow(val id: String, val title: String, val ago: String)
@@ -36,7 +37,7 @@ class HomeController(
     @GetMapping("/")
     fun home(model: Model): String {
         val rows = threads.findAll().map { t ->
-            ThreadRow(t.id, t.title, threadReads.unreadCount(t.id))
+            ThreadRow(t.id, t.title, threadReads.unreadCount(t.id), t.authorId)
         }
         model.addAttribute("threads", rows)
         val personaViews = personas.findAll().map {

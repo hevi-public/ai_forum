@@ -10,6 +10,7 @@
 @param body: String
 @param bodyHtml: String
 @param edited: Boolean = false
+@param author: String? = null
 @param replies: List<ReplyView>
 @param branchIndex: List<BranchIndexEntry>
 @param waitingOnRoom: Boolean
@@ -27,7 +28,7 @@
         @template.fragments.wideToggle()
         <%-- The OP is a nav item and editable (§7); the block lives in its own fragment so an edit can
              re-render just it. --%>
-        @template.fragments.threadOp(threadId = threadId, title = title, body = body, bodyHtml = bodyHtml, edited = edited, attachments = opAttachments)
+        @template.fragments.threadOp(threadId = threadId, title = title, body = body, bodyHtml = bodyHtml, edited = edited, attachments = opAttachments, author = author, personas = personas)
         @if(summoning && replies.isEmpty())
             <%-- The create-time summon is still routing (the dispatcher's "who replies" call runs on a
                  worker), so there are no drafts yet. Poll /threads/{id}/room until they land; htmx then

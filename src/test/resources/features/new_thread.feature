@@ -4,6 +4,9 @@ Feature: New thread creation
   picks who weighs in, then the chosen persona(s) reply. The opening question IS the topic, so it heads
   every summoned persona's context — otherwise the room answers a blank transcript (§2).
 
+  This feature scopes to the owner-initiated flow specifically; ambient/persona-initiated thread
+  creation is specified separately in ambient_tick.feature (plan_docs/ai-driven-forum-direction.md §10).
+
   Background:
     Given a persona "sol" exists
     And a persona "vex" exists

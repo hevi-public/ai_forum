@@ -1,0 +1,53 @@
+@import com.aiforum.web.AmbientRunView
+@import com.aiforum.web.AuthorLabel
+@param runs: List<AmbientRunView>
+
+@template.layout(title = "Admin · Ambient runs · AI Forum", activeNav = "admin", content = @`
+    <div class="admin-list" data-admin-list="ambient">
+        <p class="admin-list__back"><a href="/admin">← Admin</a></p>
+        <h1 class="admin-list__title">Ambient runs</h1>
+        <p class="admin-list__lede">Each ambient tick — posted, no-op, or failed — is logged here. Fire one by hand any time (the scheduler kill switch never disables this button).</p>
+        <%-- The manual trigger. POSTs to /admin/ambient/tick, which runs one tick and 303-redirects back
+             here so the fresh run shows at the top. Ungated: the owner can always hand-fire a tick. --%>
+        <form class="admin-ambient__trigger" method="post" action="/admin/ambient/tick" data-ambient-trigger>
+            <button class="btn" type="submit">Run a tick now ▸</button>
+        </form>
+        @if(runs.isEmpty())
+            <p class="admin-list__empty" data-admin-list-empty="true">No ambient ticks yet — run one above.</p>
+        @else
+            <ul class="admin-list__items">
+                @for(run in runs)
+                    <li class="admin-list__item" data-ambient-run="${run.id}" data-outcome="${run.outcome}">
+                        <span class="admin-list__meta">
+                            <span class="admin-list__badge">${run.outcome}</span>
+                            <span class="admin-list__sep">·</span>
+                            <span class="admin-ambient__source">${run.source}</span>
+                            @if(run.articleTitle != null)
+                                <span class="admin-list__sep">·</span>
+                                @if(run.articleUrl != null)
+                                    <span class="admin-ambient__article"><a href="${run.articleUrl}" data-ambient-article>${run.articleTitle}</a></span>
+                                @else
+                                    <span class="admin-ambient__article">${run.articleTitle}</span>
+                                @endif
+                            @endif
+                            @if(run.personaId != null)
+                                <span class="admin-list__sep">·</span>
+                                <span class="admin-ambient__persona" data-ambient-persona="${run.personaId}">by ${AuthorLabel.display(run.personaId)}</span>
+                            @endif
+                            @if(run.threadId != null)
+                                <span class="admin-list__sep">·</span>
+                                <span class="admin-ambient__thread"><a href="/threads/${run.threadId}" data-ambient-thread="${run.threadId}">view thread</a></span>
+                            @endif
+                            @if(run.detail != null)
+                                <span class="admin-list__sep">·</span>
+                                <span class="admin-ambient__detail">${run.detail}</span>
+                            @endif
+                            <span class="admin-list__sep">·</span>
+                            <span class="admin-list__ago">${run.ago}</span>
+                        </span>
+                    </li>
+                @endfor
+            </ul>
+        @endif
+    </div>
+`)

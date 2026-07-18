@@ -42,6 +42,16 @@ class PersonaRepository(private val jdbc: JdbcTemplate) {
         jdbc.query("SELECT $columns FROM persona ORDER BY name") { rs, _ -> mapPersona(rs) }
 
     /**
+     * The roster in stable INSERTION order (SQLite's implicit rowid), the deterministic base for the
+     * ambient round-robin author pick (plan_docs/ambient-slice-1.md): index = ambient_run count % size.
+     * [findAll] orders by name for display; the round-robin needs seed order so the first-seeded persona
+     * is index 0 (superseded by S2 relevance gating). rowid ASC == insertion order, so a persona keeps
+     * its slot as others come and go.
+     */
+    fun findAllByRowid(): List<Persona> =
+        jdbc.query("SELECT $columns FROM persona ORDER BY rowid") { rs, _ -> mapPersona(rs) }
+
+    /**
      * Insert a persona. `systemPrompt` defaults to the deterministic forum framing so seeding (which
      * runs at startup with no LLM available) keeps working unchanged; the admin create path passes the
      * LLM-composed prompt explicitly along with the `abilities`/`dials` it was composed from.

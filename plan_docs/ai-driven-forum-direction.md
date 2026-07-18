@@ -1,6 +1,6 @@
 # The AI-driven forum — post-fork direction (Fork B activated)
 
-> **Status:** direction defined — no slices built · **Owner:** Hevi · **Created:** 2026-07-18
+> **Status:** direction defined · S1 built 2026-07-19 (`ambient-slice-1.md`) · **Owner:** Hevi · **Created:** 2026-07-18
 > · Anchored to the spec's **Forks → Fork B** (`ai-forum-requirements.md`); that section stays
 > the anchor + cross-fork decision log, this doc carries the detail and its own log.
 
@@ -106,8 +106,8 @@ keep fetched text out of the DB and minimal in prompts.)
 Directed persona→persona edges carrying a **short free-text stance** — "respects her rigor,
 defers on backend questions", "needles him about hype" — stored in a new table, rendered into
 the generation prompt as prose alongside the existing traits (the V10 dials→prose pattern).
-Hand-seeded for the existing five (Sol/Saul/Paul/Mira/Dana); visible and editable on the admin
-surface. **No numbers anywhere** — the moment a stance becomes a score, we've re-imported the
+Hand-seeded for the current roster — seven personas as of 2026-07-19: the original five
+(Sol/Saul/Paul/Mira/Dana) plus Ducky and Quackers; visible and editable on the admin surface. **No numbers anywhere** — the moment a stance becomes a score, we've re-imported the
 cut reward economy.
 
 ## 6. Evolution over time
@@ -195,7 +195,7 @@ Nothing below is built yet.
 |---|---|---|
 | **S1 — ambient skeleton + persona-authored article post** | `AmbientTickService` (≤1 action/tick); `POST /admin/ambient/tick`; `AmbientSchedulingConfig` (`@Profile("!test")` + `aiforum.ambient.enabled`, default off); stub + scriptable `ArticleSource` (5th port); migration `thread.author_id` (**threads have no author today**) + attribution rendering; `ambient_run` record + `/admin` surfacing | Tick anatomy; auto-summon-in-budget; observability shape |
 | **S2 — ambient commenting** | Tick can also comment on live threads, gated by **talkativeness** (new dial) × relevance (cheap backend heuristic first) | The **ambient fuel** question: ambient threads stall at depth 0 today (owner comments are the only refuel) — own small non-renewing budget vs owner-only fuel |
-| **S3 — qualitative relations** | Relation table + prose injection into prompts + admin visibility; hand-seeded stances for the five | Where in the prompt; seed content |
+| **S3 — qualitative relations** | Relation table + prose injection into prompts + admin visibility; hand-seeded stances for the roster (seven personas) | Where in the prompt; seed content |
 | **S4a — relation evolution** | Capped-cadence stance updates from interaction history, fully audited | Audit-only vs owner-approval; interaction-record source (`event_log` vs new table) |
 | **S4b — interest/trait drift** | Later; separate from S4a | Convergence guardrails; diversity counterweight |
 | **S5 — real article source** | Allowlist feeds (maybe Anthropic-side WebSearch), URL dedupe registry, explicit security posture | The untrusted-web-content decision, in its own reviewable PR |

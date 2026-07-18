@@ -1,5 +1,7 @@
 package com.aiforum.acceptance.config
 
+import com.aiforum.ambient.Article
+import com.aiforum.ambient.ArticleSource
 import com.aiforum.dto.ReasoningLeak
 import com.aiforum.github.GitHubClient
 import com.aiforum.github.GitHubOverview
@@ -237,6 +239,40 @@ class ScriptableGitHubClient : GitHubClient {
         issues.clear()
         pullDetails.clear()
         pullsRequested.clear()
+    }
+}
+
+/**
+ * The scriptable [ArticleSource] under test — the fifth IO port's fake, sibling of [ScriptableLlmClient].
+ * Steps script the article(s) an ambient tick should collect; `next()` pops the first one (rotating it to
+ * the back isn't needed — S1 is one-article-per-tick, and an empty list is the fake's natural reset state,
+ * which is exactly the no-op scenario's precondition, so no scripting is required for it). Reset between
+ * scenarios by DatabaseResetHooks.
+ */
+@Component
+@Primary
+@Profile("test")
+class ScriptableArticleSource : ArticleSource {
+
+    val articles = CopyOnWriteArrayList<Article>()
+
+    /** The articles handed out, in order — so a scenario can assert the source was (or wasn't) drained. */
+    val received = CopyOnWriteArrayList<Article>()
+
+    fun add(article: Article) {
+        articles += article
+    }
+
+    override fun next(): Article? {
+        val article = articles.firstOrNull() ?: return null
+        articles.removeAt(0)
+        received += article
+        return article
+    }
+
+    fun reset() {
+        articles.clear()
+        received.clear()
     }
 }
 

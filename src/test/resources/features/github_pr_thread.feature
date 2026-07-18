@@ -3,6 +3,9 @@ Feature: Discuss a GitHub PR in the forum
   the read-only GitHubClient seam, creates a forum thread whose opening post carries the change
   (description + changed files + diff), and summons the room — so a persona summarises what changed and the
   team can discuss it. One PR maps to one thread; clicking Discuss again reuses it.
+  Discuss-created threads are owner-authored (thread.author_id stays NULL) — deliberately distinct
+  from ambient ArticleSource-originated persona-authored threads (plan_docs/ai-driven-forum-direction.md
+  §10).
 
   Background:
     Given the GitHub integration reports the repository "hevi-public/ai_forum"

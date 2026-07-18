@@ -22,3 +22,9 @@ Feature: Admin drill-downs — stat links and list pages
   Scenario: A drill-down with no matches shows an empty state
     When the owner navigates to "/admin/comments?state=FAILED"
     Then the comments list is empty
+
+  # The ambient loop (plan_docs/ambient-slice-1.md) gets its own drill-down: the run log at
+  # /admin/ambient (recent ticks + the manual-trigger button), linked from its /admin stat tile.
+  Scenario: The ambient-runs statistic links to its drill-down
+    When the owner visits the admin page
+    Then the admin statistic "ambient-runs" links to "/admin/ambient"
