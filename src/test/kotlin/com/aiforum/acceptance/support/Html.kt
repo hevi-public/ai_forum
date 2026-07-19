@@ -27,6 +27,14 @@ object Html {
         return Regex("${Regex.escape(attr)}=\"([^\"]*)\"").find(tag)?.groupValues?.get(1)
     }
 
+    /** The text of the persona-profile dial <li data-dial="[key]">…</li> (e.g. "Verbosity (…): 8/10"),
+     *  or null if that dial isn't rendered at all — e.g. before [key] is added to Dials.KEYS. */
+    fun dialText(html: String, key: String): String? {
+        val m = Regex("<li[^>]*data-dial=\"${Regex.escape(key)}\"[^>]*>(.*?)</li>", RegexOption.DOT_MATCHES_ALL)
+            .find(html) ?: return null
+        return m.groupValues[1].replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()
+    }
+
     /** True if any element carries data-[name]="[value]". */
     fun hasAttr(html: String, name: String, value: String): Boolean =
         Regex("$name=\"${Regex.escape(value)}\"").containsMatchIn(html)

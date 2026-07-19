@@ -82,3 +82,14 @@ Feature: Personas & admin
     When the owner saves "vex" with the edited prompt "HAND-EDITED: bespoke voice." and dials agreeableness 8, verbosity 9
     Then the persona "vex" has system prompt "HAND-EDITED: bespoke voice."
     And no composition call was made
+
+  # S2 (plan_docs/ambient-slice-2.md §3): talkativeness — P(comment), spec §6.4 — is a fifth dial. The
+  # create/edit forms and the profile page iterate Dials.KEYS generically, so appending "talkativeness"
+  # to that one list is the whole production change; these two scenarios pin the seam it must satisfy.
+  Scenario: The create form offers a talkativeness dial control
+    When the owner opens the members list
+    Then the members page offers a talkativeness dial control
+
+  Scenario: A talkativeness value round-trips through create and the profile display
+    When the owner adds a persona "gale" with abilities "sqlite" and dials agreeableness 5, verbosity 5, talkativeness 8
+    Then the persona "gale" has dial "talkativeness" value 8

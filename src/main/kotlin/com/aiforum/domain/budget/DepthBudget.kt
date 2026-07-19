@@ -11,6 +11,14 @@ object DepthBudget {
     /** Levels of autonomous growth an owner comment / `/more` fuels on its branch ("the K in run-K"). */
     const val DEFAULT_GRANT = 4
 
+    /**
+     * The small NON-renewing budget an ambient tick's own comment carries (plan_docs/ambient-slice-2.md
+     * §2, "the fuel decision"): smaller than the owner's [DEFAULT_GRANT], so a tick-planted comment buys a
+     * bounded mini-discussion (child 1 → grandchild 0 ⇒ ~2 follow-ups) before stalling again — and nothing
+     * ambient ever re-grants. The owner stays the only RENEWABLE fuel (the §7 steering lever is untouched).
+     */
+    const val AMBIENT_GRANT = 2
+
     /** Budget handed to a fresh owner comment or `/more` directive. */
     fun granted(): Int = DEFAULT_GRANT
 

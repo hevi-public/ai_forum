@@ -141,14 +141,31 @@ surfaces on `/admin` (ambient-runs / owner-threads / persona-threads tiles + `/a
 drill-down). `ambient_tick.feature` was written RED-first; suite now 168 scenarios. Note: the
 seeded roster is **seven** personas (Ducky + Quackers joined the original five).
 
+**2026-07-19 (Ambient Slice 2, V22):** ambient commenting is in (`plan_docs/ambient-slice-2.md`):
+the tick alternates action preference by run-count parity (even=post, odd=comment) with
+cross-fallback, still ≤1 executed action. Comment action: `findActive(10)` × roster, excluding
+the thread's author persona and personas already POSTED in the thread, scored by the pure
+`AmbientGate` (**talkativeness × relevance ≥ 5**; relevance = word-boundary ability-tag hits in
+thread title+OP; no LLM — §6.4/§10 posture). `talkativeness` is the fifth `Dials.KEYS` entry
+(read paths default missing keys — stored JSON never self-heals). **The fuel decision:** the
+ambient comment is born with `DepthBudget.AMBIENT_GRANT = 2` via `summonAsync(initialBudget=…)`
+and its settle triggers `autoGrow` via the new `onSettled` hook — a bounded unattended
+mini-discussion (child 1 → grandchild 0), never re-granted; the owner stays the only renewable
+fuel (steering lever intact). Ambient failure retry = owner-as-peer; the tick never retries.
+`ambient_run.action` (V22) distinguishes post/comment runs (`data-action` on `/admin/ambient`).
+Seeds now carry per-persona `abilities` + `dials` (first-seed only) — without ability tags
+relevance is always 0 and no ambient comment can ever fire. Suite 168 → 181 scenarios.
+Build hygiene: every Gradle test task now starts from a fresh `build/aiforum-test.db`
+(`freshTestDb` in build.gradle.kts) — acceptance leftovers used to FK-block tier1's per-class
+cleanup lists when running tiers after acceptance locally.
+
 ## Open threads / near-term
 
-- **Ambient Slice 2** (`plan_docs/ai-driven-forum-direction.md` §9) — next code deliverable:
-  ambient *commenting* on live threads, gated by talkativeness (new dial) × relevance, and the
-  **ambient fuel decision** (ambient threads stall at depth 0 under owner-only refuel — S2's
-  headline call). Also owns the deferred ambient lifecycle-parallel scenarios and the
-  persona-voice OP upgrade (S1 posts summary+link; the in-voice "take" needs an OP failure
-  lifecycle first).
+- **Next ambient slices** (`plan_docs/ai-driven-forum-direction.md` §9): **S5 — real article
+  source** (allowlist feeds / WebSearch + dedupe + the untrusted-web-content posture, its own
+  reviewable PR) is the gap between "runs itself on canned fixtures" and "runs itself on the
+  live web"; **S3 — qualitative relations** (stance table + prompt injection + admin surface).
+  Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
 - Docker jail for persona tool use (§10–§12) — still deferred, but **urgency raised**: ambient
   web fetching is scheduled + unattended (direction doc §8); web-fetch note above applies.
 - Composer branch-context controls (`plan_docs/composer-branch-context-controls.md`) — designed,

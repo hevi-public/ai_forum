@@ -54,7 +54,7 @@ class MigrationPipelineTest {
             }
         }
 
-        // 3. Upgrade the EXISTING db to the latest schema (Flyway applies the pending V4–V21).
+        // 3. Upgrade the EXISTING db to the latest schema (Flyway applies the pending V4–V22).
         flyway(url, null).migrate()
 
         // 4. The old rows survived, and the new columns carry their migration default / backfill.
@@ -114,11 +114,12 @@ class MigrationPipelineTest {
                     assertEquals(null, rs.getString("updated_at"), "V11 leaves the pre-existing thread unedited (NULL)")
                 }
 
-                // flyway_schema_history records the full V1..V21 chain as applied (V20 thread.author_id +
-                // V21 ambient_run landed with the ambient loop, plan_docs/ambient-slice-1.md).
+                // flyway_schema_history records the full V1..V22 chain as applied (V20 thread.author_id +
+                // V21 ambient_run landed with the ambient loop; V22 added ambient_run.action for S2's
+                // comment action, plan_docs/ambient-slice-2.md).
                 st.executeQuery("SELECT MAX(CAST(version AS INTEGER)) AS v FROM flyway_schema_history").use { rs ->
                     rs.next()
-                    assertEquals(21, rs.getInt("v"), "the latest migration (V21) should be recorded as applied")
+                    assertEquals(22, rs.getInt("v"), "the latest migration (V22) should be recorded as applied")
                 }
             }
         }

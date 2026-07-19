@@ -248,6 +248,10 @@ class ScriptableGitHubClient : GitHubClient {
  * the back isn't needed — S1 is one-article-per-tick, and an empty list is the fake's natural reset state,
  * which is exactly the no-op scenario's precondition, so no scripting is required for it). Reset between
  * scenarios by DatabaseResetHooks.
+ *
+ * [failWith] (S2, plan_docs/ambient-slice-2.md §6) programs the NEXT [next] call to throw instead of
+ * returning — the acceptance-level pin of the tick's outer failure handling the S1 Assay review asked
+ * for (a broken feed must record a 'failed' run, never crash the tick).
  */
 @Component
 @Primary
@@ -259,11 +263,20 @@ class ScriptableArticleSource : ArticleSource {
     /** The articles handed out, in order — so a scenario can assert the source was (or wasn't) drained. */
     val received = CopyOnWriteArrayList<Article>()
 
+    @Volatile
+    private var failure: RuntimeException? = null
+
     fun add(article: Article) {
         articles += article
     }
 
+    /** Program the NEXT [next] call to throw [message] instead of returning — simulates a broken feed. */
+    fun failWith(message: String) {
+        failure = RuntimeException(message)
+    }
+
     override fun next(): Article? {
+        failure?.let { throw it }
         val article = articles.firstOrNull() ?: return null
         articles.removeAt(0)
         received += article
@@ -273,6 +286,7 @@ class ScriptableArticleSource : ArticleSource {
     fun reset() {
         articles.clear()
         received.clear()
+        failure = null
     }
 }
 

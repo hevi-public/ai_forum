@@ -207,6 +207,18 @@ class CommentRepository(private val jdbc: JdbcTemplate, private val clock: Clock
         jdbc.query("SELECT * FROM comment WHERE thread_id = ? ORDER BY depth, created_at", mapper, threadId)
 
     /**
+     * The distinct author ids that already have a POSTED comment in [threadId] (plan_docs/ambient-slice-2.md
+     * §5 step 4, exclusion rule b): the ambient comment action rules these personas out so no one comments
+     * twice in the same thread. Only POSTED counts — a persona whose earlier draft failed/cancelled is free
+     * to try again. Owner/system authors appear here too, harmlessly (the roster it filters holds persona ids).
+     */
+    fun postedAuthors(threadId: String): Set<String> =
+        jdbc.query(
+            "SELECT DISTINCT author_id FROM comment WHERE thread_id = ? AND state = 'POSTED'",
+            { rs, _ -> rs.getString("author_id") }, threadId,
+        ).toSet()
+
+    /**
      * The newest POSTED comments across all threads, for the front-page "Recent comments" rail. Drafts,
      * failures and cancelled nodes are excluded (only settled, visible replies). created_at is a UTC
      * ISO instant ('…Z'), so ORDER BY on the text column sorts chronologically.
@@ -250,17 +262,38 @@ class CommentRepository(private val jdbc: JdbcTemplate, private val clock: Clock
      * The autonomous-growth frontier (§4): POSTED leaf nodes that still have depth budget. A node can
      * sprout an auto-reply only if it has no children yet and budget > 0, so exhausted branches and
      * non-leaf nodes are excluded. FAILED/DRAFTING nodes are never grown under.
+     *
+     * [withinSubtreeOf] (plan_docs/ambient-slice-2.md §2, the branch-scoped ambient growth) narrows the
+     * frontier to the SUBTREE rooted at that comment id — the node itself plus all its descendants, the
+     * same recursive-CTE walk as [descendantCount]/[subtreeIdsDeepestFirst] (lvl-bounded against parent_id
+     * cycles, T1.3). Null (the owner's thread-wide /auto-grow) keeps the whole-thread frontier unchanged.
      */
-    fun growableLeaves(threadId: String): List<Comment> =
-        jdbc.query(
-            """SELECT * FROM comment c
-               WHERE c.thread_id = ?
-                 AND c.state = 'POSTED'
-                 AND c.depth_budget > 0
-                 AND NOT EXISTS (SELECT 1 FROM comment k WHERE k.parent_id = c.id)
-               ORDER BY c.depth, c.created_at""",
-            mapper, threadId,
-        )
+    fun growableLeaves(threadId: String, withinSubtreeOf: String? = null): List<Comment> =
+        if (withinSubtreeOf == null)
+            jdbc.query(
+                """SELECT * FROM comment c
+                   WHERE c.thread_id = ?
+                     AND c.state = 'POSTED'
+                     AND c.depth_budget > 0
+                     AND NOT EXISTS (SELECT 1 FROM comment k WHERE k.parent_id = c.id)
+                   ORDER BY c.depth, c.created_at""",
+                mapper, threadId,
+            )
+        else
+            jdbc.query(
+                """WITH RECURSIVE sub(id, lvl) AS (
+                       SELECT id, 0 FROM comment WHERE id = ?
+                       UNION ALL
+                       SELECT c.id, s.lvl + 1 FROM comment c JOIN sub s ON c.parent_id = s.id WHERE s.lvl < 10000
+                   )
+                   SELECT c.* FROM comment c JOIN sub ON c.id = sub.id
+                   WHERE c.thread_id = ?
+                     AND c.state = 'POSTED'
+                     AND c.depth_budget > 0
+                     AND NOT EXISTS (SELECT 1 FROM comment k WHERE k.parent_id = c.id)
+                   ORDER BY c.depth, c.created_at""",
+                mapper, withinSubtreeOf, threadId,
+            )
 
     /** Number of descendants under [nodeId] (excluding the node itself) via recursive CTE. The `lvl`
      *  counter bounds the recursion (< 10000) so a corrupt parent_id cycle terminates — see T1.3. */

@@ -150,6 +150,18 @@ class GenerationService(
         includeSiblings: Boolean = false,
         postAsOwner: Boolean = false,
         routingScope: ScopeMode = ScopeMode.WHOLE_THREAD,
+        // Optional starting depth budget (plan_docs/ambient-slice-2.md §2): the ambient tick's comment
+        // action passes DepthBudget.AMBIENT_GRANT so its top-level comment is born fuelled for a bounded
+        // mini-discussion instead of the childBudget(0)=0 a fresh top-level summon gets. Null (every existing
+        // call site, via the Kotlin default) keeps the inherited-from-parent behaviour unchanged.
+        initialBudget: Int? = null,
+        // Optional post-settle hook, run on the SAME worker after every persona in this summon has settled
+        // (§2: "the ambient comment's settle triggers the same growth round the owner-grant paths get"),
+        // handed the ids of the nodes this summon just settled. The ambient comment action hands a
+        // BRANCH-SCOPED autoGrow in here — keyed on those ids — so its AMBIENT_GRANT is consumed without
+        // owner attention while owner-granted branches elsewhere in the thread stay untouched; every other
+        // call site passes nothing and behaves exactly as before.
+        onSettled: ((settledIds: List<String>) -> Unit)? = null,
     ) {
         inFlight.beginSummon(threadId)
         inFlight.submit {
@@ -157,7 +169,7 @@ class GenerationService(
                 val owner = ownerComment(threadId, parentId, text, postAsOwner)
                 val anchorId = owner?.id ?: parentId
                 val resolvedIds = resolvePersonas(threadId, anchorId, routingScope, personaIds, text)
-                planGeneration(threadId, anchorId, resolvedIds, scope, includeSiblings).map { plan ->
+                planGeneration(threadId, anchorId, resolvedIds, scope, includeSiblings, initialBudget).map { plan ->
                     plan to inFlight.register(plan.id, plan.threadId, draftView(plan))
                 }
             } catch (_: Throwable) {
@@ -174,6 +186,19 @@ class GenerationService(
                     settleOne(plan, token)
                 } finally {
                     inFlight.markDone(plan.id)
+                }
+            }
+            // Everything in this summon has settled (or nothing was planned) — run the post-settle hook on
+            // this same worker, handed the settled node ids so the caller can scope follow-up work to
+            // exactly the nodes this summon produced. Isolated in its own catch: a growth failure must
+            // neither propagate (killing the worker task) nor retro-mark the already-settled nodes failed —
+            // the nodes are persisted and the follow-up discussion is best-effort (the owner's /auto-grow
+            // button still exists).
+            onSettled?.let { hook ->
+                try {
+                    hook(started.map { (plan, _) -> plan.id })
+                } catch (e: Exception) {
+                    log.warn("post-settle hook for thread {} failed", threadId, e)
                 }
             }
         }
@@ -234,14 +259,20 @@ class GenerationService(
      * grant and then stalls, and a re-grant on one branch never wakes a quiet sibling. Returns only the
      * nodes created this run. The iteration cap is a runaway backstop: budget never exceeds the grant,
      * so a healthy tree drains in ≤ DEFAULT_GRANT rounds.
+     *
+     * [withinSubtreeOf] narrows the frontier to one comment's subtree (itself + descendants). The ambient
+     * comment's settle-triggered growth passes its own id here (plan_docs/ambient-slice-2.md §2), so it
+     * consumes ONLY its own AMBIENT_GRANT — an owner-granted branch elsewhere in the thread that the owner
+     * deliberately left un-grown must not have its fuel spent at an ambient-triggered moment. Null (the
+     * owner's explicit /auto-grow) keeps the thread-wide semantics unchanged.
      */
-    fun autoGrow(threadId: String): List<ReplyView> {
+    fun autoGrow(threadId: String, withinSubtreeOf: String? = null): List<ReplyView> {
         val pool = personas.findAll()
         if (pool.isEmpty()) return emptyList()
         val created = mutableListOf<ReplyView>()
         var round = 0
         while (round++ < GROWTH_ROUND_CAP) {
-            val frontier = comments.growableLeaves(threadId)
+            val frontier = comments.growableLeaves(threadId, withinSubtreeOf)
             if (frontier.isEmpty()) break
             // Snapshot the thread once per round; freshly-granted /more directives are already in it, so
             // the directive flows into the context handed to the model (§7).
@@ -398,11 +429,16 @@ class GenerationService(
         personaIds: List<String>,
         scope: ScopeMode,
         includeSiblings: Boolean,
+        // An explicit starting budget (plan_docs/ambient-slice-2.md §2) overrides the inherited-from-parent
+        // one — the ambient comment carries DepthBudget.AMBIENT_GRANT so it can auto-grow a couple of levels.
+        // Null (every non-ambient call site) keeps the childBudget(parent) behaviour exactly as before.
+        initialBudget: Int? = null,
     ): List<GenPlan> {
         val parent = parentId?.let { comments.findById(it) }
         val baseDepth = parent?.let { it.depth + 1 } ?: 0
-        // A reply continues its parent branch's depth budget (§4); a top-level reply starts unfuelled.
-        val baseBudget = DepthBudget.childBudget(parent?.depthBudget ?: 0)
+        // A reply continues its parent branch's depth budget (§4); a top-level reply starts unfuelled —
+        // UNLESS an initialBudget is handed in (the ambient comment's non-renewing grant).
+        val baseBudget = initialBudget ?: DepthBudget.childBudget(parent?.depthBudget ?: 0)
         // Mint every reply's id up front so each persona's context can fold in the OTHERS in this round
         // (the ones already settled by the time it generates) — but only this round's replies, never the
         // target's pre-existing children.

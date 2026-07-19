@@ -17,7 +17,7 @@
         @else
             <ul class="admin-list__items">
                 @for(run in runs)
-                    <li class="admin-list__item" data-ambient-run="${run.id}" data-outcome="${run.outcome}">
+                    <li class="admin-list__item" data-ambient-run="${run.id}" data-outcome="${run.outcome}" data-action="${run.action}">
                         <span class="admin-list__meta">
                             <span class="admin-list__badge">${run.outcome}</span>
                             <span class="admin-list__sep">·</span>

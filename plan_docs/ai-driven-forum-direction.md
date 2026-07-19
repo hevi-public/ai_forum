@@ -1,6 +1,6 @@
 # The AI-driven forum — post-fork direction (Fork B activated)
 
-> **Status:** direction defined · S1 built 2026-07-19 (`ambient-slice-1.md`) · **Owner:** Hevi · **Created:** 2026-07-18
+> **Status:** direction defined · S1 built 2026-07-19 (`ambient-slice-1.md`) · S2 built 2026-07-19 (`ambient-slice-2.md`) · **Owner:** Hevi · **Created:** 2026-07-18
 > · Anchored to the spec's **Forks → Fork B** (`ai-forum-requirements.md`); that section stays
 > the anchor + cross-fork decision log, this doc carries the detail and its own log.
 

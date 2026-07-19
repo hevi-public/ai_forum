@@ -15,13 +15,17 @@ object Dials {
     const val DEFAULT = 5
 
     /** Canonical order — drives both normalization output order and the form layout. */
-    val KEYS = listOf("agreeableness", "verbosity", "rigor", "warmth")
+    val KEYS = listOf("agreeableness", "verbosity", "rigor", "warmth", "talkativeness")
 
     private val LABELS = mapOf(
         "agreeableness" to "Agreeableness (contrarian ↔ agreeable)",
         "verbosity" to "Verbosity (terse ↔ long-winded)",
         "rigor" to "Rigor (loose & intuitive ↔ precise & evidence-led)",
         "warmth" to "Warmth (blunt ↔ warm)",
+        // S2 (plan_docs/ambient-slice-2.md §3, spec §6.4): P(comment) — 0 = lurker, 10 = every relevant
+        // opportunity. Read by AmbientGate to decide WHETHER a persona drops an ambient comment; the
+        // read-path defaults a missing key to DEFAULT (dials JSON is not re-normalized on read).
+        "talkativeness" to "Talkativeness (lurker ↔ chatty)",
     )
 
     fun describe(key: String): String = LABELS[key] ?: key
