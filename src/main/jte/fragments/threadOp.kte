@@ -1,18 +1,34 @@
 @import com.aiforum.dto.AttachmentView
+@import com.aiforum.web.AuthorColor
+@import com.aiforum.web.AuthorLabel
+@import com.aiforum.web.PersonaView
 @param threadId: String
 @param title: String
 @param body: String
 @param bodyHtml: String
 @param edited: Boolean = false
 @param attachments: List<AttachmentView> = java.util.Collections.emptyList()
+<%-- author is the OP's attribution (V20): a persona id when the ambient loop authored the thread, null
+     when the owner did. personas resolves the persona's avatar hue for the byline monogram. Both default
+     so an owner-authored render (every existing caller) stays byline-less. --%>
+@param author: String? = null
+@param personas: List<PersonaView> = emptyList()
 
 <%-- The opening post block, extracted so the OP edit (§7) can re-render just this region. It is the root
      of the keyboard-nav tree (data-nav-item="post"; k/h/gg land here) and carries the #reply-<threadId>
      permalink. The OP edit form outerHTML-swaps this whole div (hx-target="#reply-<threadId>"), so the
-     POST returns exactly this fragment. data-edited mirrors a comment's marker hook. --%>
+     POST returns exactly this fragment. data-edited mirrors a comment's marker hook. data-thread-author
+     is a JTE smart attribute — omitted entirely when author is null (owner-authored), present for a
+     persona-authored thread (the acceptance probe reads it), so nothing false-matches. --%>
 <div class="thread__op" data-nav-item="post" data-nav-id="${threadId}" id="reply-${threadId}"
-     data-edited="${edited.toString()}">
+     data-edited="${edited.toString()}" data-thread-author="${author}">
     <div class="thread__op-head">
+        @if(author != null)
+            <%-- Persona byline: the ambient loop opened this thread AS a persona (round-robin, never the
+                 owner). Same monogram + AuthorColor + AuthorLabel shape as a reply head. --%>
+            <span class="monogram" aria-hidden="true" style="--mono-h: ${AuthorColor.hue(author, personas)}">${AuthorLabel.monogram(author)}</span>
+            <span class="reply__author thread__op-author">${AuthorLabel.display(author)}</span>
+        @endif
         <h1 class="thread__title">${title}</h1>
         @if(edited)
             <span class="reply__edited" data-edited-marker>(edited)</span>

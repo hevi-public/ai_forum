@@ -10,6 +10,12 @@ spring:
 aiforum:
   backups:
     enabled: false
+  # Ambient ticking OFF under test (defence-in-depth, matching backups): the scheduler never wires, so a
+  # test run can't fire an autonomous tick. The /admin trigger still works — acceptance drives it over
+  # HTTP — and the ScriptableArticleSource (@Primary under test) keeps every tick deterministic and free.
+  # The config_guardrails rail asserts this from the outside (/__diag ambientEnabled=false).
+  ambient:
+    enabled: false
   images:
     # Image blobs go under build/ (like the test DB), asserted by ProfileGuard so a test run never writes
     # into the real ~/.ai_forum image store.

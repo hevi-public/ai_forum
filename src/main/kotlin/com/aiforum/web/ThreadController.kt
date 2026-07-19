@@ -58,7 +58,9 @@ class ThreadController(
     @PostMapping("/threads", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun createJson(@RequestBody req: CreateThreadRequest, model: Model): String {
         val id = newThread(req.title, req.text)
-        return renderThread(id, req.title, req.text, edited = false, model = model)
+        // Owner-created via the API → author null (no persona byline). The ambient path opens threads with
+        // a persona author; those render their byline on the GET below.
+        return renderThread(id, req.title, req.text, edited = false, author = null, model = model)
     }
 
     @PostMapping("/threads", consumes = [MediaType.APPLICATION_FORM_URLENCODED_VALUE])
@@ -127,7 +129,7 @@ class ThreadController(
     fun view(@PathVariable id: String, model: Model): String {
         val thread = threads.find(id) ?: return "redirect:/"
         threadReads.markRead(id)
-        return renderThread(thread.id, thread.title, thread.body, thread.edited, model)
+        return renderThread(thread.id, thread.title, thread.body, thread.edited, thread.authorId, model)
     }
 
     /**
@@ -159,6 +161,10 @@ class ThreadController(
         model.addAttribute("bodyHtml", MarkdownRenderer.render(thread.body))
         model.addAttribute("edited", thread.edited)
         model.addAttribute("attachments", opAttachments(thread.id))
+        // Carry the OP attribution + roster so a re-rendered persona-authored OP keeps its byline (and its
+        // monogram hue) after an edit; owner-authored (null) stays byline-less.
+        model.addAttribute("author", thread.authorId)
+        model.addAttribute("personas", personas.findAll().map { PersonaView(it.id, it.name, it.descriptor, it.slug, colorIndex = it.colorIndex) })
         return "fragments/threadOp"
     }
 
@@ -166,13 +172,16 @@ class ThreadController(
     private fun opAttachments(threadId: String): List<AttachmentView> =
         attachmentRepo.forThread(threadId).map(AttachmentView::of)
 
-    private fun renderThread(id: String, title: String, body: String, edited: Boolean, model: Model): String {
+    private fun renderThread(id: String, title: String, body: String, edited: Boolean, author: String?, model: Model): String {
         val all = comments.threadComments(id)
         model.addAttribute("threadId", id)
         model.addAttribute("title", title)
         model.addAttribute("body", body)
         model.addAttribute("bodyHtml", MarkdownRenderer.render(body))
         model.addAttribute("edited", edited)
+        // The OP attribution (V20): a persona id for an ambient-authored thread, null for owner-authored —
+        // threadOp renders the byline + data-thread-author hook only when non-null.
+        model.addAttribute("author", author)
         model.addAttribute("opAttachments", opAttachments(id))
         // Nest replies under their parents so the page reflects the comment tree (a persona reply sits
         // under the message it answered). replyNode.kte renders reply.children recursively; the flat

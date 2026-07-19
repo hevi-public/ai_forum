@@ -33,6 +33,11 @@ class StatsRepository(private val jdbc: JdbcTemplate) {
         reasoningLeaks = groupCount(
             "SELECT reasoning_leak, COUNT(*) FROM comment WHERE reasoning_leak IS NOT NULL GROUP BY reasoning_leak",
         ),
+        // Ambient loop (plan_docs/ambient-slice-1.md): the run counter, and the thread split on author_id —
+        // NULL = owner-authored, NOT NULL = a persona-authored (ambient) thread.
+        ambientRuns = countOf("ambient_run"),
+        threadsOwner = jdbc.queryForObject("SELECT COUNT(*) FROM thread WHERE author_id IS NULL", Int::class.java) ?: 0,
+        threadsPersona = jdbc.queryForObject("SELECT COUNT(*) FROM thread WHERE author_id IS NOT NULL", Int::class.java) ?: 0,
     )
 
     private fun countOf(table: String): Int =

@@ -30,6 +30,15 @@ aiforum:
     enabled: true
     dir: ~/.ai_forum/backup
     keep: 7
+  # The ambient loop (plan_docs/ambient-slice-1.md) — scheduled autonomous posting. `enabled` is the
+  # SCHEDULER master switch ONLY: it gates AmbientSchedulingConfig + AmbientTicker (the @Scheduled caller),
+  # not the /admin/ambient "Run a tick now" button, which always works (manual-trigger-first). Off by
+  # default — turn it on deliberately once you're ready for the room to post on its own. `cron` sets the
+  # schedule when enabled: three ticks a day (09:00/15:00/21:00), the few-ticks-a-day posture of
+  # plan_docs/ai-driven-forum-direction.md §8.
+  ambient:
+    enabled: false
+    cron: "0 0 9,15,21 * * *"
   # Shortcut ticketing integration (https://shortcut.com) — READ-ONLY. Off by default; the forum behaves
   # exactly as before until you enable it. When on, three surfaces light up: a right-rail "Shortcut" box
   # (the default-query feed) on the home + thread pages, a browsable /shortcut page with a source switcher

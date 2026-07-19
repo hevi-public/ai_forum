@@ -40,6 +40,30 @@
         </section>
 
         <section class="admin__section">
+            <h2 class="admin__section-title">Ambient loop</h2>
+            <ul class="stat-grid">
+                <%-- The run counter links to its own drill-down (the run log + the manual-tick button),
+                     the attachments-tile shape. --%>
+                <li class="stat" data-stat="ambient-runs" data-value="${stats.ambientRuns}">
+                    <a class="stat__link" href="/admin/ambient">
+                        <span class="stat__num">${stats.ambientRuns}</span><span class="stat__label">Ambient runs</span>
+                    </a>
+                </li>
+                <%-- Thread authorship split: owner-authored (author_id NULL) vs persona-authored (ambient). --%>
+                <li class="stat" data-stat="owner-threads" data-value="${stats.threadsOwner}">
+                    <a class="stat__link" href="/">
+                        <span class="stat__num">${stats.threadsOwner}</span><span class="stat__label">Owner threads</span>
+                    </a>
+                </li>
+                <li class="stat" data-stat="persona-threads" data-value="${stats.threadsPersona}">
+                    <a class="stat__link" href="/">
+                        <span class="stat__num">${stats.threadsPersona}</span><span class="stat__label">Persona threads</span>
+                    </a>
+                </li>
+            </ul>
+        </section>
+
+        <section class="admin__section">
             <h2 class="admin__section-title">Comments by state</h2>
             <ul class="stat-grid">
                 <li class="stat" data-stat="comments-posted" data-value="${stats.stateCount("POSTED")}">

@@ -4,7 +4,9 @@ Feature: Editing a comment, an AI reply, and the opening post
   context — the corrected text then seeds future summons in that branch. An edit is kept as a NEW version
   (V14): the original take stays reachable via the ‹ › switcher, and the "(edited)" marker (data-edited)
   tracks whichever version is shown. Editing never touches the author or the tree structure. Only posted
-  nodes are editable, and a blank body is rejected. The opening post (title + body) is editable the same way.
+  nodes are editable, and a blank body is rejected. The opening post (title + body) is editable the same way,
+  whether the thread was owner- or persona-authored (plan_docs/ai-driven-forum-direction.md §10) —
+  editing never changes who authored it.
 
   Background:
     Given a thread "Ideas" exists

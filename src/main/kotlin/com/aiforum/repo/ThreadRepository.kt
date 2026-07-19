@@ -12,7 +12,10 @@ class ThreadRepository(private val jdbc: JdbcTemplate, private val clock: Clock)
     // body is the opening post's content (§2, V7) — may be blank for title-only / legacy threads.
     // updatedAt is when the owner last edited the OP (title/body), or null if never (V11) — drives the
     // "(edited)" marker on the post, same as a comment's.
-    data class Thread(val id: String, val title: String, val body: String, val updatedAt: Instant? = null) {
+    // authorId is the OP's attribution string (V20): a persona id when the ambient loop authored the
+    // thread, NULL when the owner did (every hand-created / legacy thread). Plain string, not an FK — the
+    // comment.author_id precedent, so a byline survives its persona's deletion.
+    data class Thread(val id: String, val title: String, val body: String, val updatedAt: Instant? = null, val authorId: String? = null) {
         val edited: Boolean get() = updatedAt != null
     }
 
@@ -20,10 +23,16 @@ class ThreadRepository(private val jdbc: JdbcTemplate, private val clock: Clock)
     // the newest POSTED comment, falling back to the thread's own creation when it has no replies yet.
     data class ActiveThread(val id: String, val title: String, val lastActivity: String)
 
-    fun insert(id: String, title: String, body: String) {
+    // Owner-authored create (author_id NULL). Kept as its own 3-arg overload — NOT a 4-arg with a default —
+    // so every existing caller AND its test subclass (which overrides this exact signature) stay unchanged;
+    // a defaulted 4th param would leave no 3-arg signature to override.
+    fun insert(id: String, title: String, body: String) = insert(id, title, body, null)
+
+    // authorId is the OP attribution (V20): the ambient loop passes the authoring persona's id here.
+    fun insert(id: String, title: String, body: String, authorId: String?) {
         jdbc.update(
-            "INSERT INTO thread(id, title, body, created_at) VALUES (?,?,?,?)",
-            id, title, body, clock.instant().toString(),
+            "INSERT INTO thread(id, title, body, author_id, created_at) VALUES (?,?,?,?,?)",
+            id, title, body, authorId, clock.instant().toString(),
         )
     }
 
@@ -55,10 +64,10 @@ class ThreadRepository(private val jdbc: JdbcTemplate, private val clock: Clock)
         ) > 0
 
     fun find(id: String): Thread? =
-        jdbc.query("SELECT id, title, body, updated_at FROM thread WHERE id = ?", ::mapThread, id).firstOrNull()
+        jdbc.query("SELECT id, title, body, updated_at, author_id FROM thread WHERE id = ?", ::mapThread, id).firstOrNull()
 
     fun findAll(): List<Thread> =
-        jdbc.query("SELECT id, title, body, updated_at FROM thread ORDER BY created_at DESC", ::mapThread)
+        jdbc.query("SELECT id, title, body, updated_at, author_id FROM thread ORDER BY created_at DESC", ::mapThread)
 
     /**
      * Threads most recently active first, capped at [limit]. Activity = newest POSTED comment, or the
@@ -82,5 +91,6 @@ class ThreadRepository(private val jdbc: JdbcTemplate, private val clock: Clock)
         Thread(
             rs.getString("id"), rs.getString("title"), rs.getString("body"),
             rs.getString("updated_at")?.let { Instant.parse(it) },
+            rs.getString("author_id"),
         )
 }

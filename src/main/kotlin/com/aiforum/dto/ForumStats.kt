@@ -20,6 +20,11 @@ data class ForumStats(
     val attachmentBytes: Long,
     val captionsByState: Map<String, Int>,
     val reasoningLeaks: Map<String, Int>,
+    // Ambient loop (plan_docs/ambient-slice-1.md): total recorded ticks, and the thread count split by
+    // authorship — owner-authored (author_id IS NULL) vs persona-authored (the ambient loop's threads).
+    val ambientRuns: Int = 0,
+    val threadsOwner: Int = 0,
+    val threadsPersona: Int = 0,
 ) {
     val commentsTotal: Int get() = commentsByState.values.sum()
 

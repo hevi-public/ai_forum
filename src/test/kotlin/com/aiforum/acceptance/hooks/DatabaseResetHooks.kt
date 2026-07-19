@@ -1,6 +1,7 @@
 package com.aiforum.acceptance.hooks
 
 import com.aiforum.acceptance.config.FailingRepositoryToggle
+import com.aiforum.acceptance.config.ScriptableArticleSource
 import com.aiforum.acceptance.config.ScriptableGitHubClient
 import com.aiforum.acceptance.config.ScriptableImageDescriber
 import com.aiforum.acceptance.config.ScriptableLlmClient
@@ -28,6 +29,7 @@ class DatabaseResetHooks(
     private val inFlight: InFlightGenerations,
     private val shortcut: ScriptableShortcutClient,
     private val shortcutService: ShortcutService,
+    private val articleSource: ScriptableArticleSource,
 ) {
     @Before(order = -10)
     fun cancelInFlight() {
@@ -38,8 +40,9 @@ class DatabaseResetHooks(
     @Before(order = 0)
     fun resetDatabase() {
         // children before parents (foreign_keys=on) — attachment + comment_revision + comment_quote reference
-        // comment, so first; github_pr_thread references thread, so before thread.
-        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "thread", "persona").forEach {
+        // comment, so first; github_pr_thread + ambient_run reference thread, so before thread (ambient_run's
+        // FK is ON DELETE SET NULL, so order isn't strictly required, but keep the child-first discipline).
+        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "thread", "persona").forEach {
             jdbc.update("DELETE FROM $it")
         }
     }
@@ -52,5 +55,6 @@ class DatabaseResetHooks(
         failingRepo.clear()
         shortcut.reset()
         shortcutService.evictCaches()
+        articleSource.reset()
     }
 }

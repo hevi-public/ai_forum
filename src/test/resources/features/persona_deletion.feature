@@ -1,9 +1,11 @@
 Feature: Deleting a persona — removing a member from the room
 
   The owner can remove a persona from the members list (modelled on thread deletion, §8). Unlike a
-  thread, a persona has nothing hanging off it: comment authorship is stored as a plain attribution
-  string, not a foreign key to persona(id) (V1 schema), so past comments keep their byline and the
-  delete is a clean single-row removal. The member leaves the list; the others are untouched.
+  thread, a persona has nothing hanging off it: comment authorship — and, per §10 of
+  plan_docs/ai-driven-forum-direction.md, thread authorship too — is stored as a plain attribution
+  string, not a foreign key to persona(id) (V1 schema). Deletion therefore remains a clean
+  single-row removal, and existing bylines on both threads and comments survive it by design.
+  The member leaves the list; the others are untouched.
 
   Background:
     Given a persona "Doomed" exists

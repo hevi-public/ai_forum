@@ -15,3 +15,11 @@ Feature: Config guardrails
     When the test diagnostics are read
     Then persona web fetch is disabled
     And persona GitHub tools are disabled
+
+  # The ambient loop (plan_docs/ambient-slice-1.md) is a background job with real cost — its scheduler
+  # must stay off under test just like backups, and its ArticleSource must be the scriptable fake, never
+  # a live fetcher, so ticks in the suite are deterministic and free.
+  Scenario: The test profile gates ambient ticking off and fakes the article source
+    When the test diagnostics are read
+    Then ambient ticking is disabled
+    And the article source is the scriptable fake

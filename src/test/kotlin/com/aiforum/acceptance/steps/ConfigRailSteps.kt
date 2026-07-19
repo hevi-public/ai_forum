@@ -40,4 +40,15 @@ class ConfigRailSteps(
     @Then("persona GitHub tools are disabled")
     fun githubToolsDisabled() =
         assertTrue((world.lastBody ?: "").contains("\"githubToolsEnabled\":false"), "gh tools not disabled: ${world.lastBody}")
+
+    @Then("ambient ticking is disabled")
+    fun ambientTickingDisabled() =
+        assertTrue((world.lastBody ?: "").contains("\"ambientEnabled\":false"), "ambient ticking not disabled: ${world.lastBody}")
+
+    @Then("the article source is the scriptable fake")
+    fun articleSourceIsScriptableFake() =
+        assertTrue(
+            (world.lastBody ?: "").contains("\"articleSource\":\"ScriptableArticleSource\""),
+            "article source not the scriptable fake: ${world.lastBody}",
+        )
 }

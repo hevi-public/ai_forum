@@ -28,8 +28,14 @@
         @else
             <div class="thread-index">
                 @for(thread in threads)
-                    <div class="thread-row" data-thread-id="${thread.id}" data-thread-title="${thread.title}" data-unread-count="${thread.unreadCount}">
+                    <%-- data-thread-author is emitted ONLY for a persona-authored (ambient) thread — a JTE
+                         smart attribute omits it entirely when thread.author is null, so the acceptance
+                         probe reads it off an ambient row and no owner-authored thread false-matches. --%>
+                    <div class="thread-row" data-thread-id="${thread.id}" data-thread-title="${thread.title}" data-unread-count="${thread.unreadCount}" data-thread-author="${thread.author}">
                         <span class="thread-row__title"><a href="/threads/${thread.id}">${thread.title}</a></span>
+                        @if(thread.author != null)
+                            <span class="thread-row__author" data-thread-byline>${thread.author}</span>
+                        @endif
                         @if(thread.unreadCount > 0)
                             <span class="pill">${thread.unreadCount} new</span>
                         @endif
