@@ -266,6 +266,24 @@ class ScriptableArticleSource : ArticleSource {
     @Volatile
     private var failure: RuntimeException? = null
 
+    /**
+     * S5 plumbing (plan_docs/ambient-slice-5.md §2 "Distinguishable no-ops"): the source's own account
+     * of WHY [next] yielded null — "feeds returned no items" vs "all N feed items already seen" — so the
+     * tick's no-op detail can distinguish them instead of the one fixed generic string it records today.
+     *
+     * GREEN (S5): the port now declares `fun emptyReason(): String? = null` (defaulted, so existing
+     * implementers stay source-compatible), and [emptyReason] below overrides it by returning this field.
+     * A settable property and a same-name override function coexist in Kotlin — `x.emptyReason` reads the
+     * field, `x.emptyReason()` calls the override — so the step that programs it
+     * (`the ArticleSource is empty because {string}` → `articleSource.emptyReason = reason`) still
+     * compiles, and `AmbientTickService`'s no-op detail now reads it back through the port and appends it.
+     */
+    @Volatile
+    var emptyReason: String? = null
+
+    /** The port method — hands the tick this scenario's programmed [emptyReason] (or null when unset). */
+    override fun emptyReason(): String? = emptyReason
+
     fun add(article: Article) {
         articles += article
     }
@@ -287,6 +305,7 @@ class ScriptableArticleSource : ArticleSource {
         articles.clear()
         received.clear()
         failure = null
+        emptyReason = null
     }
 }
 

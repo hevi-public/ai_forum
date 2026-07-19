@@ -1,5 +1,6 @@
 package com.aiforum.web
 
+import com.aiforum.ambient.AmbientFeedProperties
 import com.aiforum.ambient.ArticleSource
 import org.springframework.context.annotation.Profile
 import org.springframework.core.env.Environment
@@ -17,6 +18,10 @@ class DiagnosticsController(
     // The wired ArticleSource — the @Primary ScriptableArticleSource under test; its runtime simple class
     // name proves the scriptable fake (not a live fetcher) is what an ambient tick would draw from.
     private val articleSource: ArticleSource,
+    // S5 (plan_docs/ambient-slice-5.md §2/§4): the feed allowlist. Bound from a NON-profiled
+    // @Configuration (AmbientConfig), so the bean exists — empty — under test even though the real
+    // FeedArticleSource can never wire here; that lets the config_guardrails rail assert ambientFeedCount=0.
+    private val feedProperties: AmbientFeedProperties,
 ) {
 
     @GetMapping("/__diag")
@@ -33,6 +38,11 @@ class DiagnosticsController(
         // article source must be the scriptable fake — both pinned by config_guardrails against drift.
         "ambientEnabled" to env.getProperty("aiforum.ambient.enabled", Boolean::class.java, false),
         "articleSource" to articleSource.javaClass.simpleName,
+        // S5: which source the `aiforum.ambient.source` switch selects (stub | feed), defaulting to
+        // stub, and how many feeds are configured. Under test both stay at the safe defaults (stub, 0)
+        // — the config_guardrails rail pins them so a drift toward a live fetcher fails a scenario.
+        "ambientSource" to env.getProperty("aiforum.ambient.source", "stub"),
+        "ambientFeedCount" to feedProperties.feeds.size,
         "activeProfiles" to env.activeProfiles.toList(),
     )
 }

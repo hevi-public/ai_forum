@@ -1,5 +1,6 @@
 package com.aiforum.ambient
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Profile
 import org.springframework.stereotype.Component
 import java.util.concurrent.atomic.AtomicInteger
@@ -11,9 +12,15 @@ import java.util.concurrent.atomic.AtomicInteger
  * sourcing (allowlist feeds, dedupe) is S5, behind this same interface.
  *
  * `@Profile("!test")` so it never competes with the `@Primary` ScriptableArticleSource under test.
+ *
+ * S5 (plan_docs/ambient-slice-5.md §2 "Source selection"): the ambient source is now chosen by
+ * `aiforum.ambient.source` — `stub` (this, the `matchIfMissing` default so existing setups are
+ * unchanged) vs `feed` ([FeedArticleSource], the owner-curated RSS/Atom allowlist). Verbatim mirror of
+ * the `aiforum.llm.provider` template on [com.aiforum.llm.ProcessLlmClient].
  */
 @Component
 @Profile("!test")
+@ConditionalOnProperty(prefix = "aiforum.ambient", name = ["source"], havingValue = "stub", matchIfMissing = true)
 class StubArticleSource : ArticleSource {
 
     // Rotates through the fixtures; AtomicInteger so concurrent ticks (a manual + a scheduled one) each get

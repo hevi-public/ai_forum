@@ -42,7 +42,10 @@ class DatabaseResetHooks(
         // children before parents (foreign_keys=on) — attachment + comment_revision + comment_quote reference
         // comment, so first; github_pr_thread + ambient_run reference thread, so before thread (ambient_run's
         // FK is ON DELETE SET NULL, so order isn't strictly required, but keep the child-first discipline).
-        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "thread", "persona").forEach {
+        // article_seen (V23) is standalone (no FKs), cleared alongside ambient_run so a URL a prior scenario's
+        // feed source marked seen can't linger into the next (the real FeedArticleSource never wires under
+        // test, but keep the dedupe registry scenario-isolated the same as everything else).
+        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "persona").forEach {
             jdbc.update("DELETE FROM $it")
         }
     }

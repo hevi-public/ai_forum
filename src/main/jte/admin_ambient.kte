@@ -17,7 +17,11 @@
         @else
             <ul class="admin-list__items">
                 @for(run in runs)
-                    <li class="admin-list__item" data-ambient-run="${run.id}" data-outcome="${run.outcome}" data-action="${run.action}">
+                    <%-- data-detail mirrors the rendered detail text as a stable, grep-able hook (house
+                         convention, like data-outcome/data-action). JTE OMITS an attribute whose ${}
+                         value is null, so the hook is present iff run.detail is — the honest RED/absent
+                         case the acceptance probe (Html.latestAmbientRunAttr) distinguishes. --%>
+                    <li class="admin-list__item" data-ambient-run="${run.id}" data-outcome="${run.outcome}" data-action="${run.action}" data-detail="${run.detail}">
                         <span class="admin-list__meta">
                             <span class="admin-list__badge">${run.outcome}</span>
                             <span class="admin-list__sep">·</span>

@@ -11,6 +11,16 @@ package com.aiforum.ambient
  */
 interface ArticleSource {
     fun next(): Article?
+
+    /**
+     * The source's own account of WHY the last [next] yielded `null` — surfaced in the tick's no-op
+     * detail so an operator can tell "feeds returned no items" apart from "all N feed items already
+     * seen" (plan_docs/ambient-slice-5.md §2 "Distinguishable no-ops"). Defaulted to `null` so the
+     * canned [StubArticleSource] (which always has something to post) and any future implementer stay
+     * source-compatible without overriding it; the real [FeedArticleSource] and the scriptable test
+     * double supply a reason.
+     */
+    fun emptyReason(): String? = null
 }
 
 /** One collected article: enough to open a thread from — title, source link, and a short summary. */

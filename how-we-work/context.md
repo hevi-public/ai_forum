@@ -159,13 +159,26 @@ Build hygiene: every Gradle test task now starts from a fresh `build/aiforum-tes
 (`freshTestDb` in build.gradle.kts) — acceptance leftovers used to FK-block tier1's per-class
 cleanup lists when running tiers after acceptance locally.
 
+**2026-07-19 (Ambient Slice 5, V23):** the real article source is in
+(`plan_docs/ambient-slice-5.md`): `FeedArticleSource` pulls from an **owner-curated https-only
+RSS/Atom allowlist** (`aiforum.ambient.feeds`), selected by `aiforum.ambient.source: feed`
+(**`stub` stays the default** — the `aiforum.llm.provider` `@ConditionalOnProperty` template;
+the test profile structurally never wires a real source, which is the security rail). Parsing is
+a hand-rolled hardened `FeedParser` (Tier-0): DTDs rejected outright (kills XXE + entity bombs),
+1 MiB byte cap before parse, 10s per-feed daemon-FutureTask deadline, http(s)-only item links,
+summaries HTML-stripped + truncated (§4 content decision: link + excerpt, bodies never stored).
+URL dedupe via `article_seen` (V23, marked on yield; stub bypasses dedupe by design). The port
+gained defaulted `emptyReason()` → no-op runs now carry distinguishable details ("feeds returned
+no items" vs "all N feed items already seen"), assertable via the new `data-detail` hook on
+`/admin/ambient` rows. `/__diag` gained `ambientSource` + `ambientFeedCount`. Settles
+direction-doc open question 4: **allowlist-only**; WebSearch stays deferred; prompt-injection
+via feed text remains the documented §12 residual until the jail. Suite 181 → 184 scenarios.
+
 ## Open threads / near-term
 
-- **Next ambient slices** (`plan_docs/ai-driven-forum-direction.md` §9): **S5 — real article
-  source** (allowlist feeds / WebSearch + dedupe + the untrusted-web-content posture, its own
-  reviewable PR) is the gap between "runs itself on canned fixtures" and "runs itself on the
-  live web"; **S3 — qualitative relations** (stance table + prompt injection + admin surface).
-  Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
+- **S3 — qualitative relations** (`plan_docs/ai-driven-forum-direction.md` §9): stance table +
+  prose injection into prompts + admin surface — the next ambient slice now that S1/S2/S5 are
+  merged. Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
 - Docker jail for persona tool use (§10–§12) — still deferred, but **urgency raised**: ambient
   web fetching is scheduled + unattended (direction doc §8); web-fetch note above applies.
 - Composer branch-context controls (`plan_docs/composer-branch-context-controls.md`) — designed,
