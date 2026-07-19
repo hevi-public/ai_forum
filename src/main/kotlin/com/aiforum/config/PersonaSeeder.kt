@@ -29,7 +29,13 @@ class PersonaSeeder(
     fun seedMissing(): Int =
         props.personas.count { persona ->
             (personas.find(persona.id) == null).also { missing ->
-                if (missing) personas.insert(persona.id, persona.name, persona.descriptor, persona.model)
+                // First-seed only: an owner's later edits to abilities/dials are never clobbered on reboot
+                // (idempotency preserved). The hand-authored abilities/dials (S2) matter for a fresh boot —
+                // with empty abilities relevance is permanently 0, so no ambient comment could ever fire.
+                if (missing) personas.insert(
+                    persona.id, persona.name, persona.descriptor, persona.model,
+                    abilities = persona.abilities, dials = persona.dials,
+                )
             }
         }
 }
@@ -66,5 +72,9 @@ data class PersonaSeedProperties(
         val name: String = "",
         val descriptor: String = "",
         val model: String = "",
+        // S2 (plan_docs/ambient-slice-2.md §3): hand-authored ability tags (drive ambient RELEVANCE) and
+        // dials (esp. `talkativeness`, P(comment)). Applied on first seed only; missing → empty/neutral.
+        val abilities: List<String> = emptyList(),
+        val dials: Map<String, Int> = emptyMap(),
     )
 }

@@ -25,6 +25,9 @@ class AmbientRunRepository(
         val tickTime: String,
         val source: String,
         val outcome: String,
+        // WHICH action this run dispatched (V22): 'post' (open an article thread) | 'comment' (drop a
+        // persona comment into a live thread). S1 rows read 'post' via the column DEFAULT.
+        val action: String,
         val detail: String?,
         val articleTitle: String?,
         val articleUrl: String?,
@@ -35,12 +38,14 @@ class AmbientRunRepository(
 
     /**
      * Append one tick outcome. [outcome] is the wire string the drill-down renders verbatim ('posted' /
-     * 'no-op' / 'failed'); the article/persona/thread fields are populated only on a 'posted' run, [detail]
-     * only on a skip or failure. `cost_usd` stays NULL until per-run cost capture lands.
+     * 'no-op' / 'failed'); [action] is which action it dispatched ('post' | 'comment', V22). The
+     * article/persona/thread fields are populated only on a 'posted' run, [detail] only on a skip or
+     * failure. `cost_usd` stays NULL until per-run cost capture lands.
      */
     fun record(
         source: TickSource,
         outcome: String,
+        action: String = ACTION_POST,
         detail: String? = null,
         articleTitle: String? = null,
         articleUrl: String? = null,
@@ -49,9 +54,9 @@ class AmbientRunRepository(
         costUsd: Double? = null,
     ) {
         jdbc.update(
-            "INSERT INTO ambient_run(tick_time, source, outcome, detail, article_title, article_url, persona_id, thread_id, cost_usd) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            clock.instant().toString(), source.name.lowercase(), outcome, detail,
+            "INSERT INTO ambient_run(tick_time, source, outcome, action, detail, article_title, article_url, persona_id, thread_id, cost_usd) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            clock.instant().toString(), source.name.lowercase(), outcome, action, detail,
             articleTitle, articleUrl, personaId, threadId, costUsd,
         )
     }
@@ -62,7 +67,7 @@ class AmbientRunRepository(
     /** The most recent ticks, newest first — the /admin/ambient run list. */
     fun recent(limit: Int): List<AmbientRun> =
         jdbc.query(
-            "SELECT id, tick_time, source, outcome, detail, article_title, article_url, persona_id, thread_id, cost_usd " +
+            "SELECT id, tick_time, source, outcome, action, detail, article_title, article_url, persona_id, thread_id, cost_usd " +
                 "FROM ambient_run ORDER BY tick_time DESC, id DESC LIMIT ?",
             ::mapRun,
             limit,
@@ -73,6 +78,7 @@ class AmbientRunRepository(
         tickTime = rs.getString("tick_time"),
         source = rs.getString("source"),
         outcome = rs.getString("outcome"),
+        action = rs.getString("action"),
         detail = rs.getString("detail"),
         articleTitle = rs.getString("article_title"),
         articleUrl = rs.getString("article_url"),
@@ -80,4 +86,10 @@ class AmbientRunRepository(
         threadId = rs.getString("thread_id"),
         costUsd = rs.getObject("cost_usd") as? Double,
     )
+
+    companion object {
+        // Wire strings for the V22 `action` column, rendered as data-action on the drill-down.
+        const val ACTION_POST = "post"
+        const val ACTION_COMMENT = "comment"
+    }
 }

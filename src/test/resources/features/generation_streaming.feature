@@ -13,3 +13,14 @@ Feature: Streaming generation events (AG-UI)
   Scenario: Streaming an unknown node completes at once so the client polls instead
     When the owner opens the event stream for "no-such-node"
     Then the event stream is empty
+
+  # S2 ambient variant (plan_docs/ambient-slice-2.md §6): the SSE transport is trigger-agnostic —
+  # InFlightGenerations doesn't know or care whether a run came from an owner POST or the ambient tick's
+  # comment action — so an ambient comment's draft streams over the exact same path, just a
+  # differently-labelled run id.
+  Scenario: An ambient comment's draft streams its AG-UI events over SSE too
+    Given a streaming generation "ambient-comment-1" has produced "Indexes " then "help here"
+    When the owner opens the event stream for "ambient-comment-1"
+    Then the event stream carries an AG-UI "RUN_STARTED" event
+    And the event stream carries the text deltas "Indexes " and "help here"
+    And the event stream carries an AG-UI "RUN_FINISHED" event

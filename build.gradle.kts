@@ -111,6 +111,13 @@ tasks.test { enabled = false }
 // classes/classpath — wire them explicitly or the task reports NO-SOURCE.
 val testSourceSet = sourceSets.test.get()
 
+// Every test task shares build/aiforum-test.db (application-test.yml). A finished task leaves its
+// last test's rows in the file, and another task's per-class children-first DELETE lists can then
+// FK-block on tables they predate (e.g. acceptance leftovers vs tier1 cleanup). Start each task
+// from a fresh file; Flyway re-migrates in milliseconds.
+val testDbFiles = listOf("", "-wal", "-shm").map { layout.buildDirectory.file("aiforum-test.db$it") }
+fun Test.freshTestDb() = doFirst { testDbFiles.forEach { it.get().asFile.delete() } }
+
 fun registerTier(name: String, tag: String, after: String?) =
     tasks.register<Test>(name) {
         testClassesDirs = testSourceSet.output.classesDirs
@@ -120,6 +127,7 @@ fun registerTier(name: String, tag: String, after: String?) =
         ignoreFailures = discoveryMode
         after?.let { shouldRunAfter(it) }
         testLogging { events("passed", "skipped", "failed") }
+        freshTestDb()
     }
 
 registerTier("tier0", "tier0", "mcpShortcutTest")
@@ -197,6 +205,7 @@ tasks.register<Test>("acceptance") {
     shouldRunAfter("tier2")
     testLogging { events("passed", "skipped", "failed") }
 
+    freshTestDb()
     val report = layout.buildDirectory.file("reports/cucumber/report.json")
     doFirst { report.get().asFile.delete() }   // a stale report must never satisfy the floor
     doLast {

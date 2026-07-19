@@ -2,6 +2,11 @@ Feature: Generation sad paths
   The sad path is first-class (§4): every failure mode is simulated at the Tier-1 IO seam, surfaces as
   the right UX state, and offers a working retry. Each failure here is injected into the LlmClient fake.
 
+  S2 decision (plan_docs/ambient-slice-2.md §5): an ambient-triggered generation that fails surfaces
+  the SAME failed state as an owner-summoned reply, and the owner retries it as a peer — the tick
+  itself never retries (cost hygiene, no duplicate-spend risk). The owner-path scenarios below exercise
+  that shared state machine; there is no separate tick-retry path to test.
+
   Background:
     Given a thread "Scaling SQLite" exists
     And a persona "sol" exists

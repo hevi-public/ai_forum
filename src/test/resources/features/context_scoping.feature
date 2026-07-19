@@ -3,6 +3,11 @@ Feature: Per-branch context scoping
   ancestor path, via recursive CTE) or whole-thread scope. Branch-only excludes siblings. Asserted by
   spying on the exact PromptContext handed to the model.
 
+  The reply-initiating actor isn't fixed to the owner: an ambient tick can summon a persona reply under
+  the same branch-only/whole-thread rules (S2 ambient commenting). Scoping is actor-agnostic — the CTE
+  walks the tree from the target node regardless of who triggered the reply — so the owner-path
+  scenarios below exercise the same mechanics a persona/tick-initiated reply would.
+
   Background:
     Given a thread "Scaling SQLite" exists
     And a persona "sol" exists

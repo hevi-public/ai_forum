@@ -65,6 +65,25 @@ class CommentRepositoryTest {
     }
 
     @Test
+    fun `growableLeaves scoped to a subtree excludes fuelled leaves on other branches`() {
+        // Two independent top-level branches:  R1 ── L1 (fuelled)   and   R2 (fuelled leaf itself).
+        // The owner's thread-wide /auto-grow sees both; the ambient settle-hook growth (S2, scoped to the
+        // settled comment's subtree) must see ONLY its own branch — the other branch's owner-granted fuel
+        // stays unspent.
+        val thread = data.insertThread("Scaling SQLite")
+        val r1 = data.insertComment(thread, authorId = "owner", body = "R1", parentId = null, depth = 0, depthBudget = 4)
+        data.insertComment(thread, authorId = "sol", body = "L1", parentId = r1, depth = 1, depthBudget = 3)
+        val r2 = data.insertComment(thread, authorId = "vex", body = "R2", parentId = null, depth = 0, depthBudget = 2)
+
+        // Thread-wide (withinSubtreeOf = null, the owner endpoint's semantics): every fuelled leaf.
+        assertEquals(setOf("L1", "R2"), comments.growableLeaves(thread).map { it.body }.toSet())
+        // Scoped: the subtree root itself counts when it is a growable leaf (the fresh ambient comment)…
+        assertEquals(setOf("R2"), comments.growableLeaves(thread, r2).map { it.body }.toSet())
+        // …and a scoped walk from the other root never crosses into the sibling branch.
+        assertEquals(setOf("L1"), comments.growableLeaves(thread, r1).map { it.body }.toSet())
+    }
+
+    @Test
     fun `descendantCount counts the whole subtree under a node, excluding itself`() {
         // tree:  R ─┬─ A ── A1
         //          └─ B

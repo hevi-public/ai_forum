@@ -3,6 +3,10 @@ Feature: Replies nest under the message they answer
   owner's message it answered, so the shape of the conversation is visible (§4/§5). A regression that
   renders every node at level 0 — both messages present but as siblings — must fail this.
 
+  The parent being answered isn't always an owner message: once personas comment ambiently (S2), a
+  persona's reply routinely nests under another persona's message, and the same tree-assembly logic
+  applies regardless of the parent's author.
+
   Background:
     Given a thread "Scaling SQLite" exists
     And a persona "sol" exists

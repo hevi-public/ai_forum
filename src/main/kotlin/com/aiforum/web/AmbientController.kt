@@ -17,6 +17,8 @@ import java.time.Instant
 data class AmbientRunView(
     val id: Long,
     val outcome: String,
+    // Which action the run dispatched ('post' | 'comment', V22) — rendered as data-action on the row.
+    val action: String,
     val source: String,
     val ago: String,
     val detail: String?,
@@ -61,6 +63,7 @@ class AmbientController(
     private fun AmbientRunRepository.AmbientRun.toView(now: Instant) = AmbientRunView(
         id = id,
         outcome = outcome,
+        action = action,
         source = source,
         ago = RelativeTime.ago(Instant.parse(tickTime), now),
         detail = detail,

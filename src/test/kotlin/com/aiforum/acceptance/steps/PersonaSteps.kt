@@ -166,6 +166,44 @@ class PersonaSteps(
         assertTrue(Html.contains(body, "name=\"dial_agreeableness\""), "expected a name=\"dial_agreeableness\" control in:\n$body")
     }
 
+    // S2 (plan_docs/ambient-slice-2.md §3): talkativeness is a fifth dial (spec §6.4). The create/edit
+    // forms and the profile page all iterate Dials.KEYS generically, so this is the one seam that proves
+    // the form renders it once it's added — no template change needed beyond the KEYS list itself.
+    @Then("the members page offers a talkativeness dial control")
+    fun membersPageOffersTalkativenessDial() {
+        val body = world.lastBody ?: ""
+        assertTrue(
+            Html.contains(body, "name=\"dial_talkativeness\""),
+            "expected a name=\"dial_talkativeness\" control in:\n$body",
+        )
+    }
+
+    @When("the owner adds a persona {string} with abilities {string} and dials agreeableness {int}, verbosity {int}, talkativeness {int}")
+    fun addPersonaWithTalkativeness(name: String, abilities: String, agreeableness: Int, verbosity: Int, talkativeness: Int) {
+        val resp = http.postForm(
+            "/personas",
+            mapOf(
+                "name" to name,
+                "abilities" to abilities,
+                "dial_agreeableness" to agreeableness,
+                "dial_verbosity" to verbosity,
+                "dial_talkativeness" to talkativeness,
+            ),
+        )
+        world.lastStatus = resp.statusCode.value()
+        world.lastBody = resp.body
+    }
+
+    @Then("the persona {string} has dial {string} value {int}")
+    fun personaHasDialValue(name: String, key: String, value: Int) {
+        val body = http.get("/personas/$name").body ?: ""
+        val text = Html.dialText(body, key)
+        assertTrue(
+            text != null && text.contains("$value/10"),
+            "expected dial \"$key\" = $value/10 for \"$name\", got \"$text\" in:\n$body",
+        )
+    }
+
     @When("the owner previews a new persona {string} with abilities {string} and dials agreeableness {int}, verbosity {int}")
     fun previewNewPersona(name: String, abilities: String, agreeableness: Int, verbosity: Int) {
         val resp = http.postForm(

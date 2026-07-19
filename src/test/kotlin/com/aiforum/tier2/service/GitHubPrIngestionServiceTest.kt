@@ -94,6 +94,8 @@ class GitHubPrIngestionServiceTest {
             includeSiblings: Boolean,
             postAsOwner: Boolean,
             routingScope: ScopeMode,
+            initialBudget: Int?,
+            onSettled: ((List<String>) -> Unit)?,
         ) {
             summons += threadId
             events += "summon"

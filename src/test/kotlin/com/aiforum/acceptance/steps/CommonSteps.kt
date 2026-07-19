@@ -42,6 +42,15 @@ class CommonSteps(
         data.insertPersona(id = name, name = name, abilities = listOf(ability))
     }
 
+    // S2 (plan_docs/ambient-slice-2.md §3/§4): the ambient comment gate needs BOTH a matching ability tag
+    // (relevance) and the talkativeness dial (P(comment)) — this sibling of personaSkilledExists sets
+    // both in one seed so ambient_commenting/depth_budget scenarios can vary talkativeness independently
+    // of the ability match.
+    @Given("a persona {string} exists with ability {string} and talkativeness {int}")
+    fun personaWithAbilityAndTalkativeness(name: String, ability: String, talkativeness: Int) {
+        data.insertPersona(id = name, name = name, abilities = listOf(ability), dials = mapOf("talkativeness" to talkativeness))
+    }
+
     @Given("a posted reply from {string} saying {string}")
     fun postedReply(persona: String, body: String) {
         val id = data.insertComment(world.threadId!!, authorId = persona, body = body)
