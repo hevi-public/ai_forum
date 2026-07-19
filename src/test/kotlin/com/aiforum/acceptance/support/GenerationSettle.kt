@@ -61,7 +61,15 @@ class GenerationSettle(private val http: HttpClient) {
         var body = ""
         while (System.currentTimeMillis() < deadline) {
             body = http.get("/threads/$threadId").body ?: ""
-            if (!Html.hasAttr(body, "data-state", "drafting")) return body
+            // Two live states must both be absent before the room is quiescent. "Summoning" covers the
+            // async routing window: beginSummon fires synchronously inside summonAsync (before the
+            // trigger's HTTP response), and every draft is registered before endSummon clears it — so a
+            // poll can never observe the no-drafts gap between dispatch and registration (the CI-only
+            // flake in the ambient fan-out scenario: a sample landing there saw "no drafting" and
+            // returned a partial room).
+            val summoning = Html.hasAttr(body, "data-empty-state", "summoning")
+            val drafting = Html.hasAttr(body, "data-state", "drafting")
+            if (!summoning && !drafting) return body
             Thread.sleep(POLL_MS)
         }
         return body
