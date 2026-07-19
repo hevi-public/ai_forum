@@ -54,6 +54,17 @@ class AmbientSteps(
         articleSource.failWith(message)
     }
 
+    // S5 (plan_docs/ambient-slice-5.md §2 "Distinguishable no-ops", §4 article_source.feature scenarios
+    // 2/3): programs the source's own account of why it yielded nothing — "feeds returned no items" vs
+    // "all N feed items already seen" — leaving [articles] empty so `next()` still returns null exactly
+    // like the plain no-scripting no-op does today. Only the field is wired here (see the doc comment on
+    // ScriptableArticleSource.emptyReason in TestBeans.kt); nothing in production reads it yet, so this
+    // step alone can never turn a scenario green.
+    @Given("the ArticleSource is empty because {string}")
+    fun articleSourceEmptyBecause(reason: String) {
+        articleSource.emptyReason = reason
+    }
+
     // S2 (plan_docs/ambient-slice-2.md §5 step 4, exclusion rule a): the comment action must never let a
     // persona comment on the thread it authored itself. Background threads are owner-authored (author_id
     // NULL); this flips a thread to persona-authored without going through a real ambient post tick.
@@ -203,6 +214,24 @@ class AmbientSteps(
         assertTrue(
             Html.hasAttr(body, "data-action", action),
             "expected a run with data-action=\"$action\" in:\n$body",
+        )
+    }
+
+    // S5 (plan_docs/ambient-slice-5.md §4 article_source.feature): the run row's rendered detail text
+    // becomes assertable via a `data-detail` hook (house convention — the text is already rendered in
+    // admin_ambient.kte, the hook just makes it grep-able the same way data-outcome/data-action are).
+    // RED today: the hook doesn't exist in the template yet, so this fails honestly with "absent" rather
+    // than a false positive from a substring match against the human-readable prose elsewhere on the page.
+    @Then("the ambient run detail contains {string}")
+    fun ambientRunDetailContains(substring: String) {
+        val body = http.get("/admin/ambient").body ?: ""
+        assertTrue(body.contains("data-ambient-run"), "expected a data-ambient-run row in:\n$body")
+        val detail = Html.latestAmbientRunAttr(body, "data-detail")
+        assertTrue(
+            detail != null && detail.contains(substring),
+            "expected the latest ambient run's data-detail to contain \"$substring\" but it was " +
+                (detail?.let { "\"$it\"" } ?: "absent (no data-detail attribute rendered on the run row)") +
+                " in:\n$body",
         )
     }
 

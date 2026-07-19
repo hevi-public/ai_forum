@@ -39,6 +39,18 @@ object Html {
     fun hasAttr(html: String, name: String, value: String): Boolean =
         Regex("$name=\"${Regex.escape(value)}\"").containsMatchIn(html)
 
+    /**
+     * The value of [attr] on the MOST RECENT ambient-run row (admin_ambient.kte lists newest-first, so
+     * the first `<li data-ambient-run="…">` in document order is the latest tick) — scoped to that one
+     * row so an older run's detail can never satisfy an assertion meant for the newest tick. Null if no
+     * ambient-run row exists yet, or if [attr] isn't rendered on it at all (e.g. `data-detail` before S5
+     * wires the hook — the honest RED case article_source.feature pins).
+     */
+    fun latestAmbientRunAttr(html: String, attr: String): String? {
+        val tag = Regex("<li\\b[^>]*data-ambient-run=\"[^\"]*\"[^>]*>").find(html)?.value ?: return null
+        return Regex("${Regex.escape(attr)}=\"([^\"]*)\"").find(tag)?.groupValues?.get(1)
+    }
+
     /** Every distinct data-reply-id in document order — one for a summon, several for a fan-out. */
     fun allReplyIds(html: String): List<String> =
         Regex("data-reply-id=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.distinct().toList()

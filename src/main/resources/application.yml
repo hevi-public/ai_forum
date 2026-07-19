@@ -39,6 +39,19 @@ aiforum:
   ambient:
     enabled: false
     cron: "0 0 9,15,21 * * *"
+    # Where an ambient POST tick gets its article (plan_docs/ambient-slice-5.md). `stub` (default) rotates
+    # canned fixtures — zero IO, the demo/dev source. `feed` activates FeedArticleSource: the owner-curated
+    # RSS/Atom allowlist below, deduped against the article_seen registry. Verbatim mirror of
+    # aiforum.llm.provider (matchIfMissing => stub). ⚠ `feed` reaches the live web — everything it fetches is
+    # untrusted data (prompt-injection risk class; the Docker jail §12 is the real fix). The allowlist is the
+    # trust anchor: only hosts YOU list are ever contacted, and only a link + short stripped excerpt is stored.
+    source: stub
+    # The feed allowlist (source: feed only). https-only — non-https entries are dropped at boot with a warn.
+    # Empty by default, so turning source=feed on without a list simply yields nothing (never the open web).
+    feeds: []
+    # e.g.  feeds:
+    #         - https://hnrss.org/frontpage
+    feed-max-bytes: 1048576    # 1 MiB per-feed response cap, enforced BEFORE parsing (memory-abuse guard)
   # Shortcut ticketing integration (https://shortcut.com) — READ-ONLY. Off by default; the forum behaves
   # exactly as before until you enable it. When on, three surfaces light up: a right-rail "Shortcut" box
   # (the default-query feed) on the home + thread pages, a browsable /shortcut page with a source switcher

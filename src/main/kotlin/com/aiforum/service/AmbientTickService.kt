@@ -92,8 +92,15 @@ class AmbientTickService(
             }
             if (!ran) {
                 // A no-op records the PREFERRED action: nothing executed, so "whose turn it was" is the
-                // most informative label the row can carry (not a hardcoded 'post' placeholder).
-                ambientRuns.record(source, OUTCOME_NO_OP, action = preferredAction, detail = "nothing to post or comment")
+                // most informative label the row can carry (not a hardcoded 'post' placeholder). S5
+                // (plan_docs/ambient-slice-5.md §2 "Distinguishable no-ops"): append the source's own
+                // account of WHY it yielded nothing when it offers one — "feeds returned no items" vs
+                // "all N feed items already seen" — so an operator can tell the two no-op shapes apart.
+                // The stub (and any source that returns null without a reason) leaves this null, so the
+                // generic string is unchanged for existing setups.
+                val base = "nothing to post or comment"
+                val detail = articleSource.emptyReason()?.let { "$base — $it" } ?: base
+                ambientRuns.record(source, OUTCOME_NO_OP, action = preferredAction, detail = detail)
                 log.atInfo().setMessage("ambient tick: nothing to post or comment")
                     .addKeyValue("event", EV_NOOP).addKeyValue("source", source.name.lowercase()).log()
             }

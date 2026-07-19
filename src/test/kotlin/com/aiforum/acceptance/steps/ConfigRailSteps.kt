@@ -51,4 +51,23 @@ class ConfigRailSteps(
             (world.lastBody ?: "").contains("\"articleSource\":\"ScriptableArticleSource\""),
             "article source not the scriptable fake: ${world.lastBody}",
         )
+
+    // S5 (plan_docs/ambient-slice-5.md §2 "Source selection", §4 config_guardrails.feature additions):
+    // the new `aiforum.ambient.source` switch must default to `stub` (matchIfMissing = true), and
+    // `AmbientFeedProperties` must be wired from a non-profiled @Configuration so the bean exists — empty
+    // — under test. Neither field exists on DiagnosticsController's /__diag payload yet, so both fail
+    // honestly on a missing key, not a wiring/404 error.
+    @Then("the ambient source selection defaults to the stub")
+    fun ambientSourceDefaultsToStub() =
+        assertTrue(
+            (world.lastBody ?: "").contains("\"ambientSource\":\"stub\""),
+            "ambient source selection not defaulted to stub: ${world.lastBody}",
+        )
+
+    @Then("no feeds are configured under test")
+    fun noFeedsConfiguredUnderTest() =
+        assertTrue(
+            (world.lastBody ?: "").contains("\"ambientFeedCount\":0"),
+            "ambient feed count not 0 under test: ${world.lastBody}",
+        )
 }

@@ -19,7 +19,13 @@ Feature: Config guardrails
   # The ambient loop (plan_docs/ambient-slice-1.md) is a background job with real cost — its scheduler
   # must stay off under test just like backups, and its ArticleSource must be the scriptable fake, never
   # a live fetcher, so ticks in the suite are deterministic and free.
+  # S5 (plan_docs/ambient-slice-5.md §2, §4): the real source is chosen by `aiforum.ambient.source`
+  # (stub | feed), defaulting to stub, and its feed allowlist (`AmbientFeedProperties`) must exist —
+  # empty — under test even though FeedArticleSource itself can never wire here (see the "Network
+  # under test" rail row in the slice doc's §3 threat table).
   Scenario: The test profile gates ambient ticking off and fakes the article source
     When the test diagnostics are read
     Then ambient ticking is disabled
     And the article source is the scriptable fake
+    And the ambient source selection defaults to the stub
+    And no feeds are configured under test
