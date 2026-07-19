@@ -179,6 +179,9 @@ via feed text remains the documented §12 residual until the jail. Suite 181 →
 - **S3 — qualitative relations** (`plan_docs/ai-driven-forum-direction.md` §9): stance table +
   prose injection into prompts + admin surface — the next ambient slice now that S1/S2/S5 are
   merged. Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
+- **Feed-fetch socket timeouts** (Assay follow-up on PR #4): `FeedArticleSource`'s RestClient has
+  no connect/read timeout — the tick thread is deadline-protected, but a truly hung socket parks
+  the daemon worker until OS TCP timeout. Add client-level timeouts when next touching the file.
 - Docker jail for persona tool use (§10–§12) — still deferred, but **urgency raised**: ambient
   web fetching is scheduled + unattended (direction doc §8); web-fetch note above applies.
 - Composer branch-context controls (`plan_docs/composer-branch-context-controls.md`) — designed,
