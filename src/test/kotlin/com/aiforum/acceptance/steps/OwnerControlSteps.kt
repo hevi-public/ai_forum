@@ -126,6 +126,29 @@ class OwnerControlSteps(
     }
 
     /**
+     * S4b's half of the same boundary: a DRIFTED interest is meant to be inside the persona's system
+     * prompt, and it gets there by generation-time injection rather than by anything being composed.
+     *
+     * **Selected by the member's own name, never by `personaCall()`.** An `InterestJudge` call is not
+     * the dispatcher, so it satisfies "the last non-dispatcher call" — and the judge's own instruction
+     * contains the interest phrase, so the loose selector would let this assertion pass while proving
+     * nothing about injection into a GENERATION prompt.
+     */
+    @Then("{string}'s system prompt carried the interest {string}")
+    fun systemPromptCarriedInterest(persona: String, interest: String) {
+        val req = llm.received.lastOrNull { it.persona.name.equals(persona, ignoreCase = true) }
+            ?: error(
+                "no generation call for \"$persona\" reached the LLM " +
+                    "(calls: ${llm.received.map { it.persona.name }})",
+            )
+        assertTrue(
+            req.context.personaSystemPrompt.contains(interest, ignoreCase = true),
+            "expected the interest \"$interest\" in $persona's system prompt, which was:\n" +
+                req.context.personaSystemPrompt,
+        )
+    }
+
+    /**
      * Negative twin of GenerationSteps' `the dispatcher's roster lists ...`, and a sibling of the
      * no-vote-signal assertion above: both pin something that must NOT reach a model. With no persona in
      * the discussion yet there is no edge worth showing, so the dispatcher prompt must omit the relations

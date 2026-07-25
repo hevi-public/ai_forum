@@ -88,4 +88,18 @@ class ConfigRailSteps(
             (world.lastBody ?: "").contains("\"stanceEvolutionMaxEdgesPerRun\":0"),
             "stance evolution edge cap not at its unlimited default: ${world.lastBody}",
         )
+
+    @Then("interest drift is disabled")
+    fun interestDriftDisabled() =
+        assertTrue(
+            (world.lastBody ?: "").contains("\"interestDriftEnabled\":false"),
+            "interest drift not disabled: ${world.lastBody}",
+        )
+
+    @Then("the interest drift member cap is unlimited by default")
+    fun interestDriftCapUnlimited() =
+        assertTrue(
+            (world.lastBody ?: "").contains("\"interestDriftMaxPersonasPerRun\":0"),
+            "interest drift member cap not at its unlimited default: ${world.lastBody}",
+        )
 }

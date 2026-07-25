@@ -74,4 +74,27 @@ class TestData(private val jdbc: JdbcTemplate, private val clock: Clock) {
         )
         return id
     }
+
+    /**
+     * S4b: an interest row, written directly. [source] is `seeded` for an open interest the pass may set
+     * down and `owner` for one the owner pinned — the per-interest provenance that makes the immutable
+     * core per-persona rather than global.
+     *
+     * Direct SQL rather than the persona edit form on purpose: that form composes a prompt, so a
+     * form-driven Given would buy an LLM call and every `no LLM call was made` scenario in the drift
+     * feature would assert against a spy that had already seen one.
+     */
+    fun insertInterest(personaId: String, interest: String, source: String = "seeded") {
+        jdbc.update(
+            "INSERT INTO persona_interest(persona_id, interest, source, updated_at) VALUES (?,?,?,?)",
+            personaId, interest, source, clock.instant().toString(),
+        )
+    }
+
+    /** Every interest a member holds, for the steps that need the room's state rather than one page. */
+    fun interestsOf(personaId: String): List<String> =
+        jdbc.queryForList(
+            "SELECT interest FROM persona_interest WHERE persona_id = ? ORDER BY interest",
+            String::class.java, personaId,
+        ).filterNotNull()
 }

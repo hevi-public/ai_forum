@@ -285,6 +285,25 @@ Five things worth knowing before touching it:
   > ships green. `PersonaPromptRefresher` has no test at any tier (the only double overrides `refresh`
   > wholesale). The `nullsFirst` half of `byWindowAge` has no failing test. The `.feature` diff in the fix
   > commit is comment-only, so acceptance gained no coverage for the root cost defect.
+- **The ambient fan-out acceptance scenario is still flaky, and the S4a-branch "fix" did not cure it.**
+  `trigger_modes.feature` → "An ambient article tick fans out to the room; one persona fails, the rest
+  still post" fails intermittently at `TriggerModeSteps.kt:37` with **expected 2 posted, got 1** — the
+  settle helper returns a room that is only partly settled, so the count assertion reads a snapshot
+  rather than an outcome. History: 2026-07-19 (`cb9601c2`), main at `811f430`, twice on the S4a branch,
+  and once locally *after* `43ba812` raised `GenerationSettle.TIMEOUT_MS` from 5s to 20s; three
+  full-suite runs straight after that were clean, so call it roughly one run in four locally.
+  **`43ba812`'s commit message claims the deadline "is what was left" — that claim is wrong**, since a
+  4× deadline still fails. The raise is harmless (a stuck-draft guard, spent only when something is
+  wedged) but it is not the fix.
+  What has been ruled out, with evidence: cross-run contention (`runs-on: ubuntu-latest`, so the two
+  runs a commit starts are separate VMs); scripted-response leakage between scenarios
+  (`DatabaseResetHooks.resetFakes` clears both `script` and `received` at `@Before(order = 10)`);
+  late draft registration (`GenerationService.summonAsync` registers *every* plan before `endSummon`
+  clears `summoning`, so the room poller cannot observe a no-drafts gap mid-round).
+  What is left to look at: what the thread page renders for a node between `settleOne` persisting it
+  and `markDone` evicting it from `InFlightGenerations`, and whether a FAILED settle leaves any
+  rendered trace at all. Next move is to instrument the settle (log the body each poll sees when the
+  count is short) rather than to raise the deadline again.
 - Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
 - **Feed-fetch socket timeouts** (Assay follow-up on PR #4): `FeedArticleSource`'s RestClient has
   no connect/read timeout — the tick thread is deadline-protected, but a truly hung socket parks
