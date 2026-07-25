@@ -52,6 +52,34 @@ aiforum:
     # e.g.  feeds:
     #         - https://hnrss.org/frontpage
     feed-max-bytes: 1048576    # 1 MiB per-feed response cap, enforced BEFORE parsing (memory-abuse guard)
+  # Relation-stance evolution (plan_docs/ambient-slice-4a.md) — the pass that reads what the members
+  # actually wrote to each other, asks the model to judge the TONE of it, and rewrites the affected
+  # persona_stance rows. Auto-applied with no approval queue: every change is recorded on /admin/stances
+  # with the exchanges it was judged from, and the owner reverts what they disagree with. Its OWN switch,
+  # separate from aiforum.ambient, because an owner may want the room to post articles without letting
+  # its members' opinions of each other drift (or the reverse).
+  stance-evolution:
+    # SCHEDULER master switch ONLY: it gates StanceEvolutionSchedulingConfig + StanceEvolutionTicker, not
+    # the /admin/stances "Run the evolution pass" button, which always works (manual-trigger-first). Off
+    # by default so unattended LLM spend is opt-in — this pass costs one judgment per qualifying pair
+    # plus one prompt recompose per member whose relations moved.
+    enabled: false
+    # When the scheduler runs, once enabled. Daily at 04:00 — deliberately slower than the ambient tick's
+    # three-a-day: a relationship that lurches every few hours reads as noise, not as a room settling in.
+    cron: "0 0 4 * * *"
+    # Per-run edge budget. 0 (the default) = UNLIMITED — every pair with new exchanges is judged on every
+    # run ("let it rip", the 2026-07-25 owner call). It is a knob rather than a code change so turning the
+    # spend down later is a one-line edit; clamped at the use site like every other tunable here.
+    max-edges-per-run: 0
+    # How many exchanges a directed pair must have produced since the pass last looked at it before it is
+    # worth another judgment. 1 by default, because the per-edge window is what keeps the spend bounded:
+    # an edge stops being re-judged as soon as a USABLE judgment lands on it — one that moved the stance
+    # and one that deliberately left it standing are both answers, and both close the window over the
+    # exchanges they were given. So a settled pair drops out of the run instead of re-buying an opinion on
+    # the same old history every night. The two outcomes that leave the window OPEN are the two that
+    # deserve another look: an answer we refused (a digit came back where prose was asked for) and a call
+    # that never landed (a rate limit at 04:00). Raise this to make the room slower to re-read each other.
+    min-exchanges: 1
   # Shortcut ticketing integration (https://shortcut.com) — READ-ONLY. Off by default; the forum behaves
   # exactly as before until you enable it. When on, three surfaces light up: a right-rail "Shortcut" box
   # (the default-query feed) on the home + thread pages, a browsable /shortcut page with a source switcher

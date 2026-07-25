@@ -203,21 +203,88 @@ poses questions and the room replies" to the ambient article forum. Suite 184 �
 > pointing at an unrelated line. Pass a prepared `List<SomeView>` instead. Also: `MigrationPipelineTest`
 > pins the highest applied migration version — bump it with every new migration.
 
+**2026-07-25 (Ambient Slice 4a, V25):** relation stances now **evolve** (`plan_docs/ambient-slice-4a.md`).
+A pass reads the persona→persona exchanges in the comment tree since the last standing change, asks the
+model to judge their **tone**, and rewrites the affected `persona_stance` rows — auto-applied, no approval
+queue (direction-doc §11.5). Every change is captured in `stance_change` (V25) with old text, **old
+provenance**, and the cited exchanges snapshotted as prose; the owner reads old→new at **`/admin/stances`**
+and reverts what they disagree with.
+
+Five things worth knowing before touching it:
+
+- **The interaction read must include top-level comments.** S2's ambient comment lands on someone else's
+  article thread with `parent_id NULL`, so its addressee is `thread.author_id`, not a parent row.
+  `CommentRepository.exchangesSince` covers both branches; a plain reply→parent self-join would look
+  correct in tests and almost never fire in the live forum. Persona-ness is decided against the **roster**
+  (a string heuristic would silently admit `gh:` authors).
+- **S4a runs are deliberately NOT recorded in `ambient_run`.** `AmbientRunRepository.count()` drives the
+  ambient tick's post/comment parity *and* its round-robin author index — extra rows there would silently
+  change which persona posts which article.
+- **The no-numbers guardrail is now executable.** `StanceJudge.parse` refuses any digit-bearing answer
+  outright: the one place a number could enter the relation model is the judge's output, and a Tier-0 test
+  pins the refusal. "Pushed back twice" is prose; "trust 4/5" cannot reach the table.
+- **Revert undoes, it does not freeze** — it restores the old text *and* the old `source`, so a reverted
+  seeded row goes back to `seeded` and may drift again. Freezing is what the persona edit form's `owner`
+  stamp is for.
+- **The evolution window is PER EDGE and lives in `persona_stance.judged_at` (V26)**, not one global
+  watermark and not the audit table. Two traps here, both found by review and both worth knowing before
+  touching this code:
+  - A **global** boundary is quietly lossy — one pair's success moves it for every pair that failed, was
+    capped out, or came back unusable in the same run, and their evidence is never judged again.
+  - Keying the window off *recorded changes* is quietly expensive — the judge is told to repeat a
+    standing view unchanged when nothing moved, so **`Unchanged` is the steady state of a settled pair**
+    and it writes no audit row, so the window never advances and that pair re-buys the same judgment every
+    run forever. The watermark is therefore stamped on any **usable** verdict (changed *or* unchanged) and
+    deliberately **not** on a refusal or a seam failure, which must stay retryable.
+  Candidates are ordered by window age so a cap rotates instead of starving the tail. Both properties have
+  Tier-2 tests that fail against the wrong implementation — verified by mutation, not assumed.
+- **Owner calls 2026-07-25:** auto-recompose on evolution (settling S3's staleness tension — extracted into
+  `PersonaPromptRefresher`, shared with `POST /personas/recompose`), its own gated scheduler pair
+  (`aiforum.stance-evolution.enabled`, **default off**, `/__diag` rail + config_guardrails scenario), and
+  **no per-run cap by default** (`max-edges-per-run: 0`). That last one plus auto-recompose means a busy
+  run costs one judgment per qualifying pair **plus** one compose per affected persona — the scheduler
+  defaulting off is what keeps unattended spend opt-in. Suite 200 → 213 scenarios.
+
 ## Open threads / near-term
 
-- **S4a — relation-stance evolution** (`plan_docs/ai-driven-forum-direction.md` §6, §9): the next
-  ambient slice, and the one that makes relations *evolve* rather than sit where they were seeded.
-  Owner decision 2026-07-21: **audit-only auto-apply** — stances shift on a slow, capped cadence and the
-  owner sees old→new with the interactions cited and can revert; this is a **deliberate override** of the
-  §6.5 "owner-approved" precedent named in direction-doc §11 item 5. De-risking finding: §6 claims this
-  "forces the first real use of interaction records", but that is overstated — `comment` already carries
-  `parent_id`/`author_id`/`created_at`/`state`, so who-replied-to-whom-and-when is derivable from the
-  existing tree (`event_log` remains dead code, zero references in `src/main/kotlin`). What S4a actually
-  needs is a read over the comment tree plus an LLM judgment of exchange *tone*. Note the S3 tension it
-  must settle: stance flavour baked into a stored `system_prompt` by the composer goes stale once edges
-  evolve — either recompose on evolution, or drop stances from the composer input.
 - **S4b — interest/trait drift**, then **persona memory** (§6.3, revived into the near-term roadmap at
-  the owner's request 2026-07-21; currently has no slice or plan doc).
+  the owner's request 2026-07-21; currently has no slice or plan doc). S4b is now the next ambient slice,
+  and it carries the convergence risk S4a deliberately left alone (§11.5's remaining open items: how
+  convergence is measured, and manual newcomer injection as the diversity lever).
+- **S4a follow-ups (PR #6 review, second pass — none blocking, all verified against the code).** The
+  owner-clobber race the second review found was fixed in the PR; these were not:
+  1. `StanceEvolutionService.evolveEdge` cites the FULL window (`renderCited(exchanges)`) while the judge
+     only ever saw `takeLast(12)`, so `/admin/stances` presents evidence the model never read and the
+     `cited` TEXT is unbounded. `renderCited`'s KDoc claims the opposite — a one-line fix plus the doc.
+  2. `revert` stamps `judged_at` from `MAX(changed_at)` — a post-LLM **write** instant — into a column
+     whose contract is the pre-query **read** instant (`RelationStanceRepository.markJudged` KDoc), so a
+     revert can move a window FORWARD past exchanges nothing ever judged. Fix: carry the run's `readAt`
+     on the audit row, or clamp the revert so it can only move the stamp back.
+  3. `PersonaPromptRefresher.refresh` still has `personas.find` outside its guard, so it can throw out of
+     a method whose KDoc promises it never does — one `SQLITE_BUSY` there skips every holder queued
+     behind it and logs a successful run as `stance.evolve.failed`.
+  4. `coarseFloor` requires a watermark on EVERY `persona_stance` row, but owner-authored and
+     never-conversing edges are skipped before any stamp — so on the shipped 42-edge seed the floor is
+     null forever and the unbounded exchange read it was added to prevent still happens. Read cost only.
+  5. **The dev DB will never get `idx_stance_change_edge`.** V25 was edited in place after that DB had
+     already applied it; `application-dev.yml` sets `validate-on-migrate: false`, so Flyway neither
+     complains nor re-runs it. A V27+ `CREATE INDEX IF NOT EXISTS` is the repair (per the
+     `sqlite-spring-jdbc` skill's rule that an applied migration is immutable).
+  6. `recomposed=` in the run's log line counts refresh ATTEMPTS — `refresher.refresh`'s Boolean is
+     discarded — so the summary overstates how many prompts were rewritten.
+  7. A pass rejected by the single-flight guard 303s to the same page as a pass that ran, and its `0` is
+     indistinguishable from "ran, changed nothing". The owner has no way to tell.
+  8. Stale doc claims: `StanceChangeRepository`'s class KDoc and `lastStandingChangeAt`'s KDoc and V25's
+     header all still describe `lastStandingChangeAt` as half the window boundary, but the pass reads it
+     **zero** times (its only caller is `revert`); `StanceEvolutionProperties.cron` still says "read by
+     nobody" though `/__diag` now reads it; `ambient-slice-4a.md`'s head-of-queue residual is framed as a
+     null-window effect when any oldest edge with an unusable answer does it (and at cap=1 the whole graph
+     freezes with `changed=0`).
+  > Test-suite gaps worth knowing, same review: no fake can fail a *framing* read, so neither the
+  > run-level catch nor the `finally` that releases the guard is exercised — a latched-guard mutation
+  > ships green. `PersonaPromptRefresher` has no test at any tier (the only double overrides `refresh`
+  > wholesale). The `nullsFirst` half of `byWindowAge` has no failing test. The `.feature` diff in the fix
+  > commit is comment-only, so acceptance gained no coverage for the root cost defect.
 - Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
 - **Feed-fetch socket timeouts** (Assay follow-up on PR #4): `FeedArticleSource`'s RestClient has
   no connect/read timeout — the tick thread is deadline-protected, but a truly hung socket parks

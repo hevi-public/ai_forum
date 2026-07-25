@@ -8,6 +8,8 @@ import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.PersonaRef
 import com.aiforum.llm.PromptContext
 import com.aiforum.llm.StubLlmClient
+import com.aiforum.persona.StanceJudge
+import com.aiforum.persona.StanceJudgePrompts
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -67,6 +69,40 @@ class StubLlmClientTest {
         val names = reply.split(",").map { it.trim() }
         assertTrue(names.isNotEmpty() && names.all { it in setOf("Sol", "Dana", "Paul") }, "picked unknown names: $reply")
     }
+
+    /**
+     * S4a: a stance judgment must come back in a shape [StanceJudge] actually ACCEPTS. Asserting the
+     * verdict rather than the string is the point — the failure this guards against is the stub falling
+     * through to a canned essay, which the parser rejects on length, so every evolution pass in a stub
+     * demo would silently do nothing and the feature would look broken to whoever was trying it.
+     */
+    @Test
+    fun `stance judgments come back as prose the judge accepts`() {
+        val req = request("Paul: that benchmark measures the wrong thing", judgeRef())
+
+        val verdict = StanceJudge.parse(client.generate(req, CancellationToken()).text, current = "kindred pessimist")
+
+        assertTrue(
+            verdict is StanceJudge.Verdict.Changed,
+            "the stub must answer a judgment with something the parser takes, got: $verdict",
+        )
+    }
+
+    /** The no-numbers guardrail reaches the demo backend too: a stub answer carrying a digit would model
+     *  a DISOBEDIENT model rather than a working one, and every stub pass would be a rejection. */
+    @Test
+    fun `no canned stance carries a digit, whichever one is drawn`() {
+        repeat(24) { i ->
+            val text = client.generate(request("exchange number $i", judgeRef()), CancellationToken()).text
+            assertTrue(text.none { it.isDigit() }, "canned stance carried a digit: $text")
+            assertTrue(
+                StanceJudge.parse(text, current = "unrelated") is StanceJudge.Verdict.Changed,
+                "canned stance was not acceptable prose: $text",
+            )
+        }
+    }
+
+    private fun judgeRef() = PersonaRef(StanceJudgePrompts.JUDGE_ID, StanceJudgePrompts.JUDGE_NAME)
 
     @Test
     fun `failure triggers map onto the taxonomy`() {

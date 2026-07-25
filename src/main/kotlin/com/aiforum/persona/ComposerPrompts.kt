@@ -60,11 +60,12 @@ object ComposerPrompts {
      * as the persona reciting a relationship note instead of behaving. So the composer gets them only
      * as *flavour* for the voice it writes.
      *
-     * Known tension, deferred to a later slice: once stances evolve (see
-     * `plan_docs/ai-driven-forum-direction.md` §9/S4a), flavour absorbed into a stored prompt can go
-     * stale and quietly contradict the live block — a persona composed while it needled someone would
-     * keep a needling voice after the stance softened. The recompose-all control is the manual escape
-     * hatch today; an automatic re-compose on stance drift is the real fix, and it is not this slice's.
+     * That flavour used to be a standing staleness risk: a persona composed while it needled someone
+     * would keep a needling voice after the stance softened, quietly contradicting the live block.
+     * S4a closed it (`plan_docs/ambient-slice-4a.md` D11) — when an edge evolves, its holder is
+     * recomposed from current traits + current stances in the same pass, so a stored prompt is rewritten
+     * whenever the relation that coloured it moves. The recompose-all control remains for the case the
+     * evolution pass has no reason to notice: a reworded composer or a changed forum framing.
      */
     fun instruction(
         spec: PersonaSpec,

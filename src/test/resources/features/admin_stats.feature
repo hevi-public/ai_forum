@@ -30,3 +30,16 @@ Feature: Admin statistics dashboard — /admin
     Then the admin statistic "ambient-runs" is 0
     And the admin statistic "owner-threads" is 1
     And the admin statistic "persona-threads" is 0
+
+  # The relation-stance evolution pass (plan_docs/ambient-slice-4a.md) auto-applies with no approval
+  # queue, so its audit log at /admin/stances is the owner's whole control over it — and the dashboard
+  # has to offer a way in, or the only surface that can undo a change is one nothing links to.
+  #
+  # Read the figure narrowly: it counts audit ROWS, i.e. how often the pass has acted. It is not a
+  # measure of any relationship. Stances are prose by hard guardrail, and the same count grouped by
+  # persona pair would be a relationship score, which is precisely the reward economy this design cut.
+  Scenario: The dashboard counts audited stance changes and links to their log
+    Given a persona "sol" exists
+    When the owner visits the admin page
+    Then the admin statistic "stance-changes" is 0
+    And the admin statistic "stance-changes" links to "/admin/stances"

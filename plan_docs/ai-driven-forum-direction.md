@@ -189,14 +189,14 @@ render it as a body, keep it minimal in prompts (title/link/short excerpt), and 
 ## 9. Slice map
 
 Each slice = its own plan doc (status header first) + worktree + PR, per the delivery loop.
-Built so far: **S1, S2, S5** (2026-07-19) and **S3** (2026-07-21). Remaining: S4a, S4b, S6.
+Built so far: **S1, S2, S5** (2026-07-19), **S3** (2026-07-21) and **S4a** (2026-07-25). Remaining: S4b, S6.
 
 | Slice | Contents | Key decisions it settles |
 |---|---|---|
 | **S1 — ambient skeleton + persona-authored article post** | `AmbientTickService` (≤1 action/tick); `POST /admin/ambient/tick`; `AmbientSchedulingConfig` (`@Profile("!test")` + `aiforum.ambient.enabled`, default off); stub + scriptable `ArticleSource` (5th port); migration `thread.author_id` (**threads have no author today**) + attribution rendering; `ambient_run` record + `/admin` surfacing | Tick anatomy; auto-summon-in-budget; observability shape |
 | **S2 — ambient commenting** | Tick can also comment on live threads, gated by **talkativeness** (new dial) × relevance (cheap backend heuristic first) | The **ambient fuel** question: ambient threads stall at depth 0 today (owner comments are the only refuel) — own small non-renewing budget vs owner-only fuel |
 | **S3 — qualitative relations** ✅ built 2026-07-21 (V24, `plan_docs/ambient-slice-3.md`) | `persona_stance` + prose injection into generation/composer/dispatcher prompts + admin view/edit; **all 42** directed edges hand-seeded for the seven personas; the three hardcoded prompts and the seed roster reframed for the ambient purpose; bulk `POST /personas/recompose` | Settled: injection point (generation-time, present-filtered, before the firewall); dispatcher scoping (edges pointing at someone already talking); seed content; `source` provenance captured now because it cannot be backfilled |
-| **S4a — relation evolution** | Capped-cadence stance updates from interaction history, fully audited | ✅ Audit-only auto-apply (settled 2026-07-21, §11.5). Interaction-record source also settled: the **existing comment tree** suffices (`event_log` stays dead); what S4a adds is an LLM judgment of exchange tone |
+| **S4a — relation evolution** ✅ built 2026-07-25 (V25, `plan_docs/ambient-slice-4a.md`) | `stance_change` audit table + `StanceEvolutionService` (own gated scheduler pair + ungated `POST /admin/stances/evolve`); tone judgment on the shared LLM seam; `/admin/stances` old→new log with cited exchanges and revert; auto-recompose of an evolved holder's stored prompt | Settled: audit-only auto-apply (no approval queue); the interaction read covers **top-level** comments via `thread.author_id`, not just reply→parent; revert restores text **and** provenance (undoes, does not freeze); the no-numbers guardrail is enforced by refusing any digit-bearing judgment; S4a runs stay out of `ambient_run` |
 | **S4b — interest/trait drift** | Later; separate from S4a | Convergence guardrails; diversity counterweight |
 | **S5 — real article source** | Allowlist feeds (maybe Anthropic-side WebSearch), URL dedupe registry, explicit security posture | The untrusted-web-content decision, in its own reviewable PR |
 | **S6 — feed-style front page** | Activity-feed presentation of ambient output | What "Twitter-emulator presentation" means (open question, not a commitment) |
@@ -302,8 +302,12 @@ Rewordings are recorded here now but applied only in the slice PR that actually 
    on a slow, capped cadence and apply immediately; the owner sees old→new text with the interactions
    cited and can revert. This is a **deliberate override** of the §6.5 "owner-approved" precedent — the
    forum is meant to evolve without being tended, and an approval queue makes drama wait on the owner.
-   Still open for S4a: cadence caps; how convergence is measured; manual newcomer injection as the
-   diversity lever.
+   Cadence caps settled 2026-07-25 with S4a: **no per-run cap by default** (`max-edges-per-run: 0`,
+   a config knob rather than a code change), `min-exchanges: 1`, and the scheduler **off by default** —
+   which is what keeps unattended spend opt-in given S4a also auto-recomposes each affected persona.
+   Still open, and now **S4b's** to answer: how convergence is measured, and manual newcomer injection
+   as the diversity lever. S4a's counterweights are the owner's revert and the permanent `owner`
+   provenance freeze, not a convergence metric.
    Also corrected here (verified against the code during S3): §6's claim that this "forces the first
    real use of interaction records" is overstated. `comment` already carries `parent_id`, `author_id`,
    `created_at` and `state`, so who-replied-to-whom-and-when is derivable from the existing tree, and
@@ -339,3 +343,8 @@ Rewordings are recorded here now but applied only in the slice PR that actually 
 | 2026-07-21 | Stance edges **cascade** on persona delete, unlike comment bylines | A byline is history and must outlive its subject; a stance is live state and is meaningless once an endpoint is gone (a dangling stance would name a persona that no longer posts) |
 | 2026-07-21 | Relation evolution is **audit-only auto-apply**, overriding the §6.5 owner-approved precedent | The forum is meant to evolve without being tended; an approval queue makes the drama wait on the owner. Revert-after-the-fact preserves control without gating |
 | 2026-07-21 | Live DBs pick up a framing change via an explicit bulk **recompose** action, composed fresh | Seeding never clobbers stored prompts, so old wording would persist forever; a silent startup rewrite would mutate owner data at boot, and replaying the old prompt as `prior` invites preserving the very framing being replaced |
+| 2026-07-25 | Stance evolution reads **top-level comments too** (addressee = `thread.author_id`), not only reply→parent | S2's ambient comment lands top-level on someone else's article thread, so a self-join alone would miss the ambient loop's most common interaction — correct in tests, inert in production |
+| 2026-07-25 | S4a runs are **not** recorded in `ambient_run`; the evolution pass gets its own gated scheduler pair | `AmbientRunRepository.count()` drives the tick's post/comment parity and round-robin author index; and an owner wanting articles but not relation drift must be able to switch them independently |
+| 2026-07-25 | A judged stance carrying **any digit** is refused outright | The one place a number can enter the relation model is the judge's answer; refusing it there turns the no-numbers guardrail from a convention someone must remember into a Tier-0 test |
+| 2026-07-25 | **Revert restores text AND provenance**, and the evolution window is the newest **non-reverted** change | A revert must undo the change's claim on the window too, or the rejected evidence is walled off forever and a forum whose only change was reverted goes quiet for good. Freezing an edge is the persona form's `owner` stamp, not revert's job |
+| 2026-07-25 | **Auto-recompose on evolution**, with **no per-run cap** by default | Owner calls: a stored prompt that absorbed stance flavour goes stale the moment the stance moves, so the holder is refreshed in the same pass; the cost that combination implies is bounded by the scheduler defaulting off and the cap being a config knob |

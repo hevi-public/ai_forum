@@ -1,0 +1,34 @@
+-- The per-edge "last judged" watermark for the stance evolution pass (plan_docs/ambient-slice-4a.md D3,
+-- post-merge review finding). Nullable with NO default, on purpose: NULL means this edge has never been
+-- judged, which is exactly the instruction the pass wants — read all of this pair's history, once.
+--
+-- WHY THE AUDIT TABLE COULD NOT CARRY THIS. V25 `stance_change` gets a row only when a stance actually
+-- MOVED, and it stays that way deliberately: /admin/stances exists to show the owner what changed and
+-- offer a revert, and an audit row saying "nothing happened" is noise on the one page whose whole job is
+-- signal. But the evolution window was read from that same table, and the judge's SYSTEM prompt tells the
+-- model that if the exchanges do not move the attitude it must repeat the standing view unchanged. So
+-- "unchanged" is the DESIGNED STEADY STATE of a settled pair — and a settled pair writes no audit row, so
+-- its window never advances, the same exchanges re-qualify on the next run, and that edge buys another LLM
+-- judgment every single night. With a stance edge per ordered persona pair and D4's per-run cap defaulting
+-- to unlimited ("let it rip"), that is unbounded unattended spend, worst precisely for the relationships
+-- that have settled down and have nothing left to say.
+--
+-- WHAT STAMPS IT: any USABLE judgment — Changed AND Unchanged alike. "I read these exchanges and they did
+-- not move me" is a complete answer about that evidence; paying for it again tomorrow is the defect above.
+--
+-- WHAT DELIBERATELY DOES NOT: a REJECTED answer (D6 — the model returned a digit, so we never learned what
+-- it actually thought) and a SEAM FAILURE (the provider rate-limiting at 04:00, which D12 names as the
+-- expected unattended failure). Both leave the evidence genuinely unjudged, and both deserve another look
+-- on the next run. That retry semantic is the whole reason the window is per-edge rather than global, and
+-- it is why the watermark is written explicitly at the judgment site instead of being inferred from
+-- "an LLM call happened for this pair".
+--
+-- WHAT MUST NEVER STAMP IT: the owner's own path. `persona_stance` upsert does not touch this column
+-- (RelationStanceRepository.upsert), so editing a stance on the admin form cannot silently declare the
+-- edge judged and mute it until new exchanges arrive.
+--
+-- AND THE HARD GUARDRAIL, restated because a new column on THIS table is exactly where it would break
+-- first (V24: "no number anywhere in this table, and none may ever be added"): judged_at is a TIMESTAMP,
+-- not a count. No times_judged, no runs_since_change, no verdict score — a moment says when we last
+-- looked, and there is nothing in it to rank, compare or optimise.
+ALTER TABLE persona_stance ADD COLUMN judged_at TEXT;

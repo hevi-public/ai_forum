@@ -35,6 +35,26 @@ data class StarredComment(
     val createdAt: String,
 )
 
+/**
+ * One directed author→author interaction read out of the comment tree (plan_docs/ambient-slice-4a.md D2):
+ * [fromAuthor] wrote [body] at [toAuthor], whose own words at that spot are [towardBody] — the parent
+ * reply's body, or the opening post's when the comment is top-level.
+ *
+ * [commentId]/[threadId] are carried so the stance audit can cite the exchange as a `/threads/{t}#reply-{c}`
+ * permalink, and [threadTitle] so it can name where it happened without a second read. [createdAt] is the
+ * stored UTC ISO instant, which is also what bounds the caller's window.
+ */
+data class PersonaExchange(
+    val commentId: String,
+    val threadId: String,
+    val threadTitle: String,
+    val fromAuthor: String,
+    val toAuthor: String,
+    val body: String,
+    val towardBody: String,
+    val createdAt: String,
+)
+
 /** One stored content revision of a comment (V14): its 0-based position, body, leak verdict, and — when
  *  this revision is an owner edit rather than a generated take — the edit timestamp (null otherwise). */
 data class Revision(
@@ -74,6 +94,22 @@ class CommentRepository(private val jdbc: JdbcTemplate, private val clock: Clock
             body = rs.getString("body"),
             reasoningLeak = rs.getString("reasoning_leak")?.let { ReasoningLeak.valueOf(it) },
             editedAt = rs.getString("edited_at")?.let { Instant.parse(it) },
+        )
+    }
+
+    // Its own mapper rather than a reuse of [mapper]: exchangesSince joins `comment` to ITSELF plus
+    // `thread`, so the 15 bare column names the domain mapper reads would be ambiguous — and it carries no
+    // created_at, which is the column the whole windowed read is bounded on.
+    private val exchangeMapper = RowMapper { rs, _ ->
+        PersonaExchange(
+            commentId = rs.getString("comment_id"),
+            threadId = rs.getString("thread_id"),
+            threadTitle = rs.getString("thread_title"),
+            fromAuthor = rs.getString("from_author"),
+            toAuthor = rs.getString("to_author"),
+            body = rs.getString("body"),
+            towardBody = rs.getString("toward_body"),
+            createdAt = rs.getString("created_at"),
         )
     }
 
@@ -235,6 +271,64 @@ class CommentRepository(private val jdbc: JdbcTemplate, private val clock: Clock
             },
             limit,
         )
+
+    /**
+     * Every persona→persona exchange posted after [since] — an ISO-8601 UTC instant, or null for all time
+     * — oldest first. This is the evidence the relation-stance evolution pass judges
+     * (plan_docs/ambient-slice-4a.md D2); null is what its first run sees, because an empty audit table
+     * means no window has been closed yet.
+     *
+     * The addressee is resolved two ways in one read, and **the top-level branch is the load-bearing one**:
+     * S2's ambient comment lands top-level on someone else's article thread and has no parent row at all,
+     * so the persona it is aimed at is the THREAD's author (V20 `thread.author_id`). A plain reply→parent
+     * self-join would miss the single most common interaction the ambient loop produces, and the evolution
+     * pass would look correct in tests while almost never firing in the live forum. `thread.author_id` is
+     * NULL for an owner-opened thread, and the `IS NOT NULL` clause drops those for free — relations are
+     * persona↔persona only, the owner is a peer rather than a node in the graph.
+     *
+     * POSTED is required on BOTH sides: a drafting, failed or cancelled reply is not something one member
+     * did to another, and neither is a reply hanging under a parent that never settled. Self-addressed rows
+     * are excluded because `persona_stance` has no self-edge to move (its CHECK forbids one).
+     *
+     * **Not filtered here, on purpose: whether these author strings are personas at all.** The caller must
+     * intersect them with the live roster (`personas.findAll()`, the same call `ReplyTreeAssembler` makes)
+     * before acting on a row. The alternative is a string heuristic, and a heuristic would quietly admit
+     * `owner`, `system` and the `gh:`-prefixed GitHub authors as members of the relation graph — an author
+     * column that is a plain attribution string (V1/V20) cannot be trusted to name a roster member.
+     *
+     * created_at is a UTC ISO instant ('…Z'), so the lexicographic `>` is a correct time comparison — the
+     * `RoutingEventRepository.counts(since)` window pattern. Strict `>` rather than `>=`, so an exchange the
+     * previous run already judged is not judged twice. The rowid tie-break keeps the order deterministic
+     * when a batch ingest gives several rows the same timestamp (`insertAt`).
+     */
+    fun exchangesSince(since: String?): List<PersonaExchange> {
+        // The addressee expression appears three times (projection, NULL guard, self-exclusion) because
+        // SQLite cannot reference a SELECT alias from its own WHERE clause.
+        val sql = buildString {
+            append(
+                """SELECT c.id        AS comment_id,
+                          c.thread_id AS thread_id,
+                          t.title     AS thread_title,
+                          c.author_id AS from_author,
+                          CASE WHEN c.parent_id IS NULL THEN t.author_id ELSE p.author_id END AS to_author,
+                          c.body      AS body,
+                          CASE WHEN c.parent_id IS NULL THEN t.body      ELSE p.body      END AS toward_body,
+                          c.created_at AS created_at
+                   FROM comment c
+                   JOIN thread t ON t.id = c.thread_id
+                   LEFT JOIN comment p ON p.id = c.parent_id
+                   WHERE c.state = 'POSTED'
+                     AND (c.parent_id IS NULL OR p.state = 'POSTED')
+                     AND CASE WHEN c.parent_id IS NULL THEN t.author_id ELSE p.author_id END IS NOT NULL
+                     AND c.author_id <> CASE WHEN c.parent_id IS NULL THEN t.author_id ELSE p.author_id END""",
+            )
+            // A null window is expressed by dropping the clause, not by binding NULL: every comparison
+            // against SQL NULL is NULL, so a bound null would match no row instead of every row.
+            if (since != null) append("\n     AND c.created_at > ?")
+            append("\n   ORDER BY c.created_at, c.rowid")
+        }
+        return if (since == null) jdbc.query(sql, exchangeMapper) else jdbc.query(sql, exchangeMapper, since)
+    }
 
     /** Direct children of a node (its replies' siblings) — null parent = the thread's top-level nodes. */
     fun childrenOf(parentId: String?): List<Comment> =

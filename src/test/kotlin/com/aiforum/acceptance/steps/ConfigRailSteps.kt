@@ -70,4 +70,22 @@ class ConfigRailSteps(
             (world.lastBody ?: "").contains("\"ambientFeedCount\":0"),
             "ambient feed count not 0 under test: ${world.lastBody}",
         )
+
+    // S4a (plan_docs/ambient-slice-4a.md D12): the same shape as the ambient rail above, on the second
+    // scheduled loop that costs LLM calls. The cap assertion doubles as a wiring rail — the value only
+    // reaches /__diag if StanceEvolutionProperties was bound from a NON-profiled @Configuration, so a
+    // future @Profile on it fails here rather than quietly leaving the rail unreadable.
+    @Then("stance evolution is disabled")
+    fun stanceEvolutionDisabled() =
+        assertTrue(
+            (world.lastBody ?: "").contains("\"stanceEvolutionEnabled\":false"),
+            "stance evolution not disabled: ${world.lastBody}",
+        )
+
+    @Then("the stance evolution edge cap is unlimited by default")
+    fun stanceEvolutionCapUnlimited() =
+        assertTrue(
+            (world.lastBody ?: "").contains("\"stanceEvolutionMaxEdgesPerRun\":0"),
+            "stance evolution edge cap not at its unlimited default: ${world.lastBody}",
+        )
 }

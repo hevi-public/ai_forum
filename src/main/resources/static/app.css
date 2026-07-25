@@ -1539,6 +1539,20 @@ mark.nav-hit {
   color: var(--sage-ink); background: var(--sage-2); border-radius: 4px; padding: 1px 6px;
 }
 
+/* Stance-change audit rows (/admin/stances, plan_docs/ambient-slice-4a.md). Extends .admin-list rather
+   than opening a namespace of its own — .admin-ambient__* shipped with no CSS at all and rendered
+   unstyled, so anything new here has to hang off classes that already have rules. A row is not a line:
+   it is two paragraphs of prose plus the evidence they were judged from, and it reads as mush without
+   the stacking and the labels. */
+.admin-list__trigger { margin: 0 0 16px; }
+.admin-list__item--stance { display: flex; flex-direction: column; gap: 6px; padding: 12px 4px; }
+.admin-list__stance-label {
+  font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--faint); margin-right: 6px;
+}
+.admin-list__cited { display: flex; flex-direction: column; gap: 3px; }
+.admin-list__item--stance p { margin: 0; }
+
 /* Attachments drill-down: a thumbnail grid with metadata beside each image. */
 .admin-list__items--media { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .admin-attach { display: flex; gap: 12px; border: 1px solid var(--line); border-radius: var(--r); padding: 10px; }
