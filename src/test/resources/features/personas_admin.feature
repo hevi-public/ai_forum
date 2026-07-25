@@ -114,6 +114,19 @@ Feature: Personas & admin
     When the owner saves "ada" with a stance toward "bee" of ""
     Then the profile for "ada" shows no stance toward "bee"
 
+  # A stale edit form is all it takes: open it, delete that member in another tab, submit. The target is
+  # gone, so the V24 foreign key rejects the write — and because stance edits are applied BEFORE the
+  # prompt logic, an unguarded rejection would abort the entire save and quietly cost the owner their
+  # descriptor and dial changes as well. The vanished relation is skipped; the rest of the save lands.
+  Scenario: A stance toward a member who no longer exists is skipped, not a failed save
+    Given a persona "ada" exists with every dial at 5
+    And a persona "bee" exists
+    And persona "ada" has a stance toward "bee" of "defers to him on databases"
+    When the owner deletes the "bee" persona
+    And the owner saves "ada" with a stance toward "bee" of "still defers to him on databases"
+    Then the response status is 302
+    And the profile for "ada" shows no stance toward "bee"
+
   Scenario: The edit form offers a stance field toward each other member
     Given a persona "ada" exists
     And a persona "bee" exists

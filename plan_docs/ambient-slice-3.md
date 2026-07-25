@@ -54,6 +54,9 @@ CREATE TABLE persona_stance (
     -- to exist before the first row does. S3 WRITES it (seeding -> 'seeded', admin form -> 'owner')
     -- but READS it nowhere — deliberately inert this slice.
     source       TEXT NOT NULL DEFAULT 'seeded' CHECK (source IN ('seeded', 'owner', 'evolved')),
+    -- Injected Clock, ISO-8601 (the house repository pattern). Restamped on every upsert, so S4a's
+    -- cadence cap has a "when did this edge last move" to reason about without a second table.
+    updated_at   TEXT NOT NULL,
     PRIMARY KEY (from_persona, to_persona),
     CHECK (from_persona <> to_persona)
 );
@@ -331,8 +334,8 @@ design difficulty sit. This narrows S4a's scope meaningfully before it starts.
 - **`V24__persona_stance.sql`** (next free after V23 `article_seen` — re-scan before merge, per the
   sqlite-spring-jdbc skill's standing rule).
 - New `RelationStanceRepository` (Tier-1 test) — upsert/delete-on-blank/find-by-from/find-toward-set,
-  the `GitHubPrThreadRepository`-shape precedent (jdbc + no `Clock` needed here, stances carry no
-  timestamp this slice).
+  the `GitHubPrThreadRepository`-shape precedent, plus an injected `Clock` for `updated_at` (a fixed
+  test clock is what makes the restamp assertable).
 - New `StanceProse` (Tier-0 test) — pure prose assembly, present-filtered, per D2.
 - Tier-0 updates: `PersonaTraitsTest` (D7 roster/descriptor changes), `PersonaRouterTraitsTest` (D3
   `relationsBlock`/`rosterLine` interplay).

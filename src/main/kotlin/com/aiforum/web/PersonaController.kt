@@ -255,12 +255,20 @@ class PersonaController(
      * own words, which is the provenance a later auto-evolving pass must not overwrite.
      */
     private fun applyStanceEdits(personaId: String, params: Map<String, String>) {
-        params.forEach { (key, value) ->
-            if (!key.startsWith(STANCE_PARAM_PREFIX)) return@forEach
+        val submitted = params.filterKeys { it.startsWith(STANCE_PARAM_PREFIX) }
+        if (submitted.isEmpty()) return
+        // One roster read for the whole form rather than a lookup per field.
+        val known = personas.findAll().mapTo(mutableSetOf()) { it.id }
+        submitted.forEach { (key, value) ->
             val target = key.removePrefix(STANCE_PARAM_PREFIX)
-            // A self-stance is rejected by the V24 CHECK; drop it here so a hand-crafted POST is a no-op
-            // rather than a 500.
-            if (target.isBlank() || target == personaId) return@forEach
+            // Three targets that must degrade to a no-op instead of a 500, because each is reachable
+            // without any hand-crafting: blank, self (rejected by the V24 CHECK), and a persona that no
+            // longer exists (rejected by the V24 foreign key). The last one just needs a stale form —
+            // open it, delete that member in another tab, submit. It matters more than it looks: stance
+            // writes run BEFORE the prompt logic, so an exception here aborts the whole save and the
+            // owner silently loses their descriptor and dial edits too. Same guard the seeder applies
+            // to a configured edge naming an unknown persona.
+            if (target.isBlank() || target == personaId || target !in known) return@forEach
             if (value.isBlank()) stances.delete(personaId, target)
             else stances.upsert(personaId, target, value.trim(), RelationStanceRepository.SOURCE_OWNER)
         }
