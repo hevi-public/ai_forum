@@ -36,6 +36,10 @@ class ScenarioWorld {
     /** How many personas the most recent seeding run inserted — for the idempotency assertion. */
     var lastSeedCount: Int? = null
 
+    /** How many persona_stance edges the most recent seeding run inserted — kept separate from
+     *  [lastSeedCount] so the persona-count idempotency assertion stays about personas only. */
+    var lastStanceSeedCount: Int? = null
+
     fun rememberReply(alias: String, id: String) {
         replyIds[alias] = id
         lastReplyId = id

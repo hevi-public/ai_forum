@@ -16,3 +16,19 @@ Feature: Owner controls — the +1 firewall
     When the owner summons "vex"
     Then the model's context included "sol"'s words "Indexes help here"
     And the model's context contained no vote signal
+
+  # The firewall is about intent, not paranoia — it is a rule about WHICH signals shape a persona's voice,
+  # not a blanket ban on anything owner-adjacent. Two signals sit on opposite sides of the same boundary:
+  # the owner's +1 is structurally EXCLUDED (it would teach the room what the owner rewards — the whole
+  # anti-sycophancy point of §7/§13), while a hand-authored relation stance is structurally INCLUDED (it is
+  # character the owner wrote on purpose, and colouring one persona's tone toward another is exactly what
+  # it is for). Pinning both polarities in one context means a later refactor of prompt assembly cannot
+  # quietly flip either half — dropping the stance or leaking the vote turns this scenario red.
+  Scenario: A relation stance is injected into the very context the +1 is kept out of
+    Given a posted reply from "sol" saying "Indexes help here"
+    And persona "vex" has a stance toward "sol" of "needles him about hype"
+    And the LLM will respond with "Hype aside, an index is cheap"
+    When the owner gives a +1 to "sol"'s reply
+    And the owner summons "vex"
+    Then the model's system prompt carried the stance "needles him about hype"
+    And the model's context contained no vote signal

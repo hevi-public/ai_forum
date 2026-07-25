@@ -116,8 +116,9 @@ class PersonaRepository(private val jdbc: JdbcTemplate) {
      * default; the admin create/edit path replaces this with an LLM-composed prompt.
      */
     private fun systemPromptFor(name: String, descriptor: String): String = buildString {
-        append("You are $name, a participant in a collaborative brainstorming forum where the owner ")
-        append("poses questions and the room replies in a threaded discussion.")
+        append("You are $name, a member of a small ambient discussion forum where the members share ")
+        append("interesting articles from around the web and talk them over in threaded discussions, ")
+        append("alongside the forum's owner, who takes part as a peer.")
         if (descriptor.isNotBlank()) append(" Your character: $descriptor")
         append(" Reply directly to the discussion as $name, engaging with its substance first and ")
         append("letting your character lightly colour your voice rather than take over. Do not narrate, ")

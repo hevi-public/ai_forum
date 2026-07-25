@@ -6,9 +6,13 @@ import com.aiforum.acceptance.support.HttpClient
 import com.aiforum.acceptance.support.ScenarioWorld
 import com.aiforum.acceptance.support.TestData
 import com.aiforum.llm.LlmRequest
+import com.aiforum.persona.Dials
+import com.aiforum.repo.PersonaRepository
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 
 class PersonaSteps(
@@ -16,6 +20,9 @@ class PersonaSteps(
     private val http: HttpClient,
     private val data: TestData,
     private val llm: ScriptableLlmClient,
+    // Read-only, and only ever for ARRANGE: the stance-save step has to replay a persona's stored
+    // descriptor/abilities/dials/prompt verbatim so that the one field it changes really is the stance.
+    private val personas: PersonaRepository,
 ) {
     // The composition call rides the single LlmClient seam tagged with this synthetic persona, so the
     // spy can tell a prompt-authoring call apart from a normal generation call (see PromptComposer).
@@ -290,4 +297,162 @@ class PersonaSteps(
         world.lastStatus = resp.statusCode.value()
         world.lastBody = resp.body
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Qualitative relations (plan_docs/ambient-slice-3.md): directed, FREE-TEXT persona→persona
+    // stances. These steps are the SHARED vocabulary — persona_seeding, persona_routing and
+    // owner_controls_firewall use them and must not redefine them (Cucumber glue is global, so a
+    // second definition of any of these step texts fails the whole suite).
+    // ---------------------------------------------------------------------------------------------
+
+    /** Seed one directed edge straight into persona_stance — [from] and [to] are persona IDs, i.e. the
+     *  strings the "a persona {string} exists" step inserts as both id and name. */
+    @Given("persona {string} has a stance toward {string} of {string}")
+    fun personaHasStanceToward(from: String, to: String, stance: String) = data.insertStance(from, to, stance)
+
+    @Then("the profile for {string} shows a stance toward {string} of {string}")
+    fun profileShowsStance(from: String, to: String, stance: String) {
+        val body = profileBody(from)
+        val text = stanceEntryText(body, to)
+        assertNotNull(text, "expected a stance entry (data-stance-to=\"$to\") on \"$from\"'s profile:\n$body")
+        assertTrue(
+            text!!.contains(stance, ignoreCase = true),
+            "expected \"$from\"'s stance toward \"$to\" to read \"$stance\", got \"$text\"",
+        )
+    }
+
+    @Then("the profile for {string} shows no stance toward {string}")
+    fun profileShowsNoStance(from: String, to: String) {
+        val body = profileBody(from)
+        assertNull(
+            stanceEntryText(body, to),
+            "expected NO stance toward \"$to\" on \"$from\"'s profile, but found one in:\n$body",
+        )
+    }
+
+    /**
+     * A stance-only save: every other field is replayed exactly as stored, so the single thing this
+     * submit changes is the one `stance_<toId>` param. That is what makes the "editing only a stance
+     * costs nothing" scenario meaningful — with any other field drifting, the server's `inputsChanged`
+     * backstop would recompose and the free-save claim would be untestable. Dials are submitted for
+     * every [Dials.KEYS] entry, exactly as the rendered edit form does, so the persona under test must
+     * be seeded with a complete dial set (see "a persona … exists with every dial at …").
+     */
+    @When("the owner saves {string} with a stance toward {string} of {string}")
+    fun saveStanceOnly(name: String, to: String, stance: String) {
+        val existing = personas.find(name) ?: error("no persona \"$name\" — seed it before saving a stance")
+        val form = mutableMapOf<String, Any?>(
+            "descriptor" to existing.descriptor,
+            "model" to existing.model,
+            "abilities" to existing.abilities.joinToString(", "),
+            "systemPrompt" to existing.systemPrompt,
+            "stance_$to" to stance,
+        )
+        Dials.KEYS.forEach { key -> form["dial_$key"] = existing.dials[key] ?: Dials.DEFAULT }
+        val resp = http.postForm("/personas/${existing.slug}/edit", form)
+        world.lastStatus = resp.statusCode.value()
+        world.lastBody = resp.body
+    }
+
+    /** Seeds the full fixed dial schema so an "unchanged" resubmit really is unchanged (the sibling
+     *  Given that seeds only two dials leaves the other three absent, which the edit form would then
+     *  fill with defaults — a difference the server reads as a changed input). */
+    @Given("a persona {string} exists with every dial at {int}")
+    fun personaWithEveryDialAt(name: String, value: Int) {
+        data.insertPersona(id = name, name = name, dials = Dials.KEYS.associateWith { value })
+    }
+
+    @Then("the edit form offers a stance field toward {string}")
+    fun editFormOffersStanceField(to: String) {
+        val body = world.lastBody ?: ""
+        assertTrue(
+            Html.contains(body, "name=\"stance_$to\""),
+            "expected a name=\"stance_$to\" field on the edit form in:\n$body",
+        )
+        assertTrue(
+            Html.hasAttr(body, "data-stance-field", to),
+            "expected a data-stance-field=\"$to\" hook on the edit form in:\n$body",
+        )
+    }
+
+    @Then("the stance field toward {string} is prefilled with {string}")
+    fun stanceFieldPrefilled(to: String, stance: String) {
+        val body = world.lastBody ?: ""
+        val field = Regex(
+            "<textarea\\b[^>]*data-stance-field=\"${Regex.escape(to)}\"[^>]*>(.*?)</textarea>",
+            RegexOption.DOT_MATCHES_ALL,
+        ).find(body)?.groupValues?.get(1)?.let { unescape(it) }
+        assertNotNull(field, "expected a stance textarea (data-stance-field=\"$to\") in:\n$body")
+        assertTrue(
+            field!!.contains(stance, ignoreCase = true),
+            "expected the stance field toward \"$to\" to be prefilled with \"$stance\", got \"${field.trim()}\"",
+        )
+    }
+
+    @Then("the composer was handed the stance {string}")
+    fun composerHandedStance(stance: String) {
+        val calls = composerCalls()
+        assertTrue(calls.isNotEmpty(), "expected a composition call to the LLM, got: ${llm.received.map { it.persona.name }}")
+        assertTrue(
+            calls.any { it.allText().contains(stance, ignoreCase = true) },
+            "expected the composer to be handed the stance \"$stance\", got:\n${calls.joinToString("\n") { it.allText() }}",
+        )
+    }
+
+    @When("the owner recomposes every persona's prompt")
+    fun recomposeEveryPrompt() {
+        val resp = http.post("/personas/recompose")
+        world.lastStatus = resp.statusCode.value()
+        world.lastBody = resp.body
+    }
+
+    @Then("the members page offers a recompose-all control")
+    fun membersPageOffersRecomposeAll() {
+        val body = world.lastBody ?: ""
+        val tag = Regex("<[^>]*data-recompose-all[^>]*>").find(body)?.value
+        assertNotNull(tag, "expected a data-recompose-all form on the members page in:\n$body")
+        assertTrue(
+            tag!!.contains("action=\"/personas/recompose\""),
+            "expected the recompose-all form to post to /personas/recompose, got: $tag",
+        )
+    }
+
+    @Then("the recompose-all control warns what it costs")
+    fun recomposeAllWarnsCost() {
+        val body = world.lastBody ?: ""
+        assertTrue(
+            Html.contains(body, "per member"),
+            "expected copy warning it is one LLM call PER MEMBER in:\n$body",
+        )
+        assertTrue(
+            Html.contains(body, "overwrit"),
+            "expected copy warning that hand-edited prompts are OVERWRITTEN in:\n$body",
+        )
+    }
+
+    /** The persona profile page, resolved the way the app resolves it — by slug, not by id. */
+    private fun profileBody(personaId: String): String {
+        val slug = personas.find(personaId)?.slug ?: PersonaRepository.slugFor(personaId)
+        val resp = http.get("/personas/$slug")
+        world.lastStatus = resp.statusCode.value()
+        world.lastBody = resp.body
+        return resp.body ?: ""
+    }
+
+    /** The visible text of the Relations entry pointing at [to] (`<li data-stance-to="…">`), or null
+     *  when the profile carries no stance toward that persona at all. Entities are decoded so a stance
+     *  the owner wrote with an apostrophe or an ampersand still compares as the prose they typed. */
+    private fun stanceEntryText(html: String, to: String): String? {
+        val li = Regex(
+            "<li\\b[^>]*data-stance-to=\"${Regex.escape(to)}\"[^>]*>(.*?)</li>",
+            RegexOption.DOT_MATCHES_ALL,
+        ).find(html) ?: return null
+        return unescape(li.groupValues[1].replace(Regex("<[^>]*>"), " ")).replace(Regex("\\s+"), " ").trim()
+    }
+
+    private fun unescape(s: String): String = s
+        .replace("&#39;", "'").replace("&#x27;", "'").replace("&apos;", "'")
+        .replace("&quot;", "\"").replace("&#34;", "\"")
+        .replace("&lt;", "<").replace("&gt;", ">")
+        .replace("&amp;", "&")
 }

@@ -9,6 +9,8 @@ import com.aiforum.llm.LlmClient
 import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.PersonaRef
 import com.aiforum.repo.PersonaRepository.Persona
+import com.aiforum.repo.RelationStanceRepository
+import com.aiforum.repo.Stance
 import org.springframework.stereotype.Component
 import java.time.Duration
 
@@ -23,6 +25,11 @@ import java.time.Duration
  * in prose ("I'd let Sol and Paul take this") rather than a strict format. Anything unparseable, an
  * empty pick, or a generation failure falls back to the whole room — "Anyone" must never silently pick
  * no one.
+ *
+ * Beyond skills and temperament, the brief also carries the qualitative relations pointing at whoever is
+ * already talking (see [relationsBlock]) — who bristles at whom is routing signal in a room that argues.
+ * Those stances are free text by construction and are never scored or ranked here; they colour the
+ * model's judgement, they don't weight it.
  *
  * ## Known failure mode: name-matching honours the model only when it *names* members
  *
@@ -65,6 +72,12 @@ class PersonaRouter(
     // the no-op so the Tier-2 `PersonaRouter(llm)` constructions stay metrics-free; Spring injects the
     // real persisting adapter (RoutingEventRepository). A pure addition — it never changes the pick.
     private val metrics: RoutingMetrics = NoOpRoutingMetrics,
+    // The qualitative relation graph (plan_docs/ambient-slice-3.md), read to tell the model how the
+    // roster feels about whoever is already talking. Nullable-defaulted rather than a no-op object like
+    // [metrics] above: a repository has no meaningful null implementation (an empty-graph stub would be a
+    // second thing to keep in sync with the real schema), and every Tier-2 construction here is
+    // positional with at most two arguments, so a trailing nullable keeps them compiling untouched.
+    private val stances: RelationStanceRepository? = null,
 ) {
 
     /**
@@ -82,9 +95,19 @@ class PersonaRouter(
             metrics.record(RoutingOutcome.SINGLE_PERSONA, roster.size, roster.size, routingScope, null)
             return roster
         }
+        // Who is already in the discussion, straight from the context the caller already scoped for us —
+        // no extra query, and it follows the "looking at" scope for free. Read the graph ONCE per pick:
+        // one query feeds the whole prompt. A null repository yields an empty list, [relationsBlock]
+        // returns null, and the prompt is byte-for-byte the pre-relations one.
+        val presentAuthorIds = context.map { it.authorId }.toSet()
+        val relations = stances?.findAll().orEmpty()
         val reply = runCatching {
             llm.generate(
-                LlmRequest(ContextAssembler.assemble(systemPrompt(roster), context), ROUTER, TIMEOUT),
+                LlmRequest(
+                    ContextAssembler.assemble(systemPrompt(roster, relations, presentAuthorIds), context),
+                    ROUTER,
+                    TIMEOUT,
+                ),
                 CancellationToken(),
             ).text
         }.getOrNull()
@@ -192,15 +215,77 @@ class PersonaRouter(
             )
         }
 
-        private fun systemPrompt(roster: List<Persona>): String = buildString {
-            append("You are the forum's dispatcher. You do NOT answer the question yourself. Given the ")
-            append("discussion below, decide which participant(s) from the roster are best suited to reply, ")
-            append("based on the topic — match their skills to it, and when more than one should weigh in, ")
-            append("prefer a mix of temperaments (a contrarian and an agreeable voice) over three alike. ")
+        /** The literal header the relations section opens with; the acceptance suite pins this string. */
+        private const val RELATIONS_HEADER = "Relations between participants:"
+
+        /**
+         * The directed stances worth showing the dispatcher, as `- <From> -> <To>: <text>` lines under
+         * [RELATIONS_HEADER], or null when nothing qualifies (so the caller appends nothing rather than a
+         * header dangling over zero bullets). Pure — Tier-0 testable.
+         *
+         * **Why the scoping is this narrow.** The dispatcher's one job is deciding who should weigh in
+         * NEXT, so the only relation that can inform it is one pointing AT someone already in the
+         * discussion ("Paul needles Sol" matters exactly when Sol has spoken). An edge aimed at a silent
+         * persona says nothing about the reply we're about to route. Unfiltered, the seeded graph is 42
+         * edges — a wall of prose that would swamp the real routing signal (skills and topic) on every
+         * single call, and grows quadratically with the roster. Hence: keep an edge only when BOTH
+         * endpoints are on the roster (a stance naming someone who isn't a participant is unactionable)
+         * AND its target is in [presentAuthorIds]. Blank text is dropped as an empty edge.
+         *
+         * Ordering is the repository's (from, to) order, preserved rather than re-derived: the prompt text
+         * must be byte-stable across runs, and re-sorting here would be a second ordering rule to keep in
+         * step with [RelationStanceRepository.findAll].
+         *
+         * Note the display-name convention: stance rows and [presentAuthorIds] are persona **ids** (that's
+         * what the FKs and `Comment.authorId` carry), while the roster the model reads is written in
+         * **names** — so both endpoints are resolved through the roster before rendering, and the lines
+         * line up with the `Roster:` block above them.
+         */
+        fun relationsBlock(
+            roster: List<Persona>,
+            stances: List<Stance>,
+            presentAuthorIds: Set<String>,
+        ): String? {
+            val names = roster.associate { it.id to it.name }
+            val lines = stances.mapNotNull { s ->
+                if (s.toPersona !in presentAuthorIds || s.stance.isBlank()) return@mapNotNull null
+                val from = names[s.fromPersona] ?: return@mapNotNull null
+                val to = names[s.toPersona] ?: return@mapNotNull null
+                "- $from -> $to: ${s.stance}"
+            }
+            if (lines.isEmpty()) return null
+            return buildString {
+                append(RELATIONS_HEADER).append("\n")
+                lines.forEach { append(it).append("\n") }
+            }
+        }
+
+        /**
+         * The dispatcher's brief. Framed for the ambient forum rather than a Q&A helpdesk: nobody "asks a
+         * question" here — members post articles they found interesting and argue about them with each
+         * other and with the owner — so asking the model who should *answer the question* mis-describes
+         * the job and biases it toward whoever looks most like an expert witness.
+         *
+         * The cap sentence and the output contract are deliberately verbatim: [parseChosen] and
+         * [MAX_PICKS] are built around them, and the acceptance suite pins the roster lines.
+         */
+        private fun systemPrompt(
+            roster: List<Persona>,
+            stances: List<Stance>,
+            presentAuthorIds: Set<String>,
+        ): String = buildString {
+            append("You are the forum's dispatcher. You do NOT reply yourself. This is an ambient ")
+            append("discussion forum where members post articles they find interesting and discuss them ")
+            append("with each other and with the owner. Given the discussion below, decide which ")
+            append("participant(s) from the roster are best suited to weigh in next — match their skills ")
+            append("to the topic, let their relations to those already in the discussion inform the pick, ")
+            append("and when more than one should weigh in, prefer a mix of temperaments (a contrarian ")
+            append("and an agreeable voice) over three alike. ")
             append("Pick the most relevant — usually one or two, at most three. ")
             append("Respond with ONLY their names, comma-separated, most relevant first. Nothing else.\n\n")
             append("Roster:\n")
             roster.forEach { append(rosterLine(it)).append("\n") }
+            relationsBlock(roster, stances, presentAuthorIds)?.let { append("\n").append(it) }
         }
     }
 }

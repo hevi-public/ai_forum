@@ -12,8 +12,16 @@ import java.time.Duration
 /** Turns a persona's structured authoring inputs into its system prompt. */
 interface PromptComposer {
     /** Compose a fresh system prompt for [spec]; on an edit pass the [prior] composition so the model
-     *  adjusts the existing prompt instead of regenerating it from scratch. */
-    fun compose(spec: PersonaSpec, prior: PriorComposition? = null): String
+     *  adjusts the existing prompt instead of regenerating it from scratch. [stances] are this persona's
+     *  standing relations toward other members, resolved to names by the caller — they colour the voice
+     *  the composer writes, while the discussion-scoped copy injected at reply time stays authoritative
+     *  (see [ComposerPrompts.instruction]). Defaulted to empty so callers that have no relations to hand
+     *  — and the pure Tier-0 call sites — stay unchanged. */
+    fun compose(
+        spec: PersonaSpec,
+        prior: PriorComposition? = null,
+        stances: List<StanceProse.NamedStance> = emptyList(),
+    ): String
 }
 
 /**
@@ -25,7 +33,11 @@ interface PromptComposer {
 @Service
 class LlmPromptComposer(private val llm: LlmClient) : PromptComposer {
 
-    override fun compose(spec: PersonaSpec, prior: PriorComposition?): String {
+    override fun compose(
+        spec: PersonaSpec,
+        prior: PriorComposition?,
+        stances: List<StanceProse.NamedStance>,
+    ): String {
         val request = LlmRequest(
             context = PromptContext(
                 personaSystemPrompt = ComposerPrompts.SYSTEM,
@@ -33,7 +45,7 @@ class LlmPromptComposer(private val llm: LlmClient) : PromptComposer {
                     ContextComment(
                         id = "spec",
                         authorId = "owner",
-                        body = ComposerPrompts.instruction(spec, prior),
+                        body = ComposerPrompts.instruction(spec, prior, stances),
                         parentId = null,
                         depth = 0,
                     ),

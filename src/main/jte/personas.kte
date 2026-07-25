@@ -22,6 +22,18 @@
                 </div>
             @endfor
         </div>
+        <%-- Bulk prompt refresh (S3 §2.9). Seeding never clobbers a stored prompt, so a forum that has
+             been running since before a framing change keeps serving the old wording until the owner
+             asks for this. It costs one LLM call per member and replaces hand-edited prompts, so the
+             price is written on the control rather than buried — this is a deliberate, paid action. --%>
+        @if(!personas.isEmpty())
+            <form class="recompose-all" data-recompose-all method="post" action="/personas/recompose">
+                <button class="btn btn--ghost" type="submit">Recompose all prompts ▸</button>
+                <span class="recompose-all__warning">Rewrites every member's system prompt from its current
+                    character, abilities, dials and relations — one paid LLM call per member, and any
+                    hand-edited prompt is overwritten.</span>
+            </form>
+        @endif
         <%-- Add a persona: a click-to-reveal composer that mirrors the home page's new-thread card — and
              like it, sits below the index it adds to. The <summary> is the "Add a member" card; opening
              the <details> discloses the form (form-urlencoded POST to /personas → PRG redirect onto the

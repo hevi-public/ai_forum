@@ -34,6 +34,27 @@ Feature: Anyone — the room decides who replies
     Then the reply is "posted"
     And the dispatcher's roster lists "design"
 
+  # Relations are dispatcher input too, but deliberately scoped: the block lists only the edges POINTING
+  # AT someone already talking, because that is the only relation information that can inform who should
+  # weigh in NEXT — the full roster graph is dozens of edges of noise. So a stance stays invisible to the
+  # dispatcher until its target is actually in the room, and disappears again from a silent discussion.
+  Scenario: The dispatcher sees a stance aimed at someone already in the discussion
+    Given a posted reply from "Sol" saying "Indexes help here"
+    And persona "Paul" has a stance toward "Sol" of "needles him about hype"
+    And the LLM will respond with "Paul"
+    And the LLM will respond with "Hype aside, an index is cheap"
+    When the owner asks the room "how do we make these queries faster?"
+    Then the reply is "posted"
+    And the dispatcher's roster lists "needles him about hype"
+
+  Scenario: With nobody talking yet, the dispatcher is told nothing about relations
+    Given persona "Paul" has a stance toward "Sol" of "needles him about hype"
+    And the LLM will respond with "Sol"
+    And the LLM will respond with "Add an index on the lookup column"
+    When the owner asks the room "how do we make these queries faster?"
+    Then the reply is "posted"
+    And the dispatcher's prompt carries no relations section
+
   # The owner's "looking at" selector scopes WHAT the dispatcher reads to decide who replies — the whole
   # topic (default) or just the branch being replied to — independent of the persona's generation scope.
   Rule: The dispatcher's "looking at" scope is selectable

@@ -34,6 +34,22 @@ class TestData(private val jdbc: JdbcTemplate, private val clock: Clock) {
         )
     }
 
+    /**
+     * Seed one directed persona→persona stance edge (persona_stance, V24) the same way [insertPersona]
+     * seeds a member: straight INSERT, so a `Given` never has to drive the edit form to establish a
+     * relation. [source] records provenance ('seeded' | 'owner' | 'evolved'); [stance] is free text and
+     * must stay that way — no number ever stands in for a relationship (plan_docs/ambient-slice-3.md §1).
+     * Note the guardrail the firewall scan imposes on stance text: it is injected into
+     * personaSystemPrompt, which owner_controls_firewall greps for "+1"/"vote", so no stance string
+     * (here or in the features) may contain that substring — "devoted"/"pivoted" included.
+     */
+    fun insertStance(from: String, to: String, stance: String, source: String = "seeded") {
+        jdbc.update(
+            "INSERT INTO persona_stance(from_persona, to_persona, stance, source, updated_at) VALUES (?,?,?,?,?)",
+            from, to, stance, source, clock.instant().toString(),
+        )
+    }
+
     fun insertThread(title: String): String {
         val id = newId()
         jdbc.update("INSERT INTO thread(id, title, created_at) VALUES (?,?,?)", id, title, clock.instant().toString())

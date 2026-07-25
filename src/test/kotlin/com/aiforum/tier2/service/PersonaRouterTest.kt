@@ -5,16 +5,23 @@ import com.aiforum.llm.LlmClient
 import com.aiforum.llm.LlmException
 import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.LlmResponse
+import com.aiforum.domain.Comment
+import com.aiforum.dto.GenerationState
 import com.aiforum.dto.ScopeMode
 import com.aiforum.repo.PersonaRepository.Persona
+import com.aiforum.repo.RelationStanceRepository
+import com.aiforum.repo.Stance
 import com.aiforum.service.PersonaRouter
 import com.aiforum.service.RoutingMetrics
 import com.aiforum.service.RoutingOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.springframework.jdbc.core.JdbcTemplate
+import java.time.Clock
 
 /**
  * Tier-2: the "Anyone" dispatcher running real routing logic over a faked LlmClient (the single IO
@@ -27,11 +34,13 @@ class PersonaRouterTest {
     private fun persona(name: String) = Persona(name, name, "$name's specialty", "You are $name.")
     private val roster = listOf(persona("Sol"), persona("Saul"), persona("Paul"), persona("Mira"))
 
-    /** A seam that returns canned text and records whether it was called at all. */
+    /** A seam that returns canned text and records whether it was called at all, plus what it was sent. */
     private class CannedLlm(private val text: String) : LlmClient {
         var calls = 0
+        var lastRequest: LlmRequest? = null
         override fun generate(request: LlmRequest, cancellation: CancellationToken): LlmResponse {
             calls++
+            lastRequest = request
             return LlmResponse(text)
         }
     }
@@ -184,5 +193,50 @@ class PersonaRouterTest {
         PersonaRouter(CannedLlm("Sol"), metrics).pick(roster, emptyList(), ScopeMode.BRANCH_ONLY)
 
         assertEquals(ScopeMode.BRANCH_ONLY, metrics.events.single().scope)
+    }
+
+    // --- Relations: the stances aimed at whoever is already talking reach the brief (ambient-slice-3) ---
+
+    /**
+     * The relation graph faked at the repository, not at a JdbcTemplate: the router only ever calls
+     * [RelationStanceRepository.findAll], so overriding that one method keeps the fake honest about the
+     * seam it stands in for. The `JdbcTemplate()` / [Clock] arguments are never touched — no query runs —
+     * they only satisfy the constructor. Subclassing works because kotlin-spring's allopen plugin already
+     * opens `@Repository` classes.
+     */
+    private fun graph(vararg rows: Stance) =
+        object : RelationStanceRepository(JdbcTemplate(), Clock.systemUTC()) {
+            override fun findAll(): List<Stance> = rows.toList()
+        }
+
+    private fun stance(from: String, to: String, text: String) =
+        Stance(fromPersona = from, toPersona = to, stance = text, source = "seeded", updatedAt = "2026-07-25T00:00:00Z")
+
+    private fun posted(author: String, body: String) =
+        Comment("c-$author", "t1", null, author, body, GenerationState.POSTED, null, 0)
+
+    @Test
+    fun `a stance toward someone who has posted is folded into the dispatcher's brief`() {
+        val llm = CannedLlm("Paul")
+        val router = PersonaRouter(llm, stances = graph(stance("Paul", "Sol", "needles him about hype")))
+
+        router.pick(roster, listOf(posted("Sol", "Indexes help here")))
+
+        val prompt = llm.lastRequest!!.context.personaSystemPrompt
+        assertTrue(
+            prompt.contains("- Paul -> Sol: needles him about hype"),
+            "expected the stance in the dispatcher's brief, which was:\n$prompt",
+        )
+    }
+
+    @Test
+    fun `with no relation repository wired the brief is the plain roster`() {
+        val llm = CannedLlm("Sol")
+        PersonaRouter(llm).pick(roster, listOf(posted("Sol", "Indexes help here")))
+
+        assertFalse(
+            llm.lastRequest!!.context.personaSystemPrompt.contains("Relations between participants"),
+            "a null repository must degrade to exactly the pre-relations prompt",
+        )
     }
 }
