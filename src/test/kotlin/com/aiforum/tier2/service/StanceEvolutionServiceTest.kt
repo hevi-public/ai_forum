@@ -3,6 +3,7 @@ package com.aiforum.tier2.service
 import com.aiforum.config.StanceEvolutionProperties
 import com.aiforum.llm.CancellationToken
 import com.aiforum.llm.LlmClient
+import com.aiforum.llm.LlmException
 import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.LlmResponse
 import com.aiforum.persona.PersonaPromptRefresher
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
 import java.time.Clock
+import java.time.Duration
 
 /**
  * Tier-2: [StanceEvolutionService] running its real orchestration over in-memory subclass fakes of the
@@ -51,16 +53,15 @@ class StanceEvolutionServiceTest {
         override fun find(id: String) = roster.firstOrNull { it.id == id }
     }
 
-    /** Serves a programmed exchange list and records the window each run asked for. */
+    /**
+     * Serves a programmed exchange list. The service reads ALL exchanges and then narrows PER EDGE
+     * against each pair's own last standing change, so the `since` argument is expected to be null here;
+     * the filter is still mirrored so this fake stays honest about the real query's contract.
+     */
     private class FakeComments(private val all: List<PersonaExchange> = emptyList()) :
         CommentRepository(JdbcTemplate(), Clock.systemUTC()) {
-        val windowsAsked = mutableListOf<String?>()
-        override fun exchangesSince(since: String?): List<PersonaExchange> {
-            windowsAsked += since
-            // Mirrors the repository's `created_at > ?` (a null window is all time), so a test can pin
-            // the boundary arithmetic without a database.
-            return if (since == null) all else all.filter { it.createdAt > since }
-        }
+        override fun exchangesSince(since: String?): List<PersonaExchange> =
+            if (since == null) all else all.filter { it.createdAt > since }
     }
 
     private class FakeStances : RelationStanceRepository(JdbcTemplate(), Clock.systemUTC()) {
@@ -110,7 +111,11 @@ class StanceEvolutionServiceTest {
             if (idx >= 0) rows[idx] = rows[idx].copy(revertedAt = REVERT_STAMP)
         }
 
-        override fun lastChangeAt() = rows.maxOfOrNull { it.changedAt }
+        // Mirrors the real per-edge query: the newest STANDING change for this pair, ignoring both
+        // reverted rows and every other pair's history.
+        override fun lastStandingChangeAt(fromPersona: String, toPersona: String) =
+            rows.filter { it.fromPersona == fromPersona && it.toPersona == toPersona && it.revertedAt == null }
+                .maxOfOrNull { it.changedAt }
     }
 
     /** A FIFO of scripted answers; an entry that throws models a seam fault (rate limit, timeout). */
@@ -454,7 +459,7 @@ class StanceEvolutionServiceTest {
     // --- the window --------------------------------------------------------------------------------
 
     @Test
-    fun `the first run reads all time, and the next starts at the newest standing change`() {
+    fun `an edge that moved stops re-reading the exchanges that moved it`() {
         val personas = RosterPersonas(listOf(persona("paul"), persona("sol")))
         val stances = FakeStances().apply { seed("paul", "sol", "kindred pessimist") }
         val changes = FakeChanges()
@@ -466,10 +471,45 @@ class StanceEvolutionServiceTest {
         svc.evolve(EvolutionSource.MANUAL)
         svc.evolve(EvolutionSource.MANUAL)
 
-        // Nothing has ever evolved => all time; afterwards the pass only looks at what happened since it
-        // last moved something, so a quiet forum re-judges nothing and costs nothing.
-        assertEquals(listOf(null, STAMP), comments.windowsAsked)
-        assertEquals(1, llm.received.size, "the second run had nothing new to judge")
+        assertEquals(1, llm.received.size, "the second run had nothing new to judge — a quiet forum is free")
+    }
+
+    /**
+     * The bug this pins is invisible in any single-pair test: with ONE global watermark, sol→vex's
+     * successful change moves the boundary for paul→sol too, so the pair whose judgment failed never gets
+     * another look at the very exchanges that were meant to move it. Rate limits are exactly the case D12
+     * anticipates, which is what makes "somebody else's success ate my evidence" a real failure and not a
+     * theoretical one.
+     */
+    @Test
+    fun `a pair whose judgment failed is re-judged, even when another pair changed in the same run`() {
+        val personas = RosterPersonas(listOf(persona("paul"), persona("sol"), persona("vex")))
+        val stances = FakeStances().apply {
+            seed("paul", "sol", "kindred pessimist")
+            seed("vex", "sol", "finds him tiring")
+        }
+        val changes = FakeChanges()
+        // Deterministic (from, to) order: paul→sol is judged first and its seam blows up; vex→sol follows
+        // and succeeds, recording a change — and therefore a boundary, under the old global scheme.
+        val llm = ScriptedLlm(
+            listOf(
+                { throw LlmException.RateLimited(Duration.ofSeconds(30)) },
+                { "has stopped pretending to find him tiring" },
+                { "reads him with an eyebrow already raised" },
+            ),
+        )
+        val refresher = SpyRefresher(personas, stances)
+        val comments = FakeComments(listOf(exchange("paul", "sol"), exchange("vex", "sol")))
+        val svc = service(comments, personas, stances, changes, llm, refresher)
+
+        svc.evolve(EvolutionSource.MANUAL)
+        svc.evolve(EvolutionSource.MANUAL)
+
+        assertEquals(
+            "reads him with an eyebrow already raised",
+            stances.rows.getValue("paul" to "sol").stance,
+            "paul→sol kept its own window and was judged again on the evidence its rate limit lost",
+        )
     }
 
     @Test
@@ -486,8 +526,29 @@ class StanceEvolutionServiceTest {
 
         service(comments, personas, stances, changes, llm, refresher).evolve(EvolutionSource.MANUAL)
 
-        assertEquals(listOf(null), comments.windowsAsked, "the only recorded change was undone, so read all time")
         assertEquals("reads him with an eyebrow raised", stances.rows.getValue("paul" to "sol").stance)
+    }
+
+    /**
+     * A first run over a long history must not paste every comment a pair ever exchanged into one prompt.
+     * The cap keeps the most RECENT exchanges, which are also the ones that describe how the relationship
+     * stands now — so bounding it costs the judgment nothing it wanted.
+     */
+    @Test
+    fun `the evidence handed to one judgment is bounded`() {
+        val personas = RosterPersonas(listOf(persona("paul"), persona("sol")))
+        val stances = FakeStances().apply { seed("paul", "sol", "kindred pessimist") }
+        val llm = ScriptedLlm(says("reads him with an eyebrow raised"))
+        val refresher = SpyRefresher(personas, stances)
+        val history = (1..40).map { exchange("paul", "sol", body = "exchange number $it") }
+        val comments = FakeComments(history)
+
+        service(comments, personas, stances, FakeChanges(), llm, refresher).evolve(EvolutionSource.MANUAL)
+
+        val prompt = llm.received.single().context.comments.single().body
+        assertTrue(prompt.contains("exchange number 40"), "the newest exchange is kept")
+        assertFalse(prompt.contains("exchange number 1 "), "the oldest exchanges are dropped, not truncated in place")
+        assertTrue(prompt.length < 20_000, "an unbounded first run would build an arbitrarily large prompt")
     }
 
     // --- revert ------------------------------------------------------------------------------------

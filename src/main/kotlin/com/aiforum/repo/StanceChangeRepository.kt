@@ -37,9 +37,9 @@ data class StanceChange(
  * clock makes `changed_at` exactly assertable), an AUTOINCREMENT id, and every read explicitly ordered.
  *
  * Because S4a auto-applies with no approval queue, this log carries the owner's entire control surface:
- * [recent] renders /admin/stances, [find] + [markReverted] back the revert button, and [lastChangeAt] is
- * the *window boundary* for the next run — the pass judges only exchanges newer than the last recorded
- * change, so a quiet forum re-judges nothing and costs nothing.
+ * [recent] renders /admin/stances, [find] + [markReverted] back the revert button, and
+ * [lastStandingChangeAt] is the *window boundary* for the next run — an edge is judged only on exchanges
+ * newer than its own last surviving change, so a quiet forum re-judges nothing and costs nothing.
  *
  * Note what this class deliberately does NOT offer: no count, no per-pair tally, no aggregate of any kind.
  * The V25 header explains why — an audit table that can be summed is a scoreboard, and a scoreboard is the
@@ -127,15 +127,27 @@ class StanceChangeRepository(
         )
     }
 
+
     /**
-     * The newest recorded `changed_at`, or null when nothing has ever evolved — the evolution pass's
-     * window boundary. Null deliberately means "all time": the first run reads the whole comment history
-     * once, and every later run only sees what happened since it last changed something.
+     * The window boundary for ONE directed edge: when this pair last actually moved and stayed moved, or
+     * null if it never has — in which case that edge is judged over all of its history.
      *
-     * Reverted rows still count. A revert undoes the *stance*, not the fact that the pass already read and
-     * judged those exchanges; excluding them would make the next run re-judge the same conversation and
-     * (given the same evidence) most likely re-apply the change the owner just rejected.
+     * **Per-edge, not one global watermark**, and the difference is not academic. A single boundary that
+     * advances whenever *any* pair changes silently disinherits every other pair in the same run: the
+     * judgment that rate-limited at 04:00, the pair the per-run cap did not reach, the edge whose answer
+     * came back unusable — all of them would find their evidence sitting behind a boundary moved by
+     * somebody else's success, and would never be judged on that conversation again. A stance that failed
+     * to evolve because the provider was busy must get another look at the same exchanges; only an edge
+     * that genuinely moved has earned the right to stop re-reading them.
+     *
+     * `reverted_at IS NULL` for the same reason it appears on the read path: a revert undoes the change's
+     * claim on the window too, or the evidence behind a judgment the owner rejected is walled off for
+     * good and that edge can never be reconsidered from it (D10 — revert undoes, it does not freeze).
      */
-    fun lastChangeAt(): String? =
-        jdbc.queryForObject("SELECT MAX(changed_at) FROM stance_change", String::class.java)
+    fun lastStandingChangeAt(fromPersona: String, toPersona: String): String? =
+        jdbc.queryForObject(
+            """SELECT MAX(changed_at) FROM stance_change
+               WHERE from_persona = ? AND to_persona = ? AND reverted_at IS NULL""",
+            String::class.java, fromPersona, toPersona,
+        )
 }

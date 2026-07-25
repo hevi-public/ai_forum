@@ -167,27 +167,48 @@ class StanceChangeRepositoryTest {
     }
 
     @Test
-    fun `lastChangeAt is null on an empty table and the newest stamp otherwise`() {
-        assertNull(changes.lastChangeAt(), "no run has ever changed anything — the window is all time")
-
+    fun `an edge with no history has no boundary, so it is judged over all of it`() {
         seedRoster()
-        val older = changes.record("vex", "sol", "old", "new", SOURCE_SEEDED, "C1: older")
-        backdate(older, "2026-01-01T09:00:00Z")
-        changes.record("sol", "vex", "old", "new", SOURCE_SEEDED, "C2: newer")
-
-        assertEquals(fixedNow, changes.lastChangeAt(), "the window boundary is the MAX, not the last insert")
+        assertNull(changes.lastStandingChangeAt("vex", "sol"))
     }
 
     @Test
-    fun `lastChangeAt still counts a reverted change`() {
-        // A revert undoes the stance, not the fact that those exchanges were already read and judged.
-        // Excluding reverted rows would re-open the same window and re-apply what the owner just rejected.
+    fun `each edge carries its OWN boundary, unmoved by another pair's change`() {
+        // The defect this pins: with one global watermark, sol→vex changing at 12:00 would push vex→sol's
+        // boundary forward too, and the exchanges vex→sol still had to be judged on would sit behind it
+        // for good — silently, and precisely for the pair whose judgment failed or never ran.
         seedRoster()
-        val id = changes.record("vex", "sol", "old", "new", SOURCE_SEEDED, "C1: judged once already")
+        val older = changes.record("vex", "sol", "old", "new", SOURCE_SEEDED, "C1: vex on sol")
+        backdate(older, "2026-01-01T09:00:00Z")
+        changes.record("sol", "vex", "old", "new", SOURCE_SEEDED, "C2: a different pair, later")
+
+        assertEquals("2026-01-01T09:00:00Z", changes.lastStandingChangeAt("vex", "sol"))
+        assertEquals(fixedNow, changes.lastStandingChangeAt("sol", "vex"))
+    }
+
+    @Test
+    fun `a reverted change gives up its claim on the window`() {
+        // D10: revert undoes, it does not freeze. If a reverted row kept the boundary, the evidence behind
+        // the judgment the owner rejected would be walled off and that edge could never be reconsidered
+        // from it — the acceptance scenario "A reverted stance is free to drift again" is the same rule.
+        seedRoster()
+        val id = changes.record("vex", "sol", "old", "new", SOURCE_SEEDED, "C1: judged once")
 
         changes.markReverted(id)
 
-        assertEquals(fixedNow, changes.lastChangeAt())
+        assertNull(changes.lastStandingChangeAt("vex", "sol"), "the edge is open to that evidence again")
+    }
+
+    @Test
+    fun `the boundary is the newest STANDING change, not merely the newest`() {
+        seedRoster()
+        val standing = changes.record("vex", "sol", "a", "b", SOURCE_SEEDED, "C1: stands")
+        backdate(standing, "2026-01-01T09:00:00Z")
+        val later = changes.record("vex", "sol", "b", "c", SOURCE_SEEDED, "C2: undone")
+
+        changes.markReverted(later)
+
+        assertEquals("2026-01-01T09:00:00Z", changes.lastStandingChangeAt("vex", "sol"))
     }
 
     @Test

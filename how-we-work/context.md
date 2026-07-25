@@ -225,9 +225,13 @@ Five things worth knowing before touching it:
   pins the refusal. "Pushed back twice" is prose; "trust 4/5" cannot reach the table.
 - **Revert undoes, it does not freeze** — it restores the old text *and* the old `source`, so a reverted
   seeded row goes back to `seeded` and may drift again. Freezing is what the persona edit form's `owner`
-  stamp is for. Consequently the evolution window is the newest **non-reverted** change, not
-  `MAX(changed_at)`: a reverted row must give up its claim on the window or that evidence is walled off
-  forever.
+  stamp is for.
+- **The evolution window is PER EDGE** (`lastStandingChangeAt`), not one global watermark, and it ignores
+  reverted rows. A single boundary is quietly lossy: one pair's success moves it for every pair that
+  failed, was capped out, or came back unusable in the same run, and their evidence is never judged again
+  — with rate limits being exactly the case the design anticipates. A Tier-2 test fails against the
+  global-watermark version. Evidence per judgment is capped for the same reason a never-changed edge reads
+  all-time.
 - **Owner calls 2026-07-25:** auto-recompose on evolution (settling S3's staleness tension — extracted into
   `PersonaPromptRefresher`, shared with `POST /personas/recompose`), its own gated scheduler pair
   (`aiforum.stance-evolution.enabled`, **default off**, `/__diag` rail + config_guardrails scenario), and

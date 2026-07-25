@@ -107,8 +107,7 @@ class StanceEvolutionService(
             // display names the judging model reads (stance rows and Comment.authorId carry ids, the
             // prompt is written in names; PersonaRouter.relationsBlock documents the same convention).
             val roster = personas.findAll().associate { it.id to it.name }
-            val window = windowStart()
-            val qualifying = qualifyingPairs(comments.exchangesSince(window), roster.keys)
+            val qualifying = qualifyingPairs(comments.exchangesSince(null), roster.keys)
             // Distinct holders whose edges moved, in first-changed order, so the fan-out below is one
             // recompose per member however many of their relations shifted.
             val movedHolders = LinkedHashSet<String>()
@@ -180,33 +179,21 @@ class StanceEvolutionService(
     }
 
     /**
-     * Where this run starts reading: the `changed_at` of the newest change that still STANDS, or null
-     * for "all time" — so the first run reads the whole history once and every later run sees only what
-     * has happened since it last moved something. A quiet forum therefore produces a free no-op rather
-     * than re-judging the same conversation nightly.
-     *
-     * **Why a REVERTED row does not set the boundary** (this is where the implementation reads more
-     * than D3's bare `MAX(changed_at)`, and why [StanceChangeRepository.lastChangeAt] — the unfiltered
-     * maximum — is not what is called here). A revert undoes the change in full, and that has to include
-     * its claim on the window. Otherwise the exchanges that produced a judgment the owner rejected sit
-     * permanently behind the boundary: the edge could never be reconsidered from that evidence, and a
-     * forum whose only recorded change was reverted would go silent for good. That is the opposite of
-     * D10's "revert undoes, it does not freeze", and it is pinned by the acceptance scenario "A
-     * reverted stance is free to drift again".
-     *
-     * The scan is bounded because the boundary is only ever the newest standing row; falling off the end
-     * (an owner who reverted the last [WINDOW_SCAN_LIMIT] changes in a row) degrades to all-time, which
-     * costs a re-read, never a wrong write.
-     */
-    private fun windowStart(): String? =
-        changes.recent(WINDOW_SCAN_LIMIT).firstOrNull { it.revertedAt == null }?.changedAt
-
-    /**
      * The directed pairs worth judging, in a deterministic (from, to) order so a capped run always
      * spends its budget on the same edges rather than on whatever the query happened to return first.
      *
      * Both endpoints must be on the roster: an exchange with the owner is dropped here, because
      * relations are persona↔persona by §5 — the owner is a peer, not a node in the graph.
+     *
+     * **Each edge carries its own window.** The whole exchange history is read once and then narrowed
+     * PER EDGE against [StanceChangeRepository.lastStandingChangeAt] — that method's KDoc explains why a
+     * single global watermark is wrong (it would let one pair's success disinherit every pair that
+     * failed, was capped out, or came back unusable in the same run). The cost of reading all exchanges
+     * and filtering in memory is a SQLite read on a single-user forum; the cost of getting the boundary
+     * wrong is a relationship that silently never evolves from the conversation that should have moved
+     * it.
+     *
+     * The comparison is strict (`>`), so an exchange exactly at an edge's last change is not re-judged.
      */
     private fun qualifyingPairs(
         exchanges: List<PersonaExchange>,
@@ -216,10 +203,32 @@ class StanceEvolutionService(
         return exchanges
             .filter { it.fromAuthor in roster && it.toAuthor in roster }
             .groupBy { Edge(it.fromAuthor, it.toAuthor) }
+            .mapValues { (edge, rows) ->
+                val since = changes.lastStandingChangeAt(edge.from, edge.to)
+                if (since == null) rows else rows.filter { it.createdAt > since }
+            }
             .filterValues { it.size >= minimum }
             .toList()
             .sortedWith(compareBy({ it.first.from }, { it.first.to }))
     }
+
+    /**
+     * The exchanges actually shown to the judge: the most recent [MAX_EVIDENCE_EXCHANGES], each side
+     * flattened to one line and truncated.
+     *
+     * Unbounded evidence is a real hazard rather than a theoretical one, because the window is per-edge
+     * and starts at all-time: the FIRST run on an established forum would otherwise paste every comment
+     * a pair ever exchanged, at full length, into a single prompt — and the same happens on every run for
+     * any edge that never changes. Recent exchanges are also the ones that describe how the relationship
+     * stands NOW, which is the question being asked, so the cap costs the judgment nothing it wanted.
+     */
+    private fun evidenceFor(exchanges: List<PersonaExchange>): List<StanceJudge.Exchange> =
+        exchanges.takeLast(MAX_EVIDENCE_EXCHANGES).map {
+            StanceJudge.Exchange(
+                body = Snippet.oneLine(it.body, EVIDENCE_BODY_CHARS),
+                towardBody = Snippet.oneLine(it.towardBody, EVIDENCE_BODY_CHARS),
+            )
+        }
 
     /** The per-run edge budget, clamped at the use site: 0 (and anything below) means unlimited. */
     private fun edgeCap(): Int = if (props.maxEdgesPerRun > 0) props.maxEdgesPerRun else Int.MAX_VALUE
@@ -308,7 +317,7 @@ class StanceEvolutionService(
             holder = roster[edge.from] ?: edge.from,
             toward = roster[edge.to] ?: edge.to,
             currentStance = currentStance,
-            exchanges = exchanges.map { StanceJudge.Exchange(it.body, it.towardBody) },
+            exchanges = evidenceFor(exchanges),
         )
         val request = LlmRequest(
             context = ContextAssembler.assemble(StanceJudgePrompts.SYSTEM, listOf(evidenceOf(instruction))),
@@ -348,8 +357,13 @@ class StanceEvolutionService(
          */
         private val JUDGE_TIMEOUT: Duration = Duration.ofSeconds(60)
 
-        /** How far back the window scan looks for a change that still stands — see `windowStart`. */
-        private const val WINDOW_SCAN_LIMIT = 50
+        /**
+         * How many exchanges one judgment may see, and how much of each — see `evidenceFor`. Enough to
+         * read the shape of a running argument, bounded so a first run over a long history cannot build
+         * an arbitrarily large prompt.
+         */
+        private const val MAX_EVIDENCE_EXCHANGES = 12
+        private const val EVIDENCE_BODY_CHARS = 400
 
         /**
          * How much of a cited comment is snapshotted. Long enough to recognise what was judged, short

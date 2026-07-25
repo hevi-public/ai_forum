@@ -372,6 +372,28 @@ never a wrong write). This is precisely what makes the acceptance scenario *"A r
 drift again"* pass, and it is the sharper reading of "revert undoes, it does not freeze".
 `StanceChangeRepository.lastChangeAt()` remains as the unfiltered maximum, used by its Tier-1 test.
 
+**The window is PER EDGE, not one global watermark** (found by the post-implementation adversarial pass,
+where five independent reviewers converged on the same mechanism). D3 described a single boundary — "since
+the last completed run" — and that is quietly lossy: one pair's success moves the boundary for every other
+pair in the same run, so the judgment that rate-limited at 04:00, the pair the cap did not reach, and the
+edge whose answer came back unusable all find their evidence behind a line somebody else drew, and are
+never judged on that conversation again. D12 explicitly anticipates rate limits, which makes this a real
+failure rather than a theoretical one. So each edge carries its own boundary
+(`StanceChangeRepository.lastStandingChangeAt`), and only an edge that genuinely moved stops re-reading
+the exchanges that moved it. The consequence is that the pass reads all exchanges and narrows in memory —
+a SQLite read on a single-user forum, against a relationship that would otherwise silently never evolve.
+Pinned by a Tier-2 test that fails against the global-watermark implementation.
+
+**The evidence handed to one judgment is bounded** (`MAX_EVIDENCE_EXCHANGES`, `EVIDENCE_BODY_CHARS`).
+Because a never-changed edge's window starts at all-time, an unbounded first run over an established forum
+would paste every comment a pair ever exchanged, at full length, into a single prompt. The cap keeps the
+most recent exchanges, which are also the ones that describe how the relationship stands *now*.
+
+**Known limitation, deliberately not fixed here:** reverting a *superseded* audit row restores that row's
+old text over a newer change that remains marked un-reverted. The natural fix — only offering revert on an
+edge's newest standing change — is a UI restriction that wants its own thinking about what the history
+page should then show, and every acceptance path reverts the newest row. Recorded rather than half-solved.
+
 **The persona-delete cascade is proven at Tier 1, not in `persona_deletion.feature`.** Direction doc §10
 files this scenario under the acceptance suite. Building an audit row through the acceptance layer means
 running a whole evolution pass (two scripted LLM turns) purely to set up a foreign-key assertion, when
