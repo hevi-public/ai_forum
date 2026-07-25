@@ -1,9 +1,11 @@
 package com.aiforum.tier0
 
 import com.aiforum.repo.PersonaRepository.Persona
+import com.aiforum.repo.Stance
 import com.aiforum.service.PersonaRouter
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -11,7 +13,10 @@ import org.junit.jupiter.api.Test
 /**
  * Tier-0: the pure trait-routing helpers the dispatcher uses (no LLM, no IO). [PersonaRouter.rosterLine]
  * folds the structured abilities/dials into the prompt; [PersonaRouter.diversify] re-ranks a capped
- * fan-out to span the agreeableness axis. See plan_docs/persona-traits-routing.md.
+ * fan-out to span the agreeableness axis (plan_docs/persona-traits-routing.md);
+ * [PersonaRouter.relationsBlock] decides which qualitative stances are worth the dispatcher's attention
+ * (plan_docs/ambient-slice-3.md) — the filtering is the whole point, so it's pinned here rather than
+ * only through the prompt string.
  */
 @Tag("tier0")
 class PersonaRouterTraitsTest {
@@ -79,5 +84,85 @@ class PersonaRouterTraitsTest {
         // No dial signal => every distance is 0 => ties preserve the model's relevance order.
         val roster = listOf(persona("A"), persona("B"), persona("C"), persona("D"))
         assertEquals(listOf("A", "B", "C"), PersonaRouter.diversify(roster, max = 3).map { it.name })
+    }
+
+    // --- relationsBlock: only stances aimed at someone already talking reach the dispatcher ---
+
+    private fun stance(from: String, to: String, text: String) =
+        Stance(fromPersona = from, toPersona = to, stance = text, source = "seeded", updatedAt = "2026-07-25T00:00:00Z")
+
+    private val pair = listOf(persona("Sol"), persona("Paul"))
+
+    @Test
+    fun `an edge pointing at someone in the discussion is rendered as an arrow line`() {
+        val block = PersonaRouter.relationsBlock(
+            pair,
+            listOf(stance("Paul", "Sol", "needles him about hype")),
+            presentAuthorIds = setOf("Sol"),
+        )
+
+        assertEquals("Relations between participants:\n- Paul -> Sol: needles him about hype\n", block)
+    }
+
+    @Test
+    fun `with nobody talking yet there is no block at all, not an empty header`() {
+        val block = PersonaRouter.relationsBlock(
+            pair,
+            listOf(stance("Paul", "Sol", "needles him about hype")),
+            presentAuthorIds = emptySet(),
+        )
+
+        assertNull(block, "a header over zero bullets is worse than no section")
+    }
+
+    @Test
+    fun `an edge aimed at a persona who has not spoken says nothing about who replies next`() {
+        // Paul is in the room and Sol has spoken, but this edge points at the silent Paul.
+        val block = PersonaRouter.relationsBlock(
+            pair,
+            listOf(stance("Sol", "Paul", "thinks he overclaims")),
+            presentAuthorIds = setOf("Sol"),
+        )
+
+        assertNull(block)
+    }
+
+    @Test
+    fun `an edge naming a persona outside the roster is unactionable and dropped`() {
+        val block = PersonaRouter.relationsBlock(
+            listOf(persona("Sol")),
+            listOf(stance("Ghost", "Sol", "resents his certainty")),
+            presentAuthorIds = setOf("Sol"),
+        )
+
+        assertNull(block, "the dispatcher can't route to someone who isn't a participant")
+    }
+
+    @Test
+    fun `a blank stance is an empty edge and is skipped`() {
+        val block = PersonaRouter.relationsBlock(
+            pair,
+            listOf(stance("Paul", "Sol", "   ")),
+            presentAuthorIds = setOf("Sol"),
+        )
+
+        assertNull(block)
+    }
+
+    @Test
+    fun `several qualifying edges keep the repository's order rather than being re-sorted`() {
+        // The rows arrive in (from, to) order; the prompt must be byte-stable, so this renderer is a
+        // pass-through — re-sorting here would be a second ordering rule to keep in step.
+        val roster = pair + persona("Mira")
+        val block = PersonaRouter.relationsBlock(
+            roster,
+            listOf(stance("Paul", "Sol", "needles him"), stance("Mira", "Sol", "defers to his data")),
+            presentAuthorIds = setOf("Sol"),
+        )
+
+        assertEquals(
+            "Relations between participants:\n- Paul -> Sol: needles him\n- Mira -> Sol: defers to his data\n",
+            block,
+        )
     }
 }

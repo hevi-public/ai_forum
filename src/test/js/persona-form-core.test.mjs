@@ -21,6 +21,10 @@ test("classifyField sorts controls into prompt / composer-input / other", () => 
   assert.equal(classifyField("name"), "other");
   assert.equal(classifyField("model"), "other");
   assert.equal(classifyField(""), "other");
+  // A relation stance (S3) is read fresh at reply time, never baked into the stored prompt, so it must
+  // NOT count as a composer input — otherwise editing one would flag the prompt stale and gate Save
+  // behind a paid Regenerate for a change the prompt doesn't carry.
+  assert.equal(classifyField("stance_sol"), "other");
 });
 
 test("changing a composer input makes the prompt stale", () => {

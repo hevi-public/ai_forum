@@ -15,9 +15,11 @@ import com.aiforum.llm.LlmClient
 import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.PersonaRef
 import com.aiforum.llm.PromptContext
+import com.aiforum.persona.StanceProse
 import com.aiforum.repo.AttachmentRepository
 import com.aiforum.repo.CommentRepository
 import com.aiforum.repo.PersonaRepository
+import com.aiforum.repo.RelationStanceRepository
 import com.aiforum.repo.ThreadRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -53,6 +55,14 @@ class GenerationService(
     // Image attachments fold their captions into context (caption-only path). Nullable-defaulted for the
     // same reason as [threads]; when null no captions are injected (the existing text-only behaviour).
     private val attachments: AttachmentRepository? = null,
+    // The qualitative relation graph, injected as prose into each persona's system prompt at generation
+    // time (see [assembleContext]). Nullable-defaulted like [threads]/[attachments] so the positional
+    // 3/4-arg Tier-2 constructions keep compiling; when null nothing is appended and the prompt is
+    // byte-identical to the pre-relations behaviour. Deliberately read HERE rather than baked into
+    // `persona.system_prompt` at authoring time: a stance is edited far more often than a persona is
+    // composed, and baking it in would make every stance edit a re-compose (an LLM call) plus leave every
+    // stored prompt stale the moment the evolution pass rewrites an edge.
+    private val stances: RelationStanceRepository? = null,
 ) {
     private val timeout = Duration.ofSeconds(120)
     private val log = LoggerFactory.getLogger(GenerationService::class.java)
@@ -288,7 +298,7 @@ class GenerationService(
                     budget = DepthBudget.childBudget(leaf.depthBudget),
                     // autoGrow keeps its own per-round snapshot ([context]); each leaf gets a distinct
                     // persona/target, so it doesn't share the summon round's settle-time re-read.
-                    contextOf = { assembleContext(threadId, persona.systemPrompt, withOpeningPost(threadId, context), targetId = leaf.id) },
+                    contextOf = { assembleContext(threadId, persona, withOpeningPost(threadId, context), targetId = leaf.id) },
                 )
                 created += settleOne(plan, CancellationToken())
             }
@@ -299,7 +309,7 @@ class GenerationService(
     fun retry(replyId: String): ReplyView {
         val existing = comments.findById(replyId) ?: error("no reply $replyId")
         val persona = personas.find(existing.authorId) ?: error("unknown persona ${existing.authorId}")
-        val ctx = assembleContext(existing.threadId, persona.systemPrompt, withOpeningPost(existing.threadId, comments.threadComments(existing.threadId)), targetId = existing.parentId)
+        val ctx = assembleContext(existing.threadId, persona, withOpeningPost(existing.threadId, comments.threadComments(existing.threadId)), targetId = existing.parentId)
         val updated = try {
             val resp = llm.generate(LlmRequest(ctx, PersonaRef(persona.id, persona.name, persona.model), timeout), CancellationToken())
             resp.reasoningLeak?.let { log.warn("reasoning leak ({}) on retry of reply {} by persona {}", it, replyId, persona.id) }
@@ -337,7 +347,7 @@ class GenerationService(
             ?: error("reply $replyId is not a persona reply (author ${existing.authorId})")
         // Same caption-aware context path as [retry], so a regenerated take sees the thread's image
         // captions exactly as the original generation did.
-        val ctx = assembleContext(existing.threadId, persona.systemPrompt, withOpeningPost(existing.threadId, comments.threadComments(existing.threadId)), targetId = existing.parentId)
+        val ctx = assembleContext(existing.threadId, persona, withOpeningPost(existing.threadId, comments.threadComments(existing.threadId)), targetId = existing.parentId)
         val resp = try {
             llm.generate(LlmRequest(ctx, PersonaRef(persona.id, persona.name, persona.model), timeout), CancellationToken())
         } catch (e: Throwable) {
@@ -455,7 +465,7 @@ class GenerationService(
                 // Re-read at settle time so a later persona in the round sees the earlier ones' replies.
                 contextOf = {
                     val live = roundContext(threadId, parentId, parent, scope, includeSiblings, roundIds)
-                    assembleContext(threadId, persona.systemPrompt, withOpeningPost(threadId, live), targetId = parentId)
+                    assembleContext(threadId, persona, withOpeningPost(threadId, live), targetId = parentId)
                 },
             )
         }
@@ -516,17 +526,58 @@ class GenerationService(
         }
 
     /**
-     * Assemble context with image captions folded in (caption-only path). Reads the attachments for the
-     * context comments plus the thread's own (the OP synthetic node carries id == threadId), and hands
-     * the map to the firewall boundary [ContextAssembler]. When [attachments] isn't wired (Tier-2
-     * constructions), the map is empty and this is exactly the old text-only assemble.
+     * Assemble context with image captions folded in (caption-only path) and the generating persona's
+     * relation stances appended to its system prompt. Reads the attachments for the context comments plus
+     * the thread's own (the OP synthetic node carries id == threadId), and hands the map to the firewall
+     * boundary [ContextAssembler]. When [attachments] isn't wired (Tier-2 constructions), the map is
+     * empty and this is exactly the old text-only assemble.
+     *
+     * The stance block is appended HERE, one step BEFORE [ContextAssembler.assemble], on purpose: the
+     * firewall's single job is keeping owner VOTE signal out of the transcript, and it stays a pure
+     * function that receives an already-final system prompt string. Injecting inside it would put prompt
+     * authoring into the boundary whose Tier-0 test exists to pin exclusion, so a relations change could
+     * turn a firewall test red for reasons that have nothing to do with votes.
      */
     private fun assembleContext(
         threadId: String,
-        systemPrompt: String,
+        persona: PersonaRepository.Persona,
         contextComments: List<Comment>,
         targetId: String?,
-    ) = ContextAssembler.assemble(systemPrompt, contextComments, targetId, attachmentMap(threadId, contextComments))
+    ) = ContextAssembler.assemble(
+        withStances(persona, contextComments),
+        contextComments,
+        targetId,
+        attachmentMap(threadId, contextComments),
+    )
+
+    /**
+     * [persona]'s system prompt plus its stances toward the personas ACTUALLY PRESENT in this scoped
+     * context — its outgoing edges only (a persona's prompt carries its own views, never the room's views
+     * of it), filtered to the distinct author ids of [contextComments].
+     *
+     * Present-filtering is doing two things at once. It keeps the prompt small: the seeded graph is 42
+     * edges, and pasting the whole roster's opinions into every generation is bulk noise about people who
+     * never spoke. And it makes scope narrowing free — a BRANCH_ONLY summon carries fewer authors, so the
+     * stance set narrows with it, with no scope-awareness in this code at all. The owner's author id can
+     * never match an edge (edges exist only between personas), so an owner-heavy context simply yields
+     * fewer stances rather than needing a special case.
+     *
+     * When the block renders empty ([StanceProse.block] returns null for no scoped edges — including
+     * every construction where [stances] isn't wired) the result is `persona.systemPrompt` unchanged,
+     * byte for byte: relations must be invisible where there are none, not a dangling header.
+     */
+    private fun withStances(persona: PersonaRepository.Persona, contextComments: List<Comment>): String {
+        val present = contextComments.mapTo(mutableSetOf()) { it.authorId }
+        val named = stances?.from(persona.id).orEmpty()
+            .filter { it.toPersona in present }
+            // The edge stores ids; the prompt must name people the way the transcript does, so the model
+            // can attach the attitude to a byline it can see. Falling back to the id keeps a stance
+            // toward a since-renamed/unreadable persona readable rather than dropping it silently.
+            .map { StanceProse.NamedStance(personas.find(it.toPersona)?.name ?: it.toPersona, it.stance) }
+        return StanceProse.block(persona.name, named)
+            ?.let { "${persona.systemPrompt}\n\n$it" }
+            ?: persona.systemPrompt
+    }
 
     /** comment id -> its attachments, including the thread's own keyed under threadId (the OP node id). */
     private fun attachmentMap(threadId: String, contextComments: List<Comment>): Map<String, List<Attachment>> {

@@ -12,7 +12,9 @@ import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.LlmResponse
 import com.aiforum.repo.CommentRepository
 import com.aiforum.repo.PersonaRepository
+import com.aiforum.repo.RelationStanceRepository
 import com.aiforum.repo.Revision
+import com.aiforum.repo.Stance
 import com.aiforum.service.GenerationService
 import com.aiforum.service.InFlightGenerations
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -215,6 +217,62 @@ class GenerationServiceTest {
             paulCtx.comments.any { it.authorId == "Sol" && it.body == "Sol's take" },
             "branch-only still shows the round's earlier sibling reply",
         )
+    }
+
+    /**
+     * A relation graph read from memory. Only [from] is overridden because the generation path asks the
+     * graph exactly one question — "what does the persona about to speak think of everyone?" — and
+     * deliberately never reads the incoming edges (a persona's prompt carries its own views, never the
+     * room's views of it). The list is returned in `to_persona` order, matching the real repository's
+     * explicit ORDER BY, so a test that asserted on rendered order would not be lying to itself.
+     */
+    private class ScriptedStances(private val edges: List<Stance>) :
+        RelationStanceRepository(JdbcTemplate(), Clock.systemUTC()) {
+        override fun from(fromId: String) = edges.filter { it.fromPersona == fromId }.sortedBy { it.toPersona }
+    }
+
+    private fun stance(from: String, to: String, text: String) =
+        Stance(from, to, text, RelationStanceRepository.SOURCE_SEEDED, "2026-01-01T00:00:00Z")
+
+    @Test
+    fun `only stances toward personas present in the context reach the system prompt`() {
+        // The point of the relation model is colouring how a persona speaks TO SOMEONE IN THE ROOM. Vex
+        // holds views of both Sol (who has posted here) and Paul (who has not); pasting Paul's edge in
+        // would be bulk noise about someone the model can't see — and, at 42 seeded edges, the failure
+        // mode is a prompt of opinions about absent people. This filter is also what makes BRANCH_ONLY
+        // narrow the stance set for free: a narrower context simply carries fewer authors.
+        val comments = InMemoryComments().apply { insert(postedReply("c1", "Sol", "Indexes help here")) }
+        val llm = ScriptedLlm(listOf("Hype aside, an index is cheap"))
+        val service = GenerationService(
+            llm, comments, roster("Vex", "Sol", "Paul"),
+            stances = ScriptedStances(
+                listOf(
+                    stance("Vex", "Sol", "needles him about hype"),
+                    stance("Vex", "Paul", "defers to him on frontends"),
+                ),
+            ),
+        )
+
+        service.generate("t1", null, listOf("Vex"), "", ScopeMode.WHOLE_THREAD)
+
+        val prompt = llm.requests.single().context.personaSystemPrompt
+        assertTrue(prompt.contains("needles him about hype"), "the stance toward the persona in the room is injected:\n$prompt")
+        assertFalse(prompt.contains("defers to him on frontends"), "a stance toward an absent persona is noise:\n$prompt")
+    }
+
+    @Test
+    fun `without a relation graph the system prompt is the persona's stored prompt, unchanged`() {
+        // The regression guard for every construction that predates relations (and for a roster with no
+        // edges): "no stances" must be indistinguishable from "no relation model at all" — not a header
+        // dangling over zero bullets, not a stray blank line. Byte equality is the assertion precisely
+        // because anything softer would let a formatting change slip into every prompt in the app.
+        val comments = InMemoryComments().apply { insert(postedReply("c1", "Sol", "Indexes help here")) }
+        val llm = ScriptedLlm(listOf("Hype aside, an index is cheap"))
+        val service = GenerationService(llm, comments, roster("Vex", "Sol"))
+
+        service.generate("t1", null, listOf("Vex"), "", ScopeMode.WHOLE_THREAD)
+
+        assertEquals("You are Vex.", llm.requests.single().context.personaSystemPrompt)
     }
 
     @Test

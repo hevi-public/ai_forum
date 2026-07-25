@@ -1,7 +1,9 @@
 @import com.aiforum.web.PersonaView
+@import com.aiforum.web.StanceFieldView
 @import com.aiforum.persona.Dials
 @param persona: PersonaView
 @param dialKeys: List<String>
+@param stanceFields: List<StanceFieldView>
 
 @template.layout(title = "Edit " + persona.name + " · AI Forum", activeNav = "members", content = @`
     <div data-page="edit-persona">
@@ -23,6 +25,22 @@
                     </label>
                 @endfor
             </fieldset>
+            <%-- Relations (S3): one free-text field per OTHER member — a persona holds no stance about
+                 itself. Blank retracts the view. These do NOT flag the prompt stale: a stance is read
+                 fresh at reply time, so editing one must never gate Save behind a paid Regenerate
+                 (persona-form-core classifies a stance field as inert for exactly this reason). --%>
+            @if(!stanceFields.isEmpty())
+                <fieldset class="new-persona__relations" data-relations>
+                    <legend>Relations</legend>
+                    @for(field in stanceFields)
+                        <label class="stance-field">
+                            <span class="stance-field__label">Toward ${field.toName}</span>
+                            <textarea name="stance_${field.toId}" data-stance-field="${field.toId}"
+                                      placeholder="How ${persona.name} sees ${field.toName} — free text; blank means no stance">${field.text}</textarea>
+                        </label>
+                    @endfor
+                </fieldset>
+            @endif
             <select class="new-persona__model" name="model">
                 <option value="" selected="${persona.model.isEmpty()}">default model</option>
                 <option value="claude-haiku-4-5-20251001" selected="${persona.model == "claude-haiku-4-5-20251001"}">Haiku 4.5 (fast)</option>

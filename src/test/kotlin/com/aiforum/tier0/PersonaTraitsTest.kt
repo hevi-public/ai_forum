@@ -5,6 +5,7 @@ import com.aiforum.persona.ComposerPrompts
 import com.aiforum.persona.Dials
 import com.aiforum.persona.PersonaSpec
 import com.aiforum.persona.PriorComposition
+import com.aiforum.persona.StanceProse
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -70,6 +71,35 @@ class PersonaTraitsTest {
         assertTrue(system.contains("only its") && system.contains("finished"), "must demand only the final message")
         assertTrue(system.contains("no visible reasoning") || system.contains("thinking process"), "must forbid visible reasoning")
         assertTrue(system.contains("<think>"), "must point reasoning at <think> tags so it stays strippable")
+    }
+
+    @Test
+    fun `the composer system role frames the ambient article forum, not a brainstorming room`() {
+        // The room runs on its own — personas bring articles and talk to each other, with the owner as a
+        // peer. Pinning the absence of "brainstorming" is the point: that word is what made every composed
+        // persona read as an assistant waiting for the owner to pose a question.
+        val system = ComposerPrompts.SYSTEM.lowercase()
+        assertTrue(system.contains("articles"), "the room is about sharing articles")
+        assertFalse(system.contains("brainstorming"), "the obsolete brainstorming framing must be gone")
+    }
+
+    @Test
+    fun `instruction carries the standing relationships when the persona has them`() {
+        val text = ComposerPrompts.instruction(
+            PersonaSpec(name = "Vex"),
+            stances = listOf(StanceProse.NamedStance("Sol", "needles him about hype")),
+        )
+        assertTrue(text.contains("Sol"), "the other member is named")
+        assertTrue(text.contains("needles him about hype"), "the stance prose reaches the authoring model")
+        // The live block injected at reply time is the source of truth; a stored prompt that also listed
+        // the relations would have the persona reciting a roster instead of behaving like it.
+        assertTrue(text.contains("never enumerate them"), "the composer is steered away from listing them")
+    }
+
+    @Test
+    fun `instruction omits the relationships section entirely when there are none`() {
+        val text = ComposerPrompts.instruction(PersonaSpec(name = "Vex"))
+        assertFalse(text.contains("Standing relationships"), "no header dangling over zero relations")
     }
 
     @Test

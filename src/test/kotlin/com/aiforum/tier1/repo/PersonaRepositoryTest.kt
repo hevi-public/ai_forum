@@ -27,7 +27,10 @@ class PersonaRepositoryTest {
 
     @BeforeEach
     fun clean() {
-        listOf("vote", "event_log", "comment", "thread", "persona").forEach { jdbc.update("DELETE FROM $it") }
+        // persona_stance (V24) before persona: its FKs would CASCADE the rows away anyway, but the house
+        // rule is child-first and explicit, so a future FK arriving without CASCADE can't silently block.
+        listOf("vote", "event_log", "comment", "thread", "persona_stance", "persona")
+            .forEach { jdbc.update("DELETE FROM $it") }
     }
 
     @Test

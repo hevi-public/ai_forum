@@ -114,13 +114,15 @@ class MigrationPipelineTest {
                     assertEquals(null, rs.getString("updated_at"), "V11 leaves the pre-existing thread unedited (NULL)")
                 }
 
-                // flyway_schema_history records the full V1..V23 chain as applied (V20 thread.author_id +
+                // flyway_schema_history records the full V1..V24 chain as applied (V20 thread.author_id +
                 // V21 ambient_run landed with the ambient loop; V22 added ambient_run.action for S2's
                 // comment action; V23 added the article_seen dedupe registry for S5's feed source,
-                // plan_docs/ambient-slice-5.md).
+                // plan_docs/ambient-slice-5.md; V24 added persona_stance, S3's qualitative relation graph,
+                // plan_docs/ambient-slice-3.md). Bump this with every migration — it is the check that a
+                // new migration actually RUNS against an old database rather than only a fresh one.
                 st.executeQuery("SELECT MAX(CAST(version AS INTEGER)) AS v FROM flyway_schema_history").use { rs ->
                     rs.next()
-                    assertEquals(23, rs.getInt("v"), "the latest migration (V23) should be recorded as applied")
+                    assertEquals(24, rs.getInt("v"), "the latest migration (V24) should be recorded as applied")
                 }
             }
         }

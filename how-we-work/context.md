@@ -174,11 +174,51 @@ no items" vs "all N feed items already seen"), assertable via the new `data-deta
 direction-doc open question 4: **allowlist-only**; WebSearch stays deferred; prompt-injection
 via feed text remains the documented §12 residual until the jail. Suite 181 → 184 scenarios.
 
+**2026-07-21 (Ambient Slice 3, V24):** qualitative relations are in
+(`plan_docs/ambient-slice-3.md`). `persona_stance` (V24) holds **directed, free-text** persona→persona
+stances — no numbers anywhere, which is the standing guard against re-importing the cut reward economy.
+Both endpoints are real FKs with `ON DELETE CASCADE` (a stance is *live state*, unlike a comment byline,
+which is history and survives its subject) — so deleting a persona now also drops everyone's stances
+*about* it, and "delete + let re-seed recreate" is no longer a safe way to refresh a descriptor. The
+`source` column (`seeded|owner|evolved`) is written but **read by nothing yet**: it exists now because it
+cannot be backfilled, and S4a must be able to tell the owner's own wording from a seed it may rewrite.
+Injection happens in three places: generation (`GenerationService.assembleContext` appends
+`StanceProse.block` to the persona's system prompt **before** `ContextAssembler`, so the vote firewall
+stays a pure boundary; **outgoing edges only**, filtered to personas actually present in the scoped
+context — which makes BRANCH_ONLY narrow the stance set for free), the composer
+(`ComposerPrompts.instruction`, with a don't-enumerate steer), and the dispatcher
+(`PersonaRouter.relationsBlock`, scoped to edges pointing at someone **already talking** — the full
+42-edge graph in every routing call would swamp the skills/topic signal). Admin: stances render on the
+profile (`data-stance-to`) and are edited on the persona edit form (`stance_<id>` fields, blank =
+retract, written as `source=owner`); `stance_*` is deliberately inert in `persona-form-core.mjs` and
+excluded from the `inputsChanged` backstop, so a stance edit is free. New `POST /personas/recompose`
+rewrites every stored prompt **fresh** (`prior = null`) from current traits + stances — the explicit,
+paid way to pick up a framing change on a live DB, since seeding never clobbers a stored prompt. The
+three hardcoded prompts (`ComposerPrompts.SYSTEM`, `PersonaRepository.systemPromptFor`,
+`PersonaRouter.systemPrompt`) and the seven seed descriptors/abilities were reframed from "the owner
+poses questions and the room replies" to the ambient article forum. Suite 184 → 199 scenarios.
+
+> Gotcha found the hard way: JTE parses `@param` declarations itself, and a generic carrying a comma
+> (`Map<String, String>`) breaks that parse with a misleading "Unexpected end of template expression"
+> pointing at an unrelated line. Pass a prepared `List<SomeView>` instead. Also: `MigrationPipelineTest`
+> pins the highest applied migration version — bump it with every new migration.
+
 ## Open threads / near-term
 
-- **S3 — qualitative relations** (`plan_docs/ai-driven-forum-direction.md` §9): stance table +
-  prose injection into prompts + admin surface — the next ambient slice now that S1/S2/S5 are
-  merged. Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
+- **S4a — relation-stance evolution** (`plan_docs/ai-driven-forum-direction.md` §6, §9): the next
+  ambient slice, and the one that makes relations *evolve* rather than sit where they were seeded.
+  Owner decision 2026-07-21: **audit-only auto-apply** — stances shift on a slow, capped cadence and the
+  owner sees old→new with the interactions cited and can revert; this is a **deliberate override** of the
+  §6.5 "owner-approved" precedent named in direction-doc §11 item 5. De-risking finding: §6 claims this
+  "forces the first real use of interaction records", but that is overstated — `comment` already carries
+  `parent_id`/`author_id`/`created_at`/`state`, so who-replied-to-whom-and-when is derivable from the
+  existing tree (`event_log` remains dead code, zero references in `src/main/kotlin`). What S4a actually
+  needs is a read over the comment tree plus an LLM judgment of exchange *tone*. Note the S3 tension it
+  must settle: stance flavour baked into a stored `system_prompt` by the composer goes stale once edges
+  evolve — either recompose on evolution, or drop stances from the composer input.
+- **S4b — interest/trait drift**, then **persona memory** (§6.3, revived into the near-term roadmap at
+  the owner's request 2026-07-21; currently has no slice or plan doc).
+- Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
 - **Feed-fetch socket timeouts** (Assay follow-up on PR #4): `FeedArticleSource`'s RestClient has
   no connect/read timeout — the tick thread is deadline-protected, but a truly hung socket parks
   the daemon worker until OS TCP timeout. Add client-level timeouts when next touching the file.

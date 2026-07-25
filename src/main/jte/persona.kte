@@ -1,7 +1,9 @@
 @import com.aiforum.web.PersonaView
+@import com.aiforum.web.StanceView
 @import com.aiforum.dto.Avatar
 @import com.aiforum.persona.Dials
 @param persona: PersonaView
+@param stances: List<StanceView>
 
 @template.layout(title = persona.name + " · AI Forum", activeNav = "members", content = @`
     <div class="thread__op" data-persona-id="${persona.id}" data-persona-name="${persona.name}" data-persona-descriptor="${persona.descriptor}" data-persona-abilities="${persona.abilities.joinToString(", ")}" data-system-prompt="${persona.systemPrompt}">
@@ -26,6 +28,16 @@
         @endif
         @if(persona.model.isNotBlank())
             <p class="reply__handle">model: ${persona.model}</p>
+        @endif
+        <%-- Outgoing stances only: what this member thinks of the room, never the room's view of them
+             (the same asymmetry the generation prompt uses). Free text by design — there is no score to
+             render here, and there never should be. --%>
+        @if(!stances.isEmpty())
+            <ul class="persona__relations">
+                @for(s in stances)
+                    <li class="stance" data-stance-to="${s.toId}">${s.toName}: ${s.text}</li>
+                @endfor
+            </ul>
         @endif
         <p class="persona__prompt" data-prompt-preview>${persona.systemPrompt}</p>
         <a class="btn" href="/personas/${persona.slug}/edit">Edit ▸</a>

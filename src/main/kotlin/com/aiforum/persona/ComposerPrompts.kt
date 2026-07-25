@@ -24,11 +24,17 @@ object ComposerPrompts {
     const val COMPOSER_ID = "__prompt_composer__"
     const val COMPOSER_NAME = "PromptComposer"
 
-    /** The stable role for the authoring model. */
+    /** The stable role for the authoring model. The framing is the AMBIENT forum (spec Fork B): the room
+     *  runs on its own — personas bring articles and talk about them with each other — and the owner is
+     *  one participant among them, not the questioner every reply is addressed to. The old "collaborative
+     *  brainstorming" wording made every composed persona read as an assistant waiting to be asked. */
     val SYSTEM: String = buildString {
-        append("You are a prompt author for a collaborative brainstorming forum. Given a persona's ")
-        append("name, abilities, and personality dials, write a concise system prompt (2–4 sentences) ")
-        append("that makes a language model embody that persona when it replies in the forum. ")
+        append("You are a prompt author for a small ambient discussion forum in which AI personas share ")
+        append("interesting articles from around the web and discuss them in threads — with each other, ")
+        append("and with the forum's owner, who takes part as a peer. Given a persona's name, abilities, ")
+        append("personality dials, and any standing relationships toward the other members, write a ")
+        append("concise system prompt (2–4 sentences) that makes a language model embody that persona ")
+        append("when it posts and replies in the forum. ")
         append("Translate each dial into observable behaviour in prose — never mention the numbers or ")
         append("the word \"dial\". The persona's job is to engage with the substance of the discussion; ")
         append("its personality should colour how it contributes, not become the point — so write a ")
@@ -42,14 +48,43 @@ object ComposerPrompts {
         append("Output only the system prompt itself, with no preamble or quotes.")
     }
 
-    /** The per-persona instruction turn: the spec, and on an edit the previous values + prompt. */
-    fun instruction(spec: PersonaSpec, prior: PriorComposition? = null): String = buildString {
+    /**
+     * The per-persona instruction turn: the spec, on an edit the previous values + prompt, and any
+     * [stances] this persona holds toward other members (already resolved to display names).
+     *
+     * The stance section deliberately ends with a DON'T-ENUMERATE steer. Stances are not baked state:
+     * the live, discussion-scoped list is appended at reply time by [StanceProse.block], and that block
+     * is the source of truth for who this persona is currently dealing with. If the authoring model
+     * also listed the relations inside the stored prompt, every reply would carry two versions of them
+     * — a frozen roster naming members who aren't even in the thread, plus the live one — which reads
+     * as the persona reciting a relationship note instead of behaving. So the composer gets them only
+     * as *flavour* for the voice it writes.
+     *
+     * Known tension, deferred to a later slice: once stances evolve (see
+     * `plan_docs/ai-driven-forum-direction.md` §9/S4a), flavour absorbed into a stored prompt can go
+     * stale and quietly contradict the live block — a persona composed while it needled someone would
+     * keep a needling voice after the stance softened. The recompose-all control is the manual escape
+     * hatch today; an automatic re-compose on stance drift is the real fix, and it is not this slice's.
+     */
+    fun instruction(
+        spec: PersonaSpec,
+        prior: PriorComposition? = null,
+        stances: List<StanceProse.NamedStance> = emptyList(),
+    ): String = buildString {
         append("Persona name: ${spec.name}\n")
         if (spec.descriptor.isNotBlank()) append("Character notes: ${spec.descriptor}\n")
         val abilities = if (spec.abilities.isEmpty()) "(none given)" else spec.abilities.joinToString(", ")
         append("Abilities: $abilities\n")
         append("Personality dials (0 = low, 10 = high):\n")
         Dials.normalize(spec.dials).forEach { (key, value) -> append("  - ${Dials.describe(key)}: $value\n") }
+        if (stances.isNotEmpty()) {
+            append("\nStanding relationships toward other members (this persona's own view):\n")
+            stances.forEach { (name, text) -> append("  - toward $name: $text\n") }
+            append("Weave these into the persona's voice as natural attitudes, lightly — the live list ")
+            append("is also provided at reply time, so never enumerate them in the prompt you write.\n")
+        }
+        // The EDIT block stays last: it closes with the "rewrite the previous prompt" directive, which
+        // must be the final thing the authoring model reads.
         if (prior != null) {
             append("\nThis is an EDIT — adjust the existing persona, do not start over.\n")
             append("Previous dials:\n")

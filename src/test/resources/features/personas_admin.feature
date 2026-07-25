@@ -93,3 +93,85 @@ Feature: Personas & admin
   Scenario: A talkativeness value round-trips through create and the profile display
     When the owner adds a persona "gale" with abilities "sqlite" and dials agreeableness 5, verbosity 5, talkativeness 8
     Then the persona "gale" has dial "talkativeness" value 8
+
+  # S3 (plan_docs/ambient-slice-3.md): QUALITATIVE RELATIONS. A persona holds a directed, free-text
+  # stance about each other member — "needles him about hype" — which is prose the model reads, never a
+  # score. (The moment a relation becomes a number it is rankable, then optimisable, and the cut reward
+  # economy is back under a new column name; there is no number anywhere in this model, by design.)
+  # Relations are the owner's to author, so they are shown on the profile and edited on the edit form.
+  Scenario: Setting a qualitative stance toward another persona
+    Given a persona "ada" exists with every dial at 5
+    And a persona "bee" exists
+    When the owner saves "ada" with a stance toward "bee" of "needles him about hype"
+    Then the profile for "ada" shows a stance toward "bee" of "needles him about hype"
+
+  # Clearing the field is how a relation is retired — an empty stance is not an empty opinion worth
+  # rendering, it means there is no edge.
+  Scenario: Clearing a stance field removes the relation
+    Given a persona "ada" exists with every dial at 5
+    And a persona "bee" exists
+    And persona "ada" has a stance toward "bee" of "needles him about hype"
+    When the owner saves "ada" with a stance toward "bee" of ""
+    Then the profile for "ada" shows no stance toward "bee"
+
+  Scenario: The edit form offers a stance field toward each other member
+    Given a persona "ada" exists
+    And a persona "bee" exists
+    And persona "ada" has a stance toward "bee" of "needles him about hype"
+    When the owner opens the edit form for "ada"
+    Then the edit form offers a stance field toward "bee"
+    And the stance field toward "bee" is prefilled with "needles him about hype"
+
+  # Stances reach generation dynamically — they were never baked into the stored prompt the way dials,
+  # abilities and the descriptor are — so there is nothing for a recompose to reconcile. Editing one
+  # must therefore stay FREE: no paid LLM call, and no silent server-side recompose from the
+  # inputsChanged backstop, which the same save would trigger if a dial had moved.
+  Scenario: Editing only a stance costs nothing
+    Given a persona "ada" exists with every dial at 5
+    And a persona "bee" exists
+    When the owner saves "ada" with a stance toward "bee" of "defers to him on databases"
+    Then the profile for "ada" shows a stance toward "bee" of "defers to him on databases"
+    And no composition call was made
+
+  # When a compose DOES happen for some other reason, the composer sees the persona's stances too, so a
+  # standing relation can be woven into who the persona IS rather than only recalled at reply time.
+  # (Trigger here is the resync backstop above: prompt untouched, dials moved.)
+  Scenario: A persona's stance is injected into its composer prompt
+    Given a persona "vex" exists with system prompt "OLD: a blunt contrarian." and dials agreeableness 1, verbosity 2
+    And a persona "sol" exists
+    And persona "vex" has a stance toward "sol" of "needles him about hype"
+    And the LLM will respond with "NEW: a warmer contrarian."
+    When the owner saves "vex" with the unchanged prompt "OLD: a blunt contrarian." and dials agreeableness 8, verbosity 9
+    Then the composer was handed the stance "needles him about hype"
+
+  # Reframing the room's prompts (or seeding new stances) leaves every STORED prompt stale, so the owner
+  # needs one deliberate action that refreshes them all. Deliberate is the point: it is a paid call per
+  # member and it overwrites hand-edited prompts, so the members page must say so rather than hide a
+  # bulk spend behind an innocuous button.
+  Scenario: The members page offers a recompose-all control
+    Given a persona "ada" exists
+    When the owner opens the members list
+    Then the members page offers a recompose-all control
+    And the recompose-all control warns what it costs
+
+  # The loop walks personas in NAME order, so "ada" is composed before "bee" and the two scripted
+  # responses land in that order — naming them alphabetically is what makes the pairing unambiguous.
+  Scenario: Recomposing all prompts refreshes every persona
+    Given a persona "ada" exists with system prompt "OLD: ada." and dials agreeableness 1, verbosity 2
+    And a persona "bee" exists with system prompt "OLD: bee." and dials agreeableness 1, verbosity 2
+    And the LLM will respond with "FRESH: ada."
+    And the LLM will respond with "FRESH: bee."
+    When the owner recomposes every persona's prompt
+    Then the persona "ada" has system prompt "FRESH: ada."
+    And the persona "bee" has system prompt "FRESH: bee."
+
+  # One bad response must not roll back the batch or block the members after it: the failed persona
+  # keeps the prompt it had, and the loop carries on. Again in name order — "ada" takes the failure.
+  Scenario: A failed recompose leaves that persona's prompt alone and the rest still refresh
+    Given a persona "ada" exists with system prompt "OLD: ada." and dials agreeableness 1, verbosity 2
+    And a persona "bee" exists with system prompt "OLD: bee." and dials agreeableness 1, verbosity 2
+    And the LLM will fail with a timeout
+    And the LLM will respond with "FRESH: bee."
+    When the owner recomposes every persona's prompt
+    Then the persona "ada" has system prompt "OLD: ada."
+    And the persona "bee" has system prompt "FRESH: bee."

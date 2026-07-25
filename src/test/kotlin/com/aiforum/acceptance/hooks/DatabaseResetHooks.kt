@@ -45,7 +45,12 @@ class DatabaseResetHooks(
         // article_seen (V23) is standalone (no FKs), cleared alongside ambient_run so a URL a prior scenario's
         // feed source marked seen can't linger into the next (the real FeedArticleSource never wires under
         // test, but keep the dedupe registry scenario-isolated the same as everything else).
-        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "persona").forEach {
+        // persona_stance (V24) references persona(id) from BOTH of its endpoint columns, so it precedes
+        // persona here. Its FKs are ON DELETE CASCADE — unlike every other row above, SQLite would clear
+        // these for us — but the wipe stays explicit anyway: a reset that leans on a cascade reads as if
+        // stances were never seeded at all, and the day someone drops the CASCADE the resets would start
+        // failing somewhere far from here instead of on this line.
+        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "persona_stance", "persona").forEach {
             jdbc.update("DELETE FROM $it")
         }
     }
