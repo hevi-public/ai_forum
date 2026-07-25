@@ -2,13 +2,12 @@ package com.aiforum.web
 
 import com.aiforum.persona.Abilities
 import com.aiforum.persona.Dials
+import com.aiforum.persona.PersonaPromptRefresher
 import com.aiforum.persona.PersonaSpec
 import com.aiforum.persona.PriorComposition
 import com.aiforum.persona.PromptComposer
-import com.aiforum.persona.StanceProse
 import com.aiforum.repo.PersonaRepository
 import com.aiforum.repo.RelationStanceRepository
-import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
@@ -60,9 +59,10 @@ class PersonaController(
     private val personas: PersonaRepository,
     private val composer: PromptComposer,
     private val stances: RelationStanceRepository,
+    // Owns "recompose this persona from scratch" — shared with the stance-evolution pass, which refreshes
+    // a persona whose relations just moved (plan_docs/ambient-slice-4a.md D11).
+    private val refresher: PersonaPromptRefresher,
 ) {
-
-    private val log = LoggerFactory.getLogger(javaClass)
 
     // Profile URLs use the slug (V5) so multi-word names ("Ada Lovelace") work without %20 noise.
     @GetMapping("/personas/{slug}")
@@ -175,9 +175,9 @@ class PersonaController(
             nextSpec.abilities != existing.abilities ||
             descriptor != existing.descriptor
         val prompt = when {
-            systemPrompt.isBlank() -> composer.compose(nextSpec, priorOf(existing), storedStances(existing.id))
+            systemPrompt.isBlank() -> composer.compose(nextSpec, priorOf(existing), refresher.storedStances(existing.id))
             systemPrompt == existing.systemPrompt && inputsChanged ->
-                composer.compose(nextSpec, priorOf(existing), storedStances(existing.id))
+                composer.compose(nextSpec, priorOf(existing), refresher.storedStances(existing.id))
             else -> systemPrompt
         }
         personas.update(existing.id, existing.name, descriptor, model, prompt, nextSpec.abilities, nextSpec.dials)
@@ -195,43 +195,18 @@ class PersonaController(
     ): String {
         val existing = personas.findBySlug(slug) ?: return ""
         val nextSpec = PersonaSpec(existing.name, descriptor, Abilities.parse(abilities), dialsFrom(allParams))
-        return composer.compose(nextSpec, priorOf(existing), storedStances(existing.id))
+        return composer.compose(nextSpec, priorOf(existing), refresher.storedStances(existing.id))
     }
 
     /**
-     * Rewrite EVERY member's stored system prompt from its current descriptor/abilities/dials + stances.
-     * Seeding never clobbers a stored prompt, so a forum that has been running since before a framing
-     * change keeps serving the old wording forever; this is the owner's explicit, paid way to catch up —
-     * one LLM call per member, which is why it is a button with the cost stated on it rather than
-     * something that happens quietly.
-     *
-     * Composed FRESH (`prior = null`) rather than as an adjustment: the point of the action is to REPLACE
-     * a framing, and handing the model the old prompt as prior invites it to preserve exactly what we are
-     * trying to replace. The per-persona edit → Regenerate → Save path still exists for surgical changes
-     * that should keep continuity.
-     *
-     * Each persona is isolated in its own runCatching: a flaky seam on member three must not cost members
-     * four through seven their refresh, and a failure leaves that persona's stored prompt untouched rather
-     * than half-written. Synchronous is fine here — single-user PoC, and the owner is watching the click.
-     *
-     * Rejected alternative: rewriting prompts at startup for rows matching the old template. That mutates
-     * owner data at boot with no consent, and silently misses any prompt the owner had already hand-edited.
+     * The owner's explicit, paid catch-up: rewrite EVERY member's stored system prompt from its current
+     * inputs + stances. The behaviour, and why it composes fresh rather than adjusting a prior, lives on
+     * [PersonaPromptRefresher] — the evolution pass runs the same code, and one copy of that reasoning is
+     * the point of the extraction.
      */
     @PostMapping("/personas/recompose")
     fun recomposeAll(): String {
-        var refreshed = 0
-        personas.findAll().forEach { p ->
-            runCatching {
-                val spec = PersonaSpec(p.name, p.descriptor, p.abilities, p.dials)
-                composer.compose(spec, prior = null, stances = storedStances(p.id))
-            }.onSuccess { prompt ->
-                personas.update(p.id, p.name, p.descriptor, p.model, prompt, p.abilities, p.dials)
-                refreshed++
-            }.onFailure { e ->
-                log.warn("event=persona.recompose.failed persona={} reason={}", p.id, e.toString())
-            }
-        }
-        log.info("event=persona.recompose.ok count={}", refreshed)
+        refresher.refreshAll()
         return "redirect:/personas"
     }
 
@@ -239,12 +214,6 @@ class PersonaController(
     private fun stanceViews(personaId: String): List<StanceView> =
         stances.from(personaId).map { s ->
             StanceView(s.toPersona, personas.find(s.toPersona)?.name ?: s.toPersona, s.stance)
-        }
-
-    /** The same outgoing edges shaped for the composer, which speaks in names rather than ids. */
-    private fun storedStances(personaId: String): List<StanceProse.NamedStance> =
-        stances.from(personaId).map { s ->
-            StanceProse.NamedStance(personas.find(s.toPersona)?.name ?: s.toPersona, s.stance)
         }
 
     /**

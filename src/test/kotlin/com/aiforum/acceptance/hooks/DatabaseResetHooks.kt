@@ -50,7 +50,9 @@ class DatabaseResetHooks(
         // these for us — but the wipe stays explicit anyway: a reset that leans on a cascade reads as if
         // stances were never seeded at all, and the day someone drops the CASCADE the resets would start
         // failing somewhere far from here instead of on this line.
-        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "persona_stance", "persona").forEach {
+        // stance_change (V25) is the same story one slice on — both of its endpoint columns CASCADE from
+        // persona(id) — so it precedes persona too, and the wipe stays explicit for the reason just given.
+        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "stance_change", "persona_stance", "persona").forEach {
             jdbc.update("DELETE FROM $it")
         }
     }

@@ -16,6 +16,14 @@ aiforum:
   # The config_guardrails rail asserts this from the outside (/__diag ambientEnabled=false).
   ambient:
     enabled: false
+  # Stance evolution OFF under test for the same reason (plan_docs/ambient-slice-4a.md D12): it is the
+  # second thing in this app that spends LLM calls on a schedule, so its scheduler must be unable to fire
+  # during a run. Redundant with the shipped default, and stated anyway — a rail asserts a value, and a
+  # value that exists only as a Kotlin default is one refactor away from silently becoming true. The
+  # /admin/stances trigger still works (acceptance drives it over HTTP); the config_guardrails rail
+  # asserts this from the outside (/__diag stanceEvolutionEnabled=false).
+  stance-evolution:
+    enabled: false
   images:
     # Image blobs go under build/ (like the test DB), asserted by ProfileGuard so a test run never writes
     # into the real ~/.ai_forum image store.

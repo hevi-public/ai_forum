@@ -25,6 +25,11 @@ data class ForumStats(
     val ambientRuns: Int = 0,
     val threadsOwner: Int = 0,
     val threadsPersona: Int = 0,
+    // Audited relation-stance rewrites (plan_docs/ambient-slice-4a.md): how many times the evolution pass
+    // has moved an edge. Note carefully WHAT this counts — audit ROWS, i.e. how often the pass acted. It
+    // is not a property of any relationship and never reaches a prompt: the relation model itself is prose
+    // by hard guardrail (V24/V25 headers), and a per-pair tally is exactly the scoreboard that cut.
+    val stanceChanges: Int = 0,
 ) {
     val commentsTotal: Int get() = commentsByState.values.sum()
 

@@ -1,0 +1,93 @@
+@import com.aiforum.web.StanceChangeView
+@param changes: List<StanceChangeView>
+<%-- The audited relation-stance log (plan_docs/ambient-slice-4a.md D9/D10). Two conventions this file
+     has to keep, both of which fail loudly and confusingly if broken:
+     · the @param type stays a single-argument generic — a generic carrying a comma (Map<String, String>)
+       breaks JTE's @param parser with an "Unexpected end of template expression" pointing at an
+       unrelated line, which cost a previous slice real time;
+     · NO backticks below, not even inside a comment — the whole body is a backtick-delimited JTE
+       content block, and a stray one would close it mid-template. --%>
+@template.layout(title = "Admin · Stance changes · AI Forum", activeNav = "admin", content = @`
+    <div class="admin-list" data-admin-list="stances">
+        <p class="admin-list__back"><a href="/admin">← Admin</a></p>
+        <h1 class="admin-list__title">Stance changes</h1>
+        <p class="admin-list__note">How the members see each other drifts from what they actually did to each other — applied straight away, never queued for approval. This log is the control: read before → after against the exchange it was judged from, and undo what you disagree with. A stance you wrote by hand is skipped for good and never appears here.</p>
+        <%-- The manual trigger. POSTs to /admin/stances/evolve, which runs one pass synchronously and
+             303-redirects back so the changes it just made are at the top. Ungated on purpose: the
+             stance-evolution "enabled" property is the SCHEDULER kill switch, and this button is also
+             the only way anything under the test profile can reach the pass at all. --%>
+        <form class="admin-list__trigger" method="post" action="/admin/stances/evolve" data-stance-evolve>
+            <button class="btn" type="submit">Run an evolution pass now ▸</button>
+        </form>
+        @if(changes.isEmpty())
+            <p class="admin-list__empty" data-admin-list-empty="true">Nothing has drifted yet — run a pass above.</p>
+        @else
+            <ul class="admin-list__items">
+                @for(change in changes)
+                    <%-- ONE <li> per change, and the whole row must stay inside it: the acceptance probe
+                         (Html.latestStanceChangeRow) slices from this opening tag to the FIRST </li>, so a
+                         nested list anywhere below would truncate the row and take the evidence with it.
+                         data-stance-reverted goes through .toString() because JTE treats a raw Boolean in an
+                         attribute as an HTML boolean attribute — it would render the bare attribute name
+                         (or nothing at all), and every reader here wants the literal "true"/"false". --%>
+                    <li class="admin-list__item admin-list__item--stance"
+                        data-stance-change="${change.id}"
+                        data-stance-from="${change.fromPersona}"
+                        data-stance-to="${change.toPersona}"
+                        data-stance-reverted="${change.reverted.toString()}">
+                        <span class="admin-list__meta">
+                            <span class="admin-list__badge">${change.fromLabel} → ${change.toLabel}</span>
+                            <span class="admin-list__sep">·</span>
+                            <span>was ${change.oldSource}</span>
+                            @if(change.reverted)
+                                <span class="admin-list__sep">·</span>
+                                <span class="admin-list__badge">undone by you</span>
+                            @endif
+                            <span class="admin-list__sep">·</span>
+                            <span class="admin-list__ago">${change.ago}</span>
+                        </span>
+                        <p class="admin-list__snippet">
+                            <span class="admin-list__stance-label">before</span>
+                            <span data-stance-old>${change.oldStance}</span>
+                        </p>
+                        <p class="admin-list__snippet">
+                            <span class="admin-list__stance-label">after</span>
+                            <span data-stance-new>${change.newStance}</span>
+                        </p>
+                        <div class="admin-list__cited">
+                            <span class="admin-list__stance-label">judged from</span>
+                            @if(change.cited.isEmpty())
+                                <span class="admin-list__meta">No exchange was snapshotted with this change.</span>
+                            @else
+                                @for(cite in change.cited)
+                                    <%-- The evidence is the snapshotted prose; the permalink is a convenience
+                                         on top of it. The cited column carries no foreign key (V25 header),
+                                         so a citation whose ids never made it into the snapshot still
+                                         renders — unlinked rather than absent, since this column is the
+                                         system's only copy of what was judged. --%>
+                                    @if(cite.permalink != null)
+                                        <span class="admin-list__snippet"><a href="${cite.permalink}" data-stance-cited="${cite.commentId}">“${cite.snippet}”</a></span>
+                                    @else
+                                        <span class="admin-list__snippet">“${cite.snippet}”</span>
+                                    @endif
+                                @endfor
+                            @endif
+                        </div>
+                        <%-- Reverting restores the old text AND the old provenance, so a reverted seeded edge
+                             goes back to seeded and is free to drift again — revert undoes, it does not
+                             freeze (D10). Pinning a relationship for good is what the persona edit form is
+                             for; that stamps it as yours, which the pass skips forever.
+                             The button is dropped once the change is undone: a second revert is already a
+                             no-op at the service, and offering a control that does nothing invites the owner
+                             to wonder which of the two texts is currently live. --%>
+                        @if(!change.reverted)
+                            <form method="post" action="/admin/stances/${change.id}/revert" data-stance-revert>
+                                <button class="btn btn--ghost" type="submit">Revert</button>
+                            </form>
+                        @endif
+                    </li>
+                @endfor
+            </ul>
+        @endif
+    </div>
+`)

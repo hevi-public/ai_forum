@@ -203,21 +203,44 @@ poses questions and the room replies" to the ambient article forum. Suite 184 �
 > pointing at an unrelated line. Pass a prepared `List<SomeView>` instead. Also: `MigrationPipelineTest`
 > pins the highest applied migration version — bump it with every new migration.
 
+**2026-07-25 (Ambient Slice 4a, V25):** relation stances now **evolve** (`plan_docs/ambient-slice-4a.md`).
+A pass reads the persona→persona exchanges in the comment tree since the last standing change, asks the
+model to judge their **tone**, and rewrites the affected `persona_stance` rows — auto-applied, no approval
+queue (direction-doc §11.5). Every change is captured in `stance_change` (V25) with old text, **old
+provenance**, and the cited exchanges snapshotted as prose; the owner reads old→new at **`/admin/stances`**
+and reverts what they disagree with.
+
+Five things worth knowing before touching it:
+
+- **The interaction read must include top-level comments.** S2's ambient comment lands on someone else's
+  article thread with `parent_id NULL`, so its addressee is `thread.author_id`, not a parent row.
+  `CommentRepository.exchangesSince` covers both branches; a plain reply→parent self-join would look
+  correct in tests and almost never fire in the live forum. Persona-ness is decided against the **roster**
+  (a string heuristic would silently admit `gh:` authors).
+- **S4a runs are deliberately NOT recorded in `ambient_run`.** `AmbientRunRepository.count()` drives the
+  ambient tick's post/comment parity *and* its round-robin author index — extra rows there would silently
+  change which persona posts which article.
+- **The no-numbers guardrail is now executable.** `StanceJudge.parse` refuses any digit-bearing answer
+  outright: the one place a number could enter the relation model is the judge's output, and a Tier-0 test
+  pins the refusal. "Pushed back twice" is prose; "trust 4/5" cannot reach the table.
+- **Revert undoes, it does not freeze** — it restores the old text *and* the old `source`, so a reverted
+  seeded row goes back to `seeded` and may drift again. Freezing is what the persona edit form's `owner`
+  stamp is for. Consequently the evolution window is the newest **non-reverted** change, not
+  `MAX(changed_at)`: a reverted row must give up its claim on the window or that evidence is walled off
+  forever.
+- **Owner calls 2026-07-25:** auto-recompose on evolution (settling S3's staleness tension — extracted into
+  `PersonaPromptRefresher`, shared with `POST /personas/recompose`), its own gated scheduler pair
+  (`aiforum.stance-evolution.enabled`, **default off**, `/__diag` rail + config_guardrails scenario), and
+  **no per-run cap by default** (`max-edges-per-run: 0`). That last one plus auto-recompose means a busy
+  run costs one judgment per qualifying pair **plus** one compose per affected persona — the scheduler
+  defaulting off is what keeps unattended spend opt-in. Suite 200 → 213 scenarios.
+
 ## Open threads / near-term
 
-- **S4a — relation-stance evolution** (`plan_docs/ai-driven-forum-direction.md` §6, §9): the next
-  ambient slice, and the one that makes relations *evolve* rather than sit where they were seeded.
-  Owner decision 2026-07-21: **audit-only auto-apply** — stances shift on a slow, capped cadence and the
-  owner sees old→new with the interactions cited and can revert; this is a **deliberate override** of the
-  §6.5 "owner-approved" precedent named in direction-doc §11 item 5. De-risking finding: §6 claims this
-  "forces the first real use of interaction records", but that is overstated — `comment` already carries
-  `parent_id`/`author_id`/`created_at`/`state`, so who-replied-to-whom-and-when is derivable from the
-  existing tree (`event_log` remains dead code, zero references in `src/main/kotlin`). What S4a actually
-  needs is a read over the comment tree plus an LLM judgment of exchange *tone*. Note the S3 tension it
-  must settle: stance flavour baked into a stored `system_prompt` by the composer goes stale once edges
-  evolve — either recompose on evolution, or drop stances from the composer input.
 - **S4b — interest/trait drift**, then **persona memory** (§6.3, revived into the near-term roadmap at
-  the owner's request 2026-07-21; currently has no slice or plan doc).
+  the owner's request 2026-07-21; currently has no slice or plan doc). S4b is now the next ambient slice,
+  and it carries the convergence risk S4a deliberately left alone (§11.5's remaining open items: how
+  convergence is measured, and manual newcomer injection as the diversity lever).
 - Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
 - **Feed-fetch socket timeouts** (Assay follow-up on PR #4): `FeedArticleSource`'s RestClient has
   no connect/read timeout — the tick thread is deadline-protected, but a truly hung socket parks

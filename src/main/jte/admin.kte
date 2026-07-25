@@ -64,6 +64,23 @@
         </section>
 
         <section class="admin__section">
+            <h2 class="admin__section-title">Relation stances</h2>
+            <ul class="stat-grid">
+                <%-- The audited stance rewrites (plan_docs/ambient-slice-4a.md), linking to their own
+                     drill-down — the ambient-runs shape, and for the same reason: the drill-down carries a
+                     control (revert) the read-only dashboard has no business holding.
+                     What the figure counts is deliberately narrow: audit ROWS, i.e. how often the pass has
+                     acted. There is no per-pair or per-persona breakdown here and there must never be one —
+                     a relation stance is prose by hard guardrail, and a count grouped by edge is a score. --%>
+                <li class="stat" data-stat="stance-changes" data-value="${stats.stanceChanges}">
+                    <a class="stat__link" href="/admin/stances">
+                        <span class="stat__num">${stats.stanceChanges}</span><span class="stat__label">Stance changes</span>
+                    </a>
+                </li>
+            </ul>
+        </section>
+
+        <section class="admin__section">
             <h2 class="admin__section-title">Comments by state</h2>
             <ul class="stat-grid">
                 <li class="stat" data-stat="comments-posted" data-value="${stats.stateCount("POSTED")}">

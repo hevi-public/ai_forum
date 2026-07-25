@@ -38,6 +38,11 @@ class StatsRepository(private val jdbc: JdbcTemplate) {
         ambientRuns = countOf("ambient_run"),
         threadsOwner = jdbc.queryForObject("SELECT COUNT(*) FROM thread WHERE author_id IS NULL", Int::class.java) ?: 0,
         threadsPersona = jdbc.queryForObject("SELECT COUNT(*) FROM thread WHERE author_id IS NOT NULL", Int::class.java) ?: 0,
+        // The stance-evolution audit trail (plan_docs/ambient-slice-4a.md). Counted HERE and nowhere else:
+        // StanceChangeRepository deliberately offers no aggregate at all, so that an audit row can never be
+        // summed per pair or per persona — a dashboard total says how busy the pass has been, whereas the
+        // same COUNT grouped by edge would be a relationship score wearing an auditor's badge.
+        stanceChanges = countOf("stance_change"),
     )
 
     private fun countOf(table: String): Int =

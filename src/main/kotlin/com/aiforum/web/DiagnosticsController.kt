@@ -2,6 +2,7 @@ package com.aiforum.web
 
 import com.aiforum.ambient.AmbientFeedProperties
 import com.aiforum.ambient.ArticleSource
+import com.aiforum.config.StanceEvolutionProperties
 import org.springframework.context.annotation.Profile
 import org.springframework.core.env.Environment
 import org.springframework.web.bind.annotation.GetMapping
@@ -22,6 +23,10 @@ class DiagnosticsController(
     // @Configuration (AmbientConfig), so the bean exists — empty — under test even though the real
     // FeedArticleSource can never wire here; that lets the config_guardrails rail assert ambientFeedCount=0.
     private val feedProperties: AmbientFeedProperties,
+    // S4a (plan_docs/ambient-slice-4a.md D12): the stance-evolution knobs. Bound from a NON-profiled
+    // @Configuration (StanceEvolutionConfig) for the same reason as the feed properties above — the
+    // scheduler itself can never wire under test, so the rail has to read the CONFIG, not the ticker.
+    private val stanceEvolution: StanceEvolutionProperties,
 ) {
 
     @GetMapping("/__diag")
@@ -43,6 +48,14 @@ class DiagnosticsController(
         // — the config_guardrails rail pins them so a drift toward a live fetcher fails a scenario.
         "ambientSource" to env.getProperty("aiforum.ambient.source", "stub"),
         "ambientFeedCount" to feedProperties.feeds.size,
+        // S4a: the OTHER scheduled loop that costs LLM calls. Anything in this codebase that spends
+        // money unattended gets a rail, and this pair is the only thing that would catch a future drift
+        // toward a live, paid evolution pass running inside the suite. Read off the bound properties
+        // rather than the raw environment: it is the same key the ticker's @ConditionalOnProperty
+        // resolves, and reading the bean also proves the bean EXISTS under test — which is the half the
+        // cap below depends on.
+        "stanceEvolutionEnabled" to stanceEvolution.enabled,
+        "stanceEvolutionMaxEdgesPerRun" to stanceEvolution.maxEdgesPerRun,
         "activeProfiles" to env.activeProfiles.toList(),
     )
 }

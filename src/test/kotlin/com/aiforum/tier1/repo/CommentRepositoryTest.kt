@@ -400,6 +400,119 @@ class CommentRepositoryTest {
         assertEquals(listOf("posted"), comments.recentPosted(limit = 10).map { it.body })
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // exchangesSince — the interaction read behind relation-stance evolution (ambient-slice-4a.md D2).
+    //
+    // Two helpers rather than growing TestData: the shared seeder predates thread.author_id (V20) and
+    // always leaves it NULL, and the fixed test Clock stamps every seeded row with one instant, so both
+    // the addressee and the window are only controllable by writing the columns in by hand here.
+    // ---------------------------------------------------------------------------------------------
+
+    /** A thread with an explicit opening-post author (null = owner-opened) and body — the two columns the
+     *  top-level branch resolves its addressee and its evidence from. */
+    private fun threadOpenedBy(title: String, author: String?, body: String = "$title — the opening post"): String =
+        data.insertThread(title).also { jdbc.update("UPDATE thread SET author_id = ?, body = ? WHERE id = ?", author, body, it) }
+
+    /** A POSTED comment with a hand-written created_at, so the since-window boundary is observable. */
+    private fun postAt(threadId: String, author: String, body: String, at: String): String =
+        data.insertComment(threadId, authorId = author, body = body).also {
+            jdbc.update("UPDATE comment SET created_at = ? WHERE id = ?", at, it)
+        }
+
+    @Test
+    fun `exchangesSince reads a top-level comment as an exchange aimed at the thread's author`() {
+        // The branch the ambient loop actually produces: S2's comment lands top-level on someone else's
+        // article thread, so it has no parent row and its addressee is the thread's byline.
+        val t = threadOpenedBy("Rust in the kernel", author = "sol", body = "The borrow checker earns its keep here.")
+        val c = data.insertComment(t, authorId = "paul", body = "This benchmark measures the wrong thing entirely")
+
+        val exchange = comments.exchangesSince(null).single()
+
+        assertEquals(c, exchange.commentId)
+        assertEquals(t, exchange.threadId)
+        assertEquals("Rust in the kernel", exchange.threadTitle)
+        assertEquals("paul", exchange.fromAuthor)
+        assertEquals("sol", exchange.toAuthor, "no parent row → the addressee is the thread's author")
+        assertEquals("This benchmark measures the wrong thing entirely", exchange.body)
+        assertEquals("The borrow checker earns its keep here.", exchange.towardBody, "the OP is what was answered")
+    }
+
+    @Test
+    fun `exchangesSince reads a reply as an exchange aimed at its parent's author`() {
+        // The other branch: parent_id resolves both the addressee and the prose being answered, and the
+        // thread's own author is irrelevant here — hence an owner-opened thread underneath.
+        val t = threadOpenedBy("Rust in the kernel", author = null)
+        val parent = data.insertComment(t, authorId = "sol", body = "It will hold under load, I have seen worse survive")
+        val reply = data.insertComment(t, authorId = "paul", body = "You said that about the last one", parentId = parent)
+
+        val exchange = comments.exchangesSince(null).single()
+
+        assertEquals(reply, exchange.commentId)
+        assertEquals("paul", exchange.fromAuthor)
+        assertEquals("sol", exchange.toAuthor)
+        assertEquals("It will hold under load, I have seen worse survive", exchange.towardBody)
+    }
+
+    @Test
+    fun `exchangesSince requires POSTED on both sides — an unsettled comment or parent is not an exchange`() {
+        // An interaction is something a member actually did to another. A draft nobody has seen, a failed
+        // generation, and an answer to a parent that never settled are all short of that.
+        val t = threadOpenedBy("Rust in the kernel", author = null)
+        val unsettledParent = data.insertComment(t, authorId = "sol", body = "half-written", state = "DRAFTING")
+        data.insertComment(t, authorId = "paul", body = "answering a draft", parentId = unsettledParent)
+        val settledParent = data.insertComment(t, authorId = "sol", body = "It will hold under load")
+        data.insertComment(t, authorId = "paul", body = "objection still drafting", parentId = settledParent, state = "DRAFTING")
+        data.insertComment(t, authorId = "paul", body = "objection that failed", parentId = settledParent, state = "FAILED")
+        data.insertComment(t, authorId = "paul", body = "You said that about the last one", parentId = settledParent)
+
+        assertEquals(
+            listOf("You said that about the last one"),
+            comments.exchangesSince(null).map { it.body },
+            "only the settled reply under a settled parent counts",
+        )
+    }
+
+    @Test
+    fun `exchangesSince ignores a top-level comment on an owner-opened thread`() {
+        // thread.author_id NULL means the owner opened it, and relations are persona↔persona: the owner is
+        // a peer in the room, not a node in the graph. Dropped by the addressee IS NOT NULL clause.
+        val t = threadOpenedBy("Scaling SQLite", author = null)
+        data.insertComment(t, authorId = "paul", body = "The write path is the whole story")
+
+        assertEquals(emptyList<String>(), comments.exchangesSince(null).map { it.body })
+    }
+
+    @Test
+    fun `exchangesSince ignores self-addressed comments in both branches`() {
+        // Talking to yourself is not a relation: persona_stance's CHECK forbids a self-edge, so a row that
+        // reached the caller here would only ever be discarded — or worse, written.
+        val own = threadOpenedBy("Rust in the kernel", author = "sol")
+        val first = data.insertComment(own, authorId = "sol", body = "a follow-up to my own opening post")
+        data.insertComment(own, authorId = "sol", body = "and another thing", parentId = first)
+
+        assertEquals(emptyList<String>(), comments.exchangesSince(null).map { it.body })
+    }
+
+    @Test
+    fun `exchangesSince windows on created_at, excluding the boundary itself, and returns oldest first`() {
+        // The window is the previous run's timestamp, so the boundary row is one that run already judged —
+        // a `>=` here would re-judge (and re-bill) the same exchange on every pass.
+        val t = threadOpenedBy("Rust in the kernel", author = "sol")
+        postAt(t, "paul", "before the last run", "2026-06-21T10:00:00Z")
+        postAt(t, "paul", "at the boundary", "2026-06-21T11:00:00Z")
+        postAt(t, "paul", "after the last run", "2026-06-21T12:00:00Z")
+
+        assertEquals(
+            listOf("before the last run", "at the boundary", "after the last run"),
+            comments.exchangesSince(null).map { it.body },
+            "a null window is all time — what the very first evolution run sees — oldest first",
+        )
+        assertEquals(
+            listOf("after the last run"),
+            comments.exchangesSince("2026-06-21T11:00:00Z").map { it.body },
+        )
+    }
+
     /**
      * T1.3 cycle/depth guard. A corrupt `parent_id` write (one the app's acyclic invariant would never
      * make) turns each recursive-CTE tree walk into an infinite loop — a hang, not a graceful error.

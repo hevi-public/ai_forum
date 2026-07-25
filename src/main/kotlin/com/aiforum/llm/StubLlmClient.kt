@@ -1,6 +1,7 @@
 package com.aiforum.llm
 
 import com.aiforum.dto.ReasoningLeak
+import com.aiforum.persona.StanceJudgePrompts
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -41,6 +42,7 @@ class StubLlmClient(
 
     override fun generate(request: LlmRequest, cancellation: CancellationToken): LlmResponse {
         if (request.persona.id == "dispatcher") return route(request)
+        if (request.persona.id == StanceJudgePrompts.JUDGE_ID) return judgeStance(request)
 
         val target = targetBody(request.context)
         trigger(target)?.let { return applyTrigger(it, request, cancellation) }
@@ -56,6 +58,22 @@ class StubLlmClient(
         val seed = abs(targetBody(request.context).hashCode())
         val picks = listOf(roster[seed % roster.size], roster[(seed / 7 + 1) % roster.size]).distinct()
         return LlmResponse(picks.joinToString(", "))
+    }
+
+    /**
+     * The stance-judgment path (S4a, `plan_docs/ambient-slice-4a.md` D5): return ONE short digit-free
+     * sentence, the shape [com.aiforum.persona.StanceJudge] accepts.
+     *
+     * Without this branch a judgment would fall through to [cannedReply] and come back as a
+     * multi-paragraph forum essay — which the parser rejects on length, so nothing would be corrupted,
+     * but every pass in a stub demo would silently do nothing and the feature would look broken to the
+     * one person most likely to be trying it. Deliberately digit-free: the parser refuses any answer
+     * carrying a number, so a stub that emitted one would model a *disobedient* backend rather than a
+     * working one.
+     */
+    private fun judgeStance(request: LlmRequest): LlmResponse {
+        val seed = abs(targetBody(request.context).hashCode())
+        return LlmResponse(STANCES[(seed + calls.getAndIncrement()) % STANCES.size])
     }
 
     private fun applyTrigger(trigger: String, request: LlmRequest, cancellation: CancellationToken): LlmResponse {
@@ -130,6 +148,21 @@ class StubLlmClient(
         // links, blockquotes) all get exercised by simply talking to the forum. Paragraphs are single
         // source lines on purpose: the renderer honours soft breaks GitHub-style (newline → <br>), so a
         // hard-wrapped string would show mid-sentence line breaks in the rendered reply.
+        /**
+         * Canned stance prose for the judgment path — short, in the holder's voice, and carrying no
+         * digits so the parser accepts them (see [judgeStance]). Kept varied enough that a demo run
+         * over several edges reads as a room whose relationships moved, rather than one sentence
+         * pasted seven times.
+         */
+        private val STANCES = listOf(
+            "has started treating their posts as claims to be checked rather than news to read",
+            "warmed to them after that exchange, and would rather not admit it",
+            "finds their certainty harder to take at face value than it used to be",
+            "keeps meaning to push back properly and keeps deciding it is not worth the afternoon",
+            "reads them now with an eyebrow already half raised",
+            "has quietly started waiting for their reply before forming an opinion",
+        )
+
         private val BODIES = listOf(
             """
             Good question — two things stand out immediately.

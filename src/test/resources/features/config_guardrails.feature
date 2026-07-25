@@ -29,3 +29,13 @@ Feature: Config guardrails
     And the article source is the scriptable fake
     And the ambient source selection defaults to the stub
     And no feeds are configured under test
+
+  # The stance evolution pass (plan_docs/ambient-slice-4a.md D12) is the SECOND scheduled job in this app
+  # that spends LLM calls, and it runs at 04:00 with nobody watching — so it gets the same rail ambient
+  # ticking has, on its own switch. The cap is asserted alongside the switch for a subtler reason: it can
+  # only be read at all if the properties bean was bound from a non-profiled @Configuration, which is what
+  # keeps this rail readable under a profile where the scheduler itself can never wire.
+  Scenario: The test profile gates the stance evolution pass off
+    When the test diagnostics are read
+    Then stance evolution is disabled
+    And the stance evolution edge cap is unlimited by default

@@ -51,6 +51,21 @@ object Html {
         return Regex("${Regex.escape(attr)}=\"([^\"]*)\"").find(tag)?.groupValues?.get(1)
     }
 
+    /**
+     * The WHOLE `<li>…</li>` block of the most recent stance-change row (S4a; admin_stances.kte lists
+     * newest-first, so the first `<li data-stance-change="…">` in document order is the latest change),
+     * or null when the history is empty. Returns the block rather than a single attribute because an
+     * audit row is read as a unit — old text, new text, the cited exchange and the revert control all
+     * have to be asserted against the SAME change, and a page-wide probe would happily satisfy an
+     * assertion about the newest change with an older row's field.
+     */
+    fun latestStanceChangeRow(html: String): String? {
+        val open = Regex("<li\\b[^>]*data-stance-change=\"[^\"]*\"[^>]*>").find(html) ?: return null
+        val close = html.indexOf("</li>", open.range.last + 1)
+        if (close < 0) return null
+        return html.substring(open.range.first, close + "</li>".length)
+    }
+
     /** Every distinct data-reply-id in document order — one for a summon, several for a fan-out. */
     fun allReplyIds(html: String): List<String> =
         Regex("data-reply-id=\"([^\"]+)\"").findAll(html).map { it.groupValues[1] }.distinct().toList()
