@@ -183,8 +183,8 @@ Feature: What the members are into drifts with what they actually wrote
   Scenario: Each member's character is its own, and no pass rewrites it
     Given the owner has pinned "boring technology choices" as an interest of "Sol"
     And persona "Paul" is into "typography"
-    And the persona "Sol" has abilities "databases, storage"
-    And the persona "Paul" has system prompt "You are Paul, who reads release notes for fun."
+    And the persona "Sol" was authored with abilities "databases, storage"
+    And the persona "Paul" was authored with the system prompt "You are Paul, who reads release notes for fun."
     And a thread "Rust in the kernel" exists
     And the thread was authored by "Sol"
     And a posted reply from "Paul" saying "The scheduler is the interesting part"

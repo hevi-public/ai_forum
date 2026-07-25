@@ -24,6 +24,16 @@ aiforum:
   # asserts this from the outside (/__diag stanceEvolutionEnabled=false).
   stance-evolution:
     enabled: false
+  # Interest drift OFF under test, for the third time and the same reason (plan_docs/ambient-slice-4b.md
+  # D8/D15): it is the third thing in this app that spends LLM calls on a schedule, and the one that can
+  # change what a member is INTO, so its scheduler must be unable to fire during a run. Redundant with the
+  # shipped default, and stated anyway — a rail asserts a value, and a value that exists only as a Kotlin
+  # default is one refactor away from silently becoming true. The /admin/interests trigger still works
+  # (acceptance drives it over HTTP — it is the only route into this slice, since the scheduler pair is
+  # @Profile("!test")); the config_guardrails rail asserts this from the outside
+  # (/__diag interestDriftEnabled=false).
+  interest-drift:
+    enabled: false
   images:
     # Image blobs go under build/ (like the test DB), asserted by ProfileGuard so a test run never writes
     # into the real ~/.ai_forum image store.

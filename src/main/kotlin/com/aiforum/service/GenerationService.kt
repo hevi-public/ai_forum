@@ -15,9 +15,11 @@ import com.aiforum.llm.LlmClient
 import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.PersonaRef
 import com.aiforum.llm.PromptContext
+import com.aiforum.persona.InterestProse
 import com.aiforum.persona.StanceProse
 import com.aiforum.repo.AttachmentRepository
 import com.aiforum.repo.CommentRepository
+import com.aiforum.repo.PersonaInterestRepository
 import com.aiforum.repo.PersonaRepository
 import com.aiforum.repo.RelationStanceRepository
 import com.aiforum.repo.ThreadRepository
@@ -63,6 +65,18 @@ class GenerationService(
     // composed, and baking it in would make every stance edit a re-compose (an LLM call) plus leave every
     // stored prompt stale the moment the evolution pass rewrites an edge.
     private val stances: RelationStanceRepository? = null,
+    // S4b (plan_docs/ambient-slice-4b.md D7): what each member is currently INTO, appended as prose in the
+    // same seam the stances are ([withPersonaContext]). Nullable-defaulted for the identical reason — every
+    // construction that doesn't wire it yields `persona.systemPrompt` byte-identical, so no existing test
+    // moves. Injected here rather than baked into `system_prompt` for a sharper reason than the stances':
+    // an interest is a TOPIC that the weekly drift pass rewrites, and a topic frozen into a stored prompt
+    // is the "frozen roster naming members who aren't even in the thread" failure ComposerPrompts.kt:56-61
+    // was written against. Injection also means a drift never buys a recompose, and the seven seeded
+    // members — whose stored prompts came from the trait-less template — get their interests with no owner
+    // click. Read INSIDE this call, which runs under [GenPlan.contextOf] at settle time, so an interest
+    // written between two replies of one fan-out reaches the second; a column on the captured Persona row
+    // would not.
+    private val interests: PersonaInterestRepository? = null,
 ) {
     private val timeout = Duration.ofSeconds(120)
     private val log = LoggerFactory.getLogger(GenerationService::class.java)
@@ -532,11 +546,12 @@ class GenerationService(
      * boundary [ContextAssembler]. When [attachments] isn't wired (Tier-2 constructions), the map is
      * empty and this is exactly the old text-only assemble.
      *
-     * The stance block is appended HERE, one step BEFORE [ContextAssembler.assemble], on purpose: the
-     * firewall's single job is keeping owner VOTE signal out of the transcript, and it stays a pure
-     * function that receives an already-final system prompt string. Injecting inside it would put prompt
-     * authoring into the boundary whose Tier-0 test exists to pin exclusion, so a relations change could
-     * turn a firewall test red for reasons that have nothing to do with votes.
+     * The persona-context blocks (stances, then interests) are appended HERE, one step BEFORE
+     * [ContextAssembler.assemble], on purpose: the firewall's single job is keeping owner VOTE signal out
+     * of the transcript, and it stays a pure function that receives an already-final system prompt string.
+     * Injecting inside it would put prompt authoring into the boundary whose Tier-0 test exists to pin
+     * exclusion, so a relations or interests change could turn a firewall test red for reasons that have
+     * nothing to do with votes.
      */
     private fun assembleContext(
         threadId: String,
@@ -544,29 +559,44 @@ class GenerationService(
         contextComments: List<Comment>,
         targetId: String?,
     ) = ContextAssembler.assemble(
-        withStances(persona, contextComments),
+        withPersonaContext(persona, contextComments),
         contextComments,
         targetId,
         attachmentMap(threadId, contextComments),
     )
 
     /**
-     * [persona]'s system prompt plus its stances toward the personas ACTUALLY PRESENT in this scoped
-     * context — its outgoing edges only (a persona's prompt carries its own views, never the room's views
-     * of it), filtered to the distinct author ids of [contextComments].
+     * [persona]'s system prompt plus the two blocks that make it *this* member on *this* turn: its stances
+     * toward the personas ACTUALLY PRESENT in this scoped context, and what it is currently into.
      *
-     * Present-filtering is doing two things at once. It keeps the prompt small: the seeded graph is 42
-     * edges, and pasting the whole roster's opinions into every generation is bulk noise about people who
-     * never spoke. And it makes scope narrowing free — a BRANCH_ONLY summon carries fewer authors, so the
-     * stance set narrows with it, with no scope-awareness in this code at all. The owner's author id can
-     * never match an edge (edges exist only between personas), so an owner-heavy context simply yields
-     * fewer stances rather than needing a special case.
+     * **Stances.** Its outgoing edges only (a persona's prompt carries its own views, never the room's
+     * views of it), filtered to the distinct author ids of [contextComments]. Present-filtering is doing
+     * two things at once. It keeps the prompt small: the seeded graph is 42 edges, and pasting the whole
+     * roster's opinions into every generation is bulk noise about people who never spoke. And it makes
+     * scope narrowing free — a BRANCH_ONLY summon carries fewer authors, so the stance set narrows with
+     * it, with no scope-awareness in this code at all. The owner's author id can never match an edge
+     * (edges exist only between personas), so an owner-heavy context simply yields fewer stances rather
+     * than needing a special case.
      *
-     * When the block renders empty ([StanceProse.block] returns null for no scoped edges — including
-     * every construction where [stances] isn't wired) the result is `persona.systemPrompt` unchanged,
-     * byte for byte: relations must be invisible where there are none, not a dangling header.
+     * **Interests** (S4b, D7) are NOT filtered by anything: a stance is *about* somebody, so it is only
+     * worth prompt space when that somebody is in the room, whereas an interest is about the member
+     * itself and colours every reply it writes. The list arrives `ORDER BY interest`
+     * ([PersonaInterestRepository.of]) so the prompt text is byte-stable across runs — an unrelated
+     * insertion must never silently rewrite a prompt — and as bare phrases, never rows: [InterestProse]
+     * has no parameter to pass `source` through, so a model can never learn which of its interests the
+     * owner pinned and therefore has no lever on its own drift.
+     *
+     * Both blocks read their repository HERE, per reply, rather than being captured when [GenPlan] was
+     * minted: the pass that rewrites either one runs on its own cadence, and a prompt assembled from a
+     * snapshot would serve a member's old character for the rest of the fan-out.
+     *
+     * When both blocks render empty (either renderer returns null for an empty list — including every
+     * construction where [stances] or [interests] isn't wired) the result is `persona.systemPrompt`
+     * unchanged, byte for byte: relations and interests must be invisible where there are none, not a
+     * dangling header. Order is stances-then-interests and is fixed by this list, not by which repository
+     * happens to be wired.
      */
-    private fun withStances(persona: PersonaRepository.Persona, contextComments: List<Comment>): String {
+    private fun withPersonaContext(persona: PersonaRepository.Persona, contextComments: List<Comment>): String {
         val present = contextComments.mapTo(mutableSetOf()) { it.authorId }
         val named = stances?.from(persona.id).orEmpty()
             .filter { it.toPersona in present }
@@ -574,9 +604,11 @@ class GenerationService(
             // can attach the attitude to a byline it can see. Falling back to the id keeps a stance
             // toward a since-renamed/unreadable persona readable rather than dropping it silently.
             .map { StanceProse.NamedStance(personas.find(it.toPersona)?.name ?: it.toPersona, it.stance) }
-        return StanceProse.block(persona.name, named)
-            ?.let { "${persona.systemPrompt}\n\n$it" }
-            ?: persona.systemPrompt
+        val blocks = listOfNotNull(
+            StanceProse.block(persona.name, named),
+            InterestProse.block(persona.name, interests?.phrasesOf(persona.id).orEmpty()),
+        )
+        return (listOf(persona.systemPrompt) + blocks).joinToString("\n\n")
     }
 
     /** comment id -> its attachments, including the thread's own keyed under threadId (the OP node id). */

@@ -6,16 +6,35 @@
 @param stances: List<StanceView>
 
 @template.layout(title = persona.name + " · AI Forum", activeNav = "members", content = @`
-    <div class="thread__op" data-persona-id="${persona.id}" data-persona-name="${persona.name}" data-persona-descriptor="${persona.descriptor}" data-persona-abilities="${persona.abilities.joinToString(", ")}" data-system-prompt="${persona.systemPrompt}">
+    <div class="thread__op" data-persona-id="${persona.id}" data-persona-name="${persona.name}" data-persona-descriptor="${persona.descriptor}" data-persona-abilities="${persona.abilities.joinToString(", ")}" data-persona-interests="${persona.interestPhrases}" data-system-prompt="${persona.systemPrompt}">
         <div class="reply__head">
             <span class="monogram" aria-hidden="true" style="--mono-h: ${Avatar.hueForIndex(persona.colorIndex)}">${persona.name.take(2).uppercase()}</span>
             <h1 class="thread__title">${persona.name}</h1>
         </div>
-        <p class="reply__handle">${persona.descriptor}</p>
+        <%-- The mutable/immutable split, made legible rather than left as an implementation detail (S4b
+             D9). Everything above and in the two blocks below the interests is FIXED: no pass has a write
+             path to a member's character, its expertise or its dials, and that is what anchors the room's
+             diversity while what it is into moves. So each of them is labelled for what it is. --%>
+        <p class="reply__handle"><span class="persona__label">Character</span>${persona.descriptor}</p>
         @if(!persona.abilities.isEmpty())
             <p class="persona__abilities">
+                <span class="persona__label">Expertise</span>
                 @for(ability in persona.abilities)
                     <span class="tag" data-ability="${ability}">${ability}</span>
+                @endfor
+            </p>
+        @endif
+        <%-- The mutable half. A member holding none renders NOTHING here — a header over zero rows reads
+             as breakage rather than as absence, and holding none is the ordinary state of a member the
+             owner authored no interests for (drift is opt-in per member).
+             data-interest-source is on the tag because "yours, frozen for good" and "open to the weekly
+             pass" are different things to be looking at, and this page is where an owner decides which
+             one a phrase should be. --%>
+        @if(!persona.interests.isEmpty())
+            <p class="persona__interests">
+                <span class="persona__label">Currently into</span>
+                @for(interest in persona.interests)
+                    <span class="${interest.tagClass}" data-interest="${interest.phrase}" data-interest-source="${interest.source}">${interest.phrase}</span>
                 @endfor
             </p>
         @endif

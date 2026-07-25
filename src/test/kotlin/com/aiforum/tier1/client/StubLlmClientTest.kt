@@ -8,6 +8,8 @@ import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.PersonaRef
 import com.aiforum.llm.PromptContext
 import com.aiforum.llm.StubLlmClient
+import com.aiforum.persona.InterestDrift
+import com.aiforum.persona.InterestDriftPrompts
 import com.aiforum.persona.StanceJudge
 import com.aiforum.persona.StanceJudgePrompts
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -103,6 +105,72 @@ class StubLlmClientTest {
     }
 
     private fun judgeRef() = PersonaRef(StanceJudgePrompts.JUDGE_ID, StanceJudgePrompts.JUDGE_NAME)
+
+    /**
+     * S4b: the interest-drift judgment has to come back as something [InterestDrift] ACCEPTS, and the
+     * verdict is what is asserted rather than the string. Same failure this guards against as the stance
+     * pair above — falling through to a canned essay, which the parse refuses as "not a
+     * set-down-and-take-up pair", so every drift pass in a stub demo would silently do nothing. Digit-free
+     * is asserted here rather than in its own test because a digit in the TAKE is not cosmetic: it is
+     * refusal 4, so the same answer would fail the verdict assertion for a second reason.
+     */
+    @Test
+    fun `interest judgments come back as a swap the parser accepts, carrying no digit`() {
+        val open = listOf("typography", "small tools")
+        val text = client.generate(request(driftInstruction(open), interestJudgeRef()), CancellationToken()).text
+
+        assertTrue(text.none { it.isDigit() }, "canned interest judgment carried a digit: $text")
+        assertTrue(
+            InterestDrift.parse(text, open, PINNED) is InterestDrift.Verdict.Drifted,
+            "the stub must answer a drift judgment with something the parser takes, got: $text",
+        )
+    }
+
+    /**
+     * The half a canned answer cannot fake: the DROP must name a phrase THIS member actually holds, which
+     * means reading it back out of the prompt the stub was handed rather than inventing one. A stub that
+     * invented a phrase would model a disobedient model — every run refused as "an interest this member
+     * does not hold" — which is the same broken-looking demo the branch exists to prevent, one refusal
+     * reason over. Repeated because the branch rotates its pick across the open list and across its
+     * take-up candidates, so a single draw would leave most of that rotation unexercised.
+     */
+    @Test
+    fun `every canned interest judgment sets down a phrase the member actually holds`() {
+        val open = listOf("typography", "small tools", "boring technology choices")
+        repeat(24) { i ->
+            val prompt = driftInstruction(open, said = "the scheduler is the interesting part, take $i")
+
+            val verdict = InterestDrift.parse(
+                client.generate(request(prompt, interestJudgeRef()), CancellationToken()).text,
+                open, PINNED,
+            )
+
+            assertTrue(verdict is InterestDrift.Verdict.Drifted, "canned judgment was not usable: $verdict")
+            assertTrue((verdict as InterestDrift.Verdict.Drifted).dropped in open, "dropped a phrase Sol never held: $verdict")
+        }
+    }
+
+    /**
+     * A real judging prompt, built by the renderer the stub reads back — not a hand-written lookalike, so
+     * a reworded instruction shows up here rather than only in a demo nobody is watching.
+     *
+     * [PINNED] deliberately names a phrase that is also one of the stub's take-up candidates: the branch
+     * filters candidates already present anywhere in the prompt, and the pinned line is part of that
+     * prompt, so this is what proves a stub answer can never reach for something the owner froze — which
+     * the parse would refuse outright.
+     */
+    private fun driftInstruction(open: List<String>, said: String = "preemption cost decides this") =
+        InterestDriftPrompts.instruction(
+            member = "Sol",
+            character = "A pragmatic backend engineer who distrusts hype.",
+            pinned = PINNED,
+            open = open,
+            engagements = listOf(InterestDriftPrompts.Engagement("Rust in the kernel", said)),
+        )
+
+    private val PINNED = listOf("release engineering")
+
+    private fun interestJudgeRef() = PersonaRef(InterestDriftPrompts.JUDGE_ID, InterestDriftPrompts.JUDGE_NAME)
 
     @Test
     fun `failure triggers map onto the taxonomy`() {

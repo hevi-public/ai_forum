@@ -1,0 +1,136 @@
+@import com.aiforum.web.InterestChangeView
+@import com.aiforum.web.RoomTopicView
+@param changes: List<InterestChangeView>
+@param shared: List<RoomTopicView>
+@param sole: List<RoomTopicView>
+@param spreadSentence: String
+<%-- The audited interest-drift log and the room map (plan_docs/ambient-slice-4b.md D9/D10/D12). Built on
+     admin_stances.kte, including the two conventions that file keeps — both fail loudly and confusingly:
+     · every @param type stays a single-argument generic — a generic carrying a comma (Map<String, String>)
+       breaks JTE's @param parser with an "Unexpected end of template expression" pointing at an unrelated
+       line, which cost a previous slice real time. That is why the room map arrives as two flat lists of
+       ready-to-render rows and its holders come pre-joined from the controller;
+     · NO backticks below, not even inside a comment — the whole body is a backtick-delimited JTE content
+       block, and a stray one would close it mid-template. --%>
+@template.layout(title = "Admin · Interest drift · AI Forum", activeNav = "admin", content = @`
+    <div class="admin-list" data-admin-list="interests">
+        <p class="admin-list__back"><a href="/admin">← Admin</a></p>
+        <h1 class="admin-list__title">Interest drift</h1>
+        <p class="admin-list__note">What the members are into moves with what they actually wrote — their character, their expertise and anything you pinned never move. Applied straight away, never queued for approval. This log is the control: read what was set down and taken up against the words it was judged from, and undo what made the room worse. An interest you typed on a member's edit form is skipped for good and never appears here.</p>
+        <%-- The manual trigger. POSTs to /admin/interests/drift, which runs one pass synchronously and
+             303-redirects back so anything it just moved is at the top. Ungated on purpose: the
+             interest-drift "enabled" property is the SCHEDULER kill switch, and this button is also the
+             only way anything under the test profile can reach the pass at all (D8). --%>
+        <form class="admin-list__trigger" method="post" action="/admin/interests/drift" data-interest-drift>
+            <button class="btn" type="submit">Run a drift pass now — one judgment per member with something new to say ▸</button>
+        </form>
+        @if(changes.isEmpty())
+            <p class="admin-list__empty" data-admin-list-empty="true">Nothing has drifted yet — run a pass above.</p>
+        @else
+            <ul class="admin-list__items">
+                @for(change in changes)
+                    <%-- ONE <li> per change, and the whole row must stay inside it: the acceptance probe
+                         (Html.latestInterestChangeRow) slices from this opening tag to the FIRST </li>, so a
+                         nested list anywhere below would truncate the row and take the evidence with it.
+                         data-interest-reverted goes through .toString() because JTE treats a raw Boolean in
+                         an attribute as an HTML boolean attribute — it would render the bare attribute name
+                         (or nothing at all), and every reader here wants the literal "true"/"false". --%>
+                    <%-- .admin-list__stance-label below is reused verbatim rather than twinned: it is the
+                         small-caps field label both audit logs stack their rows with, and a second class
+                         with identical rules would be churn in app.css for a name. --%>
+                    <li class="admin-list__item admin-list__item--interest"
+                        data-interest-change="${change.id}"
+                        data-interest-persona="${change.personaId}"
+                        data-interest-dropped="${change.dropped}"
+                        data-interest-taken="${change.takenUp}"
+                        data-interest-was-source="${change.droppedSource}"
+                        data-interest-reverted="${change.reverted.toString()}">
+                        <span class="admin-list__meta">
+                            <span class="admin-list__badge">${change.personaLabel}</span>
+                            <span class="admin-list__sep">·</span>
+                            <span>was ${change.droppedSource}</span>
+                            @if(change.reverted)
+                                <span class="admin-list__sep">·</span>
+                                <span class="admin-list__badge">undone by you</span>
+                            @endif
+                            <span class="admin-list__sep">·</span>
+                            <span class="admin-list__ago">${change.ago}</span>
+                        </span>
+                        <p class="admin-list__snippet">
+                            <span class="admin-list__stance-label">set down</span>
+                            <span>${change.dropped}</span>
+                        </p>
+                        <p class="admin-list__snippet">
+                            <span class="admin-list__stance-label">took up</span>
+                            <span>${change.takenUp}</span>
+                        </p>
+                        <div class="admin-list__cited">
+                            <span class="admin-list__stance-label">judged from</span>
+                            @if(change.cited.isEmpty())
+                                <span class="admin-list__meta">No engagement was snapshotted with this change.</span>
+                            @else
+                                @for(cite in change.cited)
+                                    <%-- The evidence is the snapshotted prose; the permalink is a convenience
+                                         on top of it. The cited column carries no foreign key (V27 header),
+                                         so a citation whose ids never made it into the snapshot still
+                                         renders — unlinked rather than absent, since this column is the
+                                         system's only copy of what was judged. --%>
+                                    @if(cite.permalink != null)
+                                        <span class="admin-list__snippet"><a href="${cite.permalink}" data-interest-cited="${cite.commentId}">“${cite.snippet}”</a></span>
+                                    @else
+                                        <span class="admin-list__snippet">“${cite.snippet}”</span>
+                                    @endif
+                                @endfor
+                            @endif
+                        </div>
+                        <%-- Reverting restores the old phrase AND its old provenance, and reopens the
+                             member's window, so a reverted seeded phrase goes back to seeded and is free to
+                             drift again — revert undoes, it does not freeze (D10). Freezing one phrase for
+                             good is what the member's edit form is for; typing it stamps it as yours, which
+                             the pass skips forever.
+                             The button is dropped once the change is undone: a second revert is already a
+                             no-op at the storage layer, and offering a control that does nothing invites the
+                             owner to wonder which of the two phrases the member currently holds. --%>
+                        @if(!change.reverted)
+                            <form method="post" action="/admin/interests/${change.id}/revert" data-interest-revert>
+                                <button class="btn btn--ghost" type="submit">Revert</button>
+                            </form>
+                        @endif
+                    </li>
+                @endfor
+            </ul>
+        @endif
+        <%-- The room map (D12): the convergence readout, and its subject is a PHRASE and the members
+             holding it — never a member. There is deliberately no tally anywhere below: "held by Sol, Paul"
+             attaches nothing to Sol, while "held by 2 of 7" is the shape an owner starts thresholding on,
+             and a threshold an owner acts on is the population metric this slice keeps away from models.
+             The acceptance step asserts these rows carry no digit at all, so the sentence above them
+             spells its counts as words (TopicSpread) and nothing here renders a number.
+             It fires nothing: it is text on a page the owner chose to open. --%>
+        <section class="admin-list__map" data-room-map>
+            <h2 class="admin-list__title">The room map</h2>
+            <p class="admin-list__note">${spreadSentence}</p>
+            @if(!shared.isEmpty())
+                <ul class="admin-list__items">
+                    @for(topic in shared)
+                        <li class="admin-list__item admin-list__item--topic" data-room-topic="${topic.phrase}">
+                            <span class="admin-list__snippet">${topic.phrase}</span>
+                            <span class="admin-list__meta">held by ${topic.holders}</span>
+                        </li>
+                    @endfor
+                </ul>
+            @endif
+            @if(!sole.isEmpty())
+                <p class="admin-list__note">Held by one member only — the room's counterweight, and what has not converged.</p>
+                <ul class="admin-list__items">
+                    @for(topic in sole)
+                        <li class="admin-list__item admin-list__item--topic" data-room-topic="${topic.phrase}">
+                            <span class="admin-list__snippet">${topic.phrase}</span>
+                            <span class="admin-list__meta">held by ${topic.holders}</span>
+                        </li>
+                    @endfor
+                </ul>
+            @endif
+        </section>
+    </div>
+`)

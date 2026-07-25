@@ -2,10 +2,12 @@ package com.aiforum.web
 
 import com.aiforum.persona.Abilities
 import com.aiforum.persona.Dials
+import com.aiforum.persona.Interests
 import com.aiforum.persona.PersonaPromptRefresher
 import com.aiforum.persona.PersonaSpec
 import com.aiforum.persona.PriorComposition
 import com.aiforum.persona.PromptComposer
+import com.aiforum.repo.PersonaInterestRepository
 import com.aiforum.repo.PersonaRepository
 import com.aiforum.repo.RelationStanceRepository
 import org.springframework.stereotype.Controller
@@ -15,6 +17,32 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseBody
+
+/**
+ * One phrase a member is currently into, as the profile renders it (S4b,
+ * plan_docs/ambient-slice-4b.md D9). Carries [source] because the profile's whole job here is to make the
+ * mutable/immutable split legible: a phrase the owner typed is frozen for good, a seeded or drifted one
+ * is what the weekly pass may move.
+ *
+ * There is deliberately no strength, no age and no "held since" magnitude — [phrase] is the entire
+ * interest, and nothing on a member's page may be a number the owner (or a model) could rank members by
+ * (V27 header).
+ */
+data class InterestTagView(
+    val phrase: String,
+    val source: String,
+) {
+    /**
+     * The tag's classes, decided here so the template carries no conditional and — the reason that
+     * matters — so app.css can style the pinned case off a CLASS rather than off `data-interest-source`.
+     * The data-* hooks are the acceptance probe's surface (jte-spring-kotlin: *style with `class=`, never
+     * with `data-*`*), and a stylesheet that starts depending on one turns a test hook into a visual
+     * contract nobody knows they are holding.
+     */
+    val tagClass: String get() =
+        if (source == PersonaInterestRepository.SOURCE_OWNER) "tag tag--interest tag--pinned"
+        else "tag tag--interest"
+}
 
 data class PersonaView(
     val id: String,
@@ -26,7 +54,19 @@ data class PersonaView(
     val abilities: List<String> = emptyList(),
     val dials: Map<String, Int> = emptyMap(),
     val systemPrompt: String = "",
-)
+    // Trailing and defaulted so every other construction site (the members list, the create/compose paths)
+    // keeps compiling unchanged and simply renders no interest block — which is also the honest reading
+    // for a member the owner authored none for.
+    val interests: List<InterestTagView> = emptyList(),
+) {
+    /**
+     * The phrases as one comma-joined string for the profile's `data-persona-interests` hook, computed
+     * here rather than in the template: JTE expressions carrying a lambda (`joinToString { it.phrase }`)
+     * are brace-counting territory in a parser that already has two documented traps, and the join is
+     * view formatting either way — [CitedEngagementView.permalink] precomputes for the same reason.
+     */
+    val interestPhrases: String get() = interests.joinToString(", ") { it.phrase }
+}
 
 /**
  * One outgoing stance as the profile renders it (S3, plan_docs/ambient-slice-3.md §2.5). Carries the
@@ -54,6 +94,25 @@ data class StanceFieldView(
     val text: String,
 )
 
+/**
+ * One row of the edit form's "Currently into" fieldset (S4b D11): a `name="interest_<n>"` input, its
+ * current value, and the provenance note beside it.
+ *
+ * The field name is an INDEX, not the phrase — the phrase is what the owner is editing, so keying the
+ * field by it would make "typography" → "kernel scheduling" arrive as a delete of one field and an insert
+ * of another with no way to tell that apart from a hand-crafted POST. The server reconciles the whole
+ * submitted set against what the member holds instead ([PersonaController.applyInterestEdits]), so the
+ * indexes only have to be unique.
+ *
+ * [note] is prepared here rather than decided in the template because it states a RULE the owner needs
+ * before they type: an interest they write is skipped by the pass for good, and there is no unpin button.
+ */
+data class InterestFieldView(
+    val name: String,
+    val value: String,
+    val note: String,
+)
+
 @Controller
 class PersonaController(
     private val personas: PersonaRepository,
@@ -62,13 +121,20 @@ class PersonaController(
     // Owns "recompose this persona from scratch" — shared with the stance-evolution pass, which refreshes
     // a persona whose relations just moved (plan_docs/ambient-slice-4a.md D11).
     private val refresher: PersonaPromptRefresher,
+    // The mutable half of a member's character (S4b). Read on both persona GETs and written by the edit
+    // form; the drift pass writes the same table from its own service.
+    private val interests: PersonaInterestRepository,
 ) {
 
     // Profile URLs use the slug (V5) so multi-word names ("Ada Lovelace") work without %20 noise.
     @GetMapping("/personas/{slug}")
     fun profile(@PathVariable slug: String, model: Model): String {
         val persona = personas.findBySlug(slug) ?: return "redirect:/personas"
-        model.addAttribute("persona", view(persona))
+        // The profile is where an owner actually reads what a member is into, so it is also where the
+        // pass's effect becomes visible — the acceptance scenarios assert the swap on this page rather
+        // than on a repository, because an interest that is only right in the database is not the one the
+        // owner reads.
+        model.addAttribute("persona", view(persona, interestTags(persona.id)))
         // Only the persona's OUTGOING stances: a profile shows what this member thinks of the room, not
         // what the room thinks of them — the same asymmetry the generation prompt uses (a persona is
         // never handed the others' opinions of it).
@@ -134,8 +200,18 @@ class PersonaController(
     @GetMapping("/personas/{slug}/edit")
     fun editForm(@PathVariable slug: String, model: Model): String {
         val persona = personas.findBySlug(slug) ?: return "redirect:/personas"
-        model.addAttribute("persona", view(persona))
+        val heldInterests = interests.of(persona.id)
+        model.addAttribute("persona", view(persona, heldInterests.map { InterestTagView(it.interest, it.source) }))
         model.addAttribute("dialKeys", Dials.KEYS)
+        // One field per phrase the member holds, plus ONE blank to add with. Not a blank per free slot:
+        // an owner filling four empty boxes at once is not the interaction this is for, and the ceiling
+        // is enforced on the way in anyway ([applyInterestEdits]).
+        model.addAttribute(
+            "interestFields",
+            heldInterests.mapIndexed { i, row ->
+                InterestFieldView("$INTEREST_PARAM_PREFIX$i", row.interest, noteFor(row.source))
+            } + InterestFieldView("$INTEREST_PARAM_PREFIX${heldInterests.size}", "", "blank — add one here"),
+        )
         // The relations half of the form: one field per OTHER member (a persona holds no stance about
         // itself — V24 CHECKs from <> to). Driven by the ROSTER, not by the stance rows, so a member the
         // persona has no view of still gets an empty field to write one into.
@@ -165,6 +241,11 @@ class PersonaController(
         // makes a stored prompt stale — and gating Save behind a paid Regenerate for a stance edit would
         // charge the owner for a change the prompt doesn't even carry.
         applyStanceEdits(existing.id, allParams)
+        // Interests are written here for the same reason and with the same posture as stances, and for one
+        // more: they never enter the composed prompt at all (D7 injects them at generation time), so an
+        // interest edit must not gate Save behind a paid Regenerate either — which is why they are absent
+        // from [inputsChanged] below.
+        applyInterestEdits(existing.id, allParams)
         val nextSpec = PersonaSpec(existing.name, descriptor, Abilities.parse(abilities), dialsFrom(allParams))
         // Save-what-you-see, with a resync backstop (see plan_docs/persona-prompt-edit-ux.md):
         //  - blank prompt            → compose (the one-shot path)
@@ -243,6 +324,81 @@ class PersonaController(
         }
     }
 
+    /**
+     * Apply the form's `interest_<n>` fields (S4b D11 — this is how an owner pins an interest).
+     *
+     * **Prefix-scanned out of `allParams`, never bound as `@RequestParam(defaultValue = "")`, and that is
+     * load-bearing rather than stylistic.** `POST /personas/{slug}/edit` binds every declared param to `""`
+     * when it is absent, and `PersonaSteps.saveStanceOnly`
+     * (`src/test/kotlin/com/aiforum/acceptance/steps/PersonaSteps.kt:341-355`) replays a FIXED field list —
+     * so a bound interest param would arrive blank on every stance-only save, be read as a retraction, and
+     * (because this path stamps `owner`) permanently mute that member's drift with nothing on any page to
+     * say so. Scanning means a form that carries no interest fields — a targeted POST, that step — leaves
+     * the member's interests alone, exactly as [applyStanceEdits] leaves the relation graph alone.
+     *
+     * **The fieldset is the whole set.** Every submitted value is reconciled against what the member holds:
+     * a phrase that is no longer submitted is retracted (which is how blanking a field deletes), a phrase
+     * that is new is written as the owner's. Reconciling the set rather than trusting the field INDEX is
+     * what keeps a stale form honest — the pass may have moved a phrase since the page rendered, and index
+     * arithmetic would then delete a phrase the owner never saw.
+     *
+     * **A resubmitted, unchanged phrase keeps its existing `source`** — only a new or changed phrase is
+     * stamped [PersonaInterestRepository.SOURCE_OWNER]. Without that rule the form, which prefills the
+     * member's current interests, would freeze every one of them the first time the owner opened it and
+     * pressed Save. Owner provenance is a permanent skip for the pass, so that is not a decision the owner
+     * made — pinning has to be "type a phrase", not "visit this page".
+     *
+     * Three no-op guards, the same posture as [applyStanceEdits]'s and for a sharper version of the same
+     * reason: these writes run BEFORE the prompt logic in [edit], so an exception here aborts the whole
+     * save and the owner silently loses their descriptor and dial edits too.
+     *  1. a blank key suffix (`interest_=…`) — reachable from any hand-crafted POST;
+     *  2. a phrase [Interests.validate] refuses — V27's length CHECK is enforced in SQL and would throw a
+     *     `DataAccessException` out of the middle of the save, so it is skipped rather than handed on;
+     *  3. the member's ceiling already full — the extra phrase is dropped, never the existing ones.
+     */
+    private fun applyInterestEdits(personaId: String, params: Map<String, String>) {
+        val submitted = params.filterKeys { it.startsWith(INTEREST_PARAM_PREFIX) }
+        if (submitted.isEmpty()) return
+        val typed = submitted
+            .filterKeys { it.removePrefix(INTEREST_PARAM_PREFIX).isNotBlank() }
+            .values
+            // Cleaned exactly ONCE, and only on this side of the comparison: the stored phrase already came
+            // through `upsert`, the one door that cleans, and `Interests.clean` is deliberately not
+            // idempotent on quotes — cleaning it again would strip a pair the owner meant to keep.
+            .map { Interests.clean(it) }
+            .filter { it.isNotBlank() && Interests.validate(it) == null }
+            // Two fields carrying the same phrase are one interest; the PRIMARY KEY folds case, so this
+            // must too, or the second field would upsert over the first and restamp its provenance.
+            .distinctBy { it.lowercase() }
+        val typedKeys = typed.mapTo(mutableSetOf()) { it.lowercase() }
+        val held = interests.of(personaId)
+        held.filter { it.interest.lowercase() !in typedKeys }
+            .forEach { interests.delete(personaId, it.interest) }
+        val heldKeys = held.mapTo(mutableSetOf()) { it.interest.lowercase() }
+        // Counted after the retractions above, so swapping one phrase for another on a full member works —
+        // the ceiling is about what the member ends up holding, not about how many fields were submitted.
+        var holding = held.count { it.interest.lowercase() in typedKeys }
+        typed.forEach { phrase ->
+            if (phrase.lowercase() in heldKeys) return@forEach
+            if (holding >= MAX_INTERESTS) return@forEach
+            interests.upsert(personaId, phrase, PersonaInterestRepository.SOURCE_OWNER)
+            holding++
+        }
+    }
+
+    /** The member's current interests as profile tags, in the repository's stable `ORDER BY interest`. */
+    private fun interestTags(personaId: String): List<InterestTagView> =
+        interests.of(personaId).map { InterestTagView(it.interest, it.source) }
+
+    /**
+     * What the edit form says beside a prefilled field. The owner-authored case states the rule that has no
+     * undo button — there is deliberately no "unpin" control (D11), and the documented way back is to blank
+     * the field, which deletes the row.
+     */
+    private fun noteFor(source: String): String =
+        if (source == PersonaInterestRepository.SOURCE_OWNER) "yours — the drift pass skips it for good"
+        else "open to drift — retype it to make it yours"
+
     // Hand the model the PREVIOUS values + prompt so an edit adjusts rather than regenerates (continuity).
     private fun priorOf(existing: PersonaRepository.Persona) =
         PriorComposition(
@@ -255,11 +411,30 @@ class PersonaController(
     private fun dialsFrom(params: Map<String, String>): Map<String, Int> =
         Dials.KEYS.associateWith { key -> params["dial_$key"]?.toIntOrNull() ?: Dials.DEFAULT }
 
-    private fun view(p: PersonaRepository.Persona) =
-        PersonaView(p.id, p.name, p.descriptor, p.slug, p.model, p.colorIndex, p.abilities, p.dials, p.systemPrompt)
+    // Positional, so [tags] is trailing and defaulted: the members list and the create/compose paths render
+    // no interest block and must not pay a repository read to say so.
+    private fun view(p: PersonaRepository.Persona, tags: List<InterestTagView> = emptyList()) =
+        PersonaView(
+            p.id, p.name, p.descriptor, p.slug, p.model, p.colorIndex, p.abilities, p.dials, p.systemPrompt,
+            tags,
+        )
 
     private companion object {
         /** Edit-form field prefix; the suffix is the TARGET persona's id (see [applyStanceEdits]). */
         const val STANCE_PARAM_PREFIX = "stance_"
+
+        /** Edit-form field prefix; the suffix is a row INDEX, not a phrase (see [applyInterestEdits]). */
+        const val INTEREST_PARAM_PREFIX = "interest_"
+
+        /**
+         * The per-member authoring ceiling. Four phrases is a preoccupation; a dozen is a tag cloud, and a
+         * tag cloud is the thing D1 refused to let interests become.
+         *
+         * A constant here rather than `aiforum.interest-drift.max-interests` off the bound properties bean:
+         * this controller has no other reason to depend on the drift pass's configuration, and the value it
+         * needs is the *authoring* ceiling the form enforces, which is a property of this write surface.
+         * If the two ever have to move together, bind the bean here and delete this — the swap is one line.
+         */
+        const val MAX_INTERESTS = 4
     }
 }

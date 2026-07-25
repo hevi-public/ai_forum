@@ -285,7 +285,25 @@ Five things worth knowing before touching it:
   > ships green. `PersonaPromptRefresher` has no test at any tier (the only double overrides `refresh`
   > wholesale). The `nullsFirst` half of `byWindowAge` has no failing test. The `.feature` diff in the fix
   > commit is comment-only, so acceptance gained no coverage for the root cost defect.
-- **The ambient fan-out acceptance scenario is still flaky, and the S4a-branch "fix" did not cure it.**
+- **The ambient fan-out flake was a read-skew bug in `ThreadController.renderThread`, fixed 2026-07-26.**
+  The page did two reads at two instants — the DB tree first, the in-flight registry second — and a
+  settling node crosses between them, because the worker persists the row and *then* evicts the registry
+  entry. A node that persisted AND was evicted in that gap appeared in **neither** read: gone from the
+  page entirely, neither drafting nor posted, as though that persona never spoke. The poller then saw no
+  drafting node, called the room quiescent, and the count assertion read a room with a member missing.
+  Reading the registry first closes it: the same node then appears in both, and the existing dedupe drops
+  the stale draft view in favour of the settled row.
+  This is a **UI bug, not only a test bug** — an owner loading a thread at the wrong millisecond would
+  have seen a reply that generated fine silently absent until the next load.
+  How it was found, since three earlier guesses were wrong: the count assertion in `TriggerModeSteps` now
+  reports the whole room on failure (every node with its state, the summoning flag, and the LLM spy's call
+  sequence). The first failure after that printed `nodes=[…=posted, …=failed]` with
+  `llmCalls=[Moderator, sol, vex, pike]` — all four calls made, pike's node nowhere — which named the
+  mechanism immediately. Keep that instrumentation: `expected 2 but was 1` cost three sessions.
+  **Not pinned by a test.** A unit pin wants `ThreadController` (11 constructor deps, private
+  `renderThread`), and the acceptance scenario only catches it intermittently. If this area is touched
+  again, the read order is the invariant: **in-flight first, DB second.**
+- Superseded, kept for the record: **the earlier diagnosis that this was the settle deadline was wrong.**
   `trigger_modes.feature` → "An ambient article tick fans out to the room; one persona fails, the rest
   still post" fails intermittently at `TriggerModeSteps.kt:37` with **expected 2 posted, got 1** — the
   settle helper returns a room that is only partly settled, so the count assertion reads a snapshot

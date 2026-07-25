@@ -80,6 +80,43 @@ aiforum:
     # deserve another look: an answer we refused (a digit came back where prose was asked for) and a call
     # that never landed (a rate limit at 04:00). Raise this to make the room slower to re-read each other.
     min-exchanges: 1
+  # Interest drift (plan_docs/ambient-slice-4b.md) — the pass that reads what a member actually WROTE in
+  # the forum, asks the model whether it has moved on from one of the topics it is drawn to, and swaps one
+  # interest for one. Strictly one out, one in: no member can accumulate the room's interests. Auto-applied
+  # with no approval queue; every swap is on /admin/interests with the comments it was judged from and a
+  # revert button. Its OWN switch again, because this is the convergence-risk mechanism — an owner who
+  # wants articles and relation drift but does NOT want the room's topics to move must be able to say
+  # exactly that, and must be able to kill this one thing without killing the other two.
+  # A member's character, expertise, dials and owner-pinned interests are never touched by it.
+  interest-drift:
+    # SCHEDULER master switch ONLY: it gates InterestDriftSchedulingConfig + InterestDriftTicker, not the
+    # /admin/interests "Run the drift pass" button, which always works (manual-trigger-first — and it has
+    # to, since the scheduler is @Profile("!test") and the button is the only way the acceptance suite can
+    # reach this slice). Off by default so unattended LLM spend stays opt-in. Costs one judgment per member
+    # the pass actually judges and nothing else — no recompose, because interests are injected at
+    # generation time rather than baked into a composed prompt.
+    enabled: false
+    # When the scheduler runs, once enabled. WEEKLY, Sunday 04:30 — after the 04:00 stance pass so the two
+    # paid loops never share a SQLite file or a rate-limit window. Weekly rather than nightly on purpose: a
+    # preoccupation that changes every night is not a preoccupation, and a room whose members all move
+    # every night IS the convergence failure this slice is built to avoid.
+    cron: "0 30 4 * * SUN"
+    # Per-run member budget. 0 (the default) = UNLIMITED, and here that is a knowable worst case rather
+    # than a shrug: the ceiling is the roster (seven members, one call each, no fan-out). A cap that BITES
+    # would be worse than none — a refused judgment deliberately leaves the member's window open, an open
+    # window sorts first, so one persistently-refused member would hold half a weekly budget forever.
+    # Clamped at the use site like every other tunable here.
+    max-personas-per-run: 0
+    # How much a member must have WRITTEN since the pass last looked before another judgment is worth
+    # buying. 3, derived rather than guessed: the ambient loop produces roughly one comment per member per
+    # day at this roster size, so three engagements is about three days of one member's attention — one
+    # remark is not a change of heart. A member below the floor is skipped for ZERO LLM calls, as is a
+    # member the owner authored no interests for, and one whose every interest the owner pinned.
+    min-engagements: 3
+    # The per-member authoring ceiling. Four phrases: enough to be a person, few enough that a swap costs
+    # something. No judgment can raise it — drift is one-for-one — so this is purely how many the OWNER may
+    # author. Raising it makes each member broader and each drift less meaningful; it buys no extra calls.
+    max-interests: 4
   # Shortcut ticketing integration (https://shortcut.com) — READ-ONLY. Off by default; the forum behaves
   # exactly as before until you enable it. When on, three surfaces light up: a right-rail "Shortcut" box
   # (the default-query feed) on the home + thread pages, a browsable /shortcut page with a source switcher
@@ -147,6 +184,17 @@ aiforum:
   # P(comment) once relevance clears the bar — see Dana (2, a lurker) vs Sol/Quackers (8, chatty)
   # below. `model` is blank => the aiforum.llm.default-model fallback; pin a persona to e.g. "opus"
   # here to give it a heavier brain.
+  # `interests` (S4b) is the one MUTABLE part of a member: short prose phrases, injected into its
+  # generation prompts, which the weekly drift pass may swap one-for-one as the member's own posts move.
+  # Everything else here is fixed and no pass rewrites it — descriptor (character), abilities (expertise),
+  # dials. Seeded phrases arrive open to drift; the owner pins one by typing it into the persona edit
+  # form, which is per-member, so what is fixed for Sol need not be fixed for Mira. Insert-only on first
+  # seed, like the roster and the stances, so an owner's edits survive every reboot.
+  # ⚠ Two hard rules for every phrase below. NO DIGITS — V27's CHECK refuses them outright for any source
+  # but the owner, because an interest is prose about where attention went, never a measurement. And no
+  # phrase may contain the substring `vote`, which also rules out devoted, pivoted and voting: these
+  # phrases go verbatim into the prompt that OwnerControlSteps.noVoteSignal scans to prove the owner's +1
+  # never reaches a model (the same rule recorded at TestData.kt:37-45).
   seed:
     personas:
       - id: Sol
@@ -154,6 +202,12 @@ aiforum:
         # S2: ability tags drive ambient RELEVANCE (word-boundary match against thread/article text), the
         # talkativeness dial is P(comment). Sol is a chatty (8) backend voice matching SQLite/Kotlin topics.
         abilities: [Kotlin, SQLite, Postgres, database, databases, performance, scaling, concurrency, infrastructure]
+        # Drawn from the mutable half of the descriptor below: what Sol keeps circling back to, not what
+        # Sol is qualified in (that is `abilities`, and it never drifts).
+        interests:
+          - "boring technology choices"
+          - "storage engines under real load"
+          - "what breaks at three in the morning"
         dials:
           talkativeness: 8
         descriptor: >-
@@ -165,6 +219,10 @@ aiforum:
       - id: Saul
         name: Saul
         abilities: [TypeScript, JavaScript, browser, web, CSS, UI, frontend, accessibility]
+        interests:
+          - "the web as a platform"
+          - "how software feels to use"
+          - "prototyping an idea to see it on screen"
         dials:
           talkativeness: 6
         descriptor: >-
@@ -176,6 +234,10 @@ aiforum:
       - id: Paul
         name: Paul
         abilities: [testing, reliability, outage, postmortem, debugging, security, race conditions, AI]
+        interests:
+          - "postmortems worth reading twice"
+          - "the unhappy paths everyone forgot"
+          - "how a thing fails before how it works"
         dials:
           talkativeness: 5
         descriptor: >-
@@ -186,6 +248,10 @@ aiforum:
       - id: Mira
         name: Mira
         abilities: [product, startup, startups, business, strategy, pricing, users, AI]
+        interests:
+          - "whether the economics hold up"
+          - "who a thing is actually for"
+          - "scope creep and where it starts"
         dials:
           talkativeness: 6
         descriptor: >-
@@ -197,6 +263,10 @@ aiforum:
         name: Dana
         # The room's lurker (talkativeness 2): rarely drops an ambient comment even on a matching topic.
         abilities: [design, UX, typography, interface, usability, accessibility]
+        interests:
+          - "typography that gets out of the way"
+          - "the simplest thing that helps someone"
+          - "interfaces that respect the reader"
         dials:
           talkativeness: 2
         descriptor: >-
@@ -207,6 +277,10 @@ aiforum:
       - id: Ducky
         name: Ducky McDuckface
         abilities: [debugging, learning, productivity, thinking]
+        interests:
+          - "questions that unstick people"
+          - "what you expected against what happened"
+          - "thinking out loud"
         dials:
           talkativeness: 5
         descriptor: >-
@@ -219,6 +293,10 @@ aiforum:
         name: Sir Quacks-a-Lot
         # The second chatty voice (8): a code reviewer who matches Kotlin + tree/recursive-query topics.
         abilities: [code review, code, correctness, Kotlin, programming, languages, compilers, open source]
+        interests:
+          - "benchmarks that measure the wrong thing"
+          - "naming as a correctness problem"
+          - "the edge case the demo avoided"
         dials:
           talkativeness: 8
         descriptor: >-

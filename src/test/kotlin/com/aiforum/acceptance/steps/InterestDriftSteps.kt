@@ -52,6 +52,34 @@ class InterestDriftSteps(
     fun ownerPinnedInterest(interest: String, name: String) =
         data.insertInterest(personaId(name), interest, SOURCE_OWNER)
 
+    /**
+     * Give an already-seeded member the expertise and the stored prompt this slice must never touch.
+     *
+     * These exist because their obvious counterparts — `the persona {string} has abilities {string}` and
+     * `... has system prompt {string}` (PersonaSteps) — are `@Then` ASSERTIONS, and Cucumber matches on
+     * step TEXT rather than on the Given/When/Then keyword: writing one under a `Given` silently runs the
+     * assertion, against a member nobody ever configured. The immutable-core scenario needs both halves
+     * — a value authored before the pass, and the same value asserted after it — so the authoring half
+     * gets its own wording rather than a keyword the runner ignores.
+     */
+    @Given("the persona {string} was authored with abilities {string}")
+    fun personaAuthoredWithAbilities(name: String, abilities: String) {
+        val persona = personas.find(personaId(name)) ?: error("no persona \"$name\" — seed it first")
+        personas.update(
+            persona.id, persona.name, persona.descriptor, persona.model, persona.systemPrompt,
+            abilities.split(",").map { it.trim() }.filter { it.isNotEmpty() }, persona.dials,
+        )
+    }
+
+    @Given("the persona {string} was authored with the system prompt {string}")
+    fun personaAuthoredWithSystemPrompt(name: String, prompt: String) {
+        val persona = personas.find(personaId(name)) ?: error("no persona \"$name\" — seed it first")
+        personas.update(
+            persona.id, persona.name, persona.descriptor, persona.model, prompt,
+            persona.abilities, persona.dials,
+        )
+    }
+
     @When("the owner runs the interest drift pass")
     fun runDriftPass() {
         val resp = http.post(DRIFT_PATH)

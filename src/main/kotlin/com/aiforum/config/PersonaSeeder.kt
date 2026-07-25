@@ -1,5 +1,7 @@
 package com.aiforum.config
 
+import com.aiforum.persona.Interests
+import com.aiforum.repo.PersonaInterestRepository
 import com.aiforum.repo.PersonaRepository
 import com.aiforum.repo.RelationStanceRepository
 import org.slf4j.LoggerFactory
@@ -25,6 +27,7 @@ import org.springframework.stereotype.Component
 class PersonaSeeder(
     private val personas: PersonaRepository,
     private val stances: RelationStanceRepository,
+    private val interests: PersonaInterestRepository,
     private val props: PersonaSeedProperties,
 ) {
 
@@ -71,6 +74,62 @@ class PersonaSeeder(
                 )
             }
         }
+
+    /**
+     * Insert every configured interest phrase a member does not already hold (S4b, the `interests:` key on
+     * each `aiforum.seed.personas` entry); returns the number added. The roster's and the stance list's
+     * first-seed-only contract, third time: an owner who rewrote — or deliberately deleted then re-typed —
+     * a phrase must not have it clobbered on reboot, and a phrase the owner *deleted* does come back on the
+     * next boot, matching the resurrect-on-reseed behaviour the other two phases already have. That
+     * resurrection is the documented way back from a pin (D11b): blank the field, and the seed restores the
+     * phrase as `seeded` so it is free to drift again.
+     *
+     * A configured phrase naming a persona that does not exist is skipped with a warning rather than
+     * failing, exactly as [seedMissingStances] skips an unknown endpoint: V27's foreign key would otherwise
+     * turn one stale id in hand-authored config into a startup crash that takes the other six members'
+     * interests down with it.
+     *
+     * Presence is checked against [Interests.clean]ed, case-folded text because that is the key the row is
+     * actually stored under — `persona_interest.interest` is `COLLATE NOCASE` and
+     * [PersonaInterestRepository.upsert] cleans on the way in. Comparing raw YAML (which carries whatever
+     * indentation and casing the file has) against stored text would read every phrase as missing on every
+     * boot, and each re-"insert" would restamp provenance — quietly relabelling an owner-pinned phrase back
+     * to `seeded` and un-pinning it. The set is MUTABLE and grows as phrases go in, so a phrase listed
+     * twice under one member is counted and written once.
+     *
+     * **No phrase configured here may contain the substring `vote`** — which also rules out *devoted*,
+     * *pivoted*, *voting* — nor a digit. These phrases are injected verbatim into generation prompts (D7),
+     * and `OwnerControlSteps.noVoteSignal` lowercases the whole system prompt and asserts `vote` is absent;
+     * V27's `interest NOT GLOB '*[0-9]*'` CHECK refuses a digit outright for every source but `owner`.
+     * Same rule, same reason, as the one recorded at `TestData.kt:37-45`.
+     *
+     * A digit-carrying configured phrase therefore throws out of this method at boot, and that is
+     * deliberate rather than an oversight: unlike an unknown persona id — where the *other* members'
+     * interests are still perfectly seedable, so skipping loses nothing — a refused phrase has no valid
+     * outcome, and skipping it would leave the owner's authored interest silently absent from the room
+     * forever with only a log line to say so. The unknown-persona skip buys the other six members their
+     * interests; a digit skip would buy nothing but a quieter failure.
+     */
+    fun seedMissingInterests(): Int = props.personas.sumOf(::interestsSeededFor)
+
+    /** [seedMissingInterests] for one member; split out so `sumOf` has a declared `Int` to resolve on. */
+    private fun interestsSeededFor(seed: PersonaSeedProperties.SeedPersona): Int {
+        if (personas.find(seed.id) == null) {
+            log.warn("event=seed.interest.skipped persona={} reason=unknown-persona", seed.id)
+            return 0
+        }
+        val held = interests.phrasesOf(seed.id).mapTo(mutableSetOf()) { key(it) }
+        return seed.interests.count { phrase ->
+            // `add` returns true only when the phrase was genuinely absent — the missing test and the
+            // guard against a duplicated config entry in one statement.
+            held.add(key(phrase)).also { missing ->
+                if (missing) interests.upsert(seed.id, phrase, PersonaInterestRepository.SOURCE_SEEDED)
+            }
+        }
+    }
+
+    /** The identity a stored interest row actually has: [Interests.clean]ed, then folded like `NOCASE`. */
+    private fun key(phrase: String): String = Interests.clean(phrase).lowercase()
 }
 
 /**
@@ -92,6 +151,11 @@ class PersonaSeedRunner(private val seeder: PersonaSeeder) : ApplicationRunner {
         // on a fresh DB both phases run in the same boot and the ordering is what makes that work.
         val stances = seeder.seedMissingStances()
         if (stances > 0) log.info("Seeded {} predefined persona stance(s).", stances)
+        // Interests third, for the same ordering reason stances go second: every row references a persona
+        // through V27's foreign key, so the roster has to be in place first. On a fresh DB all three phases
+        // run in the same boot and this ordering is what makes that work.
+        val interests = seeder.seedMissingInterests()
+        if (interests > 0) log.info("Seeded {} predefined persona interest(s).", interests)
     }
 }
 
@@ -116,6 +180,13 @@ data class PersonaSeedProperties(
         // dials (esp. `talkativeness`, P(comment)). Applied on first seed only; missing → empty/neutral.
         val abilities: List<String> = emptyList(),
         val dials: Map<String, Int> = emptyMap(),
+        // S4b (plan_docs/ambient-slice-4b.md D11): the MUTABLE half of a member — short prose phrases the
+        // weekly drift pass may swap one-for-one, as against the fixed `descriptor`/`abilities`/`dials`
+        // above. Seeded `source='seeded'`, so every one of them is open to drift from the first boot; an
+        // owner pins one by typing it into the edit form, which restamps it `owner`. The field and the yml
+        // key must land together: Spring silently ignores an unknown property, so an `interests:` block
+        // with no field here would bind to NOTHING and the room would boot interest-less with no error.
+        val interests: List<String> = emptyList(),
     )
 
     /** One directed edge: what [from] thinks of [to], as prose. Ids must match [SeedPersona.id]. */
