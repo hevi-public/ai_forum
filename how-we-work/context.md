@@ -251,6 +251,40 @@ Five things worth knowing before touching it:
   the owner's request 2026-07-21; currently has no slice or plan doc). S4b is now the next ambient slice,
   and it carries the convergence risk S4a deliberately left alone (§11.5's remaining open items: how
   convergence is measured, and manual newcomer injection as the diversity lever).
+- **S4a follow-ups (PR #6 review, second pass — none blocking, all verified against the code).** The
+  owner-clobber race the second review found was fixed in the PR; these were not:
+  1. `StanceEvolutionService.evolveEdge` cites the FULL window (`renderCited(exchanges)`) while the judge
+     only ever saw `takeLast(12)`, so `/admin/stances` presents evidence the model never read and the
+     `cited` TEXT is unbounded. `renderCited`'s KDoc claims the opposite — a one-line fix plus the doc.
+  2. `revert` stamps `judged_at` from `MAX(changed_at)` — a post-LLM **write** instant — into a column
+     whose contract is the pre-query **read** instant (`RelationStanceRepository.markJudged` KDoc), so a
+     revert can move a window FORWARD past exchanges nothing ever judged. Fix: carry the run's `readAt`
+     on the audit row, or clamp the revert so it can only move the stamp back.
+  3. `PersonaPromptRefresher.refresh` still has `personas.find` outside its guard, so it can throw out of
+     a method whose KDoc promises it never does — one `SQLITE_BUSY` there skips every holder queued
+     behind it and logs a successful run as `stance.evolve.failed`.
+  4. `coarseFloor` requires a watermark on EVERY `persona_stance` row, but owner-authored and
+     never-conversing edges are skipped before any stamp — so on the shipped 42-edge seed the floor is
+     null forever and the unbounded exchange read it was added to prevent still happens. Read cost only.
+  5. **The dev DB will never get `idx_stance_change_edge`.** V25 was edited in place after that DB had
+     already applied it; `application-dev.yml` sets `validate-on-migrate: false`, so Flyway neither
+     complains nor re-runs it. A V27+ `CREATE INDEX IF NOT EXISTS` is the repair (per the
+     `sqlite-spring-jdbc` skill's rule that an applied migration is immutable).
+  6. `recomposed=` in the run's log line counts refresh ATTEMPTS — `refresher.refresh`'s Boolean is
+     discarded — so the summary overstates how many prompts were rewritten.
+  7. A pass rejected by the single-flight guard 303s to the same page as a pass that ran, and its `0` is
+     indistinguishable from "ran, changed nothing". The owner has no way to tell.
+  8. Stale doc claims: `StanceChangeRepository`'s class KDoc and `lastStandingChangeAt`'s KDoc and V25's
+     header all still describe `lastStandingChangeAt` as half the window boundary, but the pass reads it
+     **zero** times (its only caller is `revert`); `StanceEvolutionProperties.cron` still says "read by
+     nobody" though `/__diag` now reads it; `ambient-slice-4a.md`'s head-of-queue residual is framed as a
+     null-window effect when any oldest edge with an unusable answer does it (and at cap=1 the whole graph
+     freezes with `changed=0`).
+  > Test-suite gaps worth knowing, same review: no fake can fail a *framing* read, so neither the
+  > run-level catch nor the `finally` that releases the guard is exercised — a latched-guard mutation
+  > ships green. `PersonaPromptRefresher` has no test at any tier (the only double overrides `refresh`
+  > wholesale). The `nullsFirst` half of `byWindowAge` has no failing test. The `.feature` diff in the fix
+  > commit is comment-only, so acceptance gained no coverage for the root cost defect.
 - Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
 - **Feed-fetch socket timeouts** (Assay follow-up on PR #4): `FeedArticleSource`'s RestClient has
   no connect/read timeout — the tick thread is deadline-protected, but a truly hung socket parks

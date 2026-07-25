@@ -182,12 +182,15 @@ class StanceEvolutionService(
             // display names the judging model reads (stance rows and Comment.authorId carry ids, the
             // prompt is written in names; PersonaRouter.relationsBlock documents the same convention).
             val roster = personas.findAll().associate { it.id to it.name }
-            // The whole relation graph, ONCE. It answers three questions that must agree with each
-            // other: does this edge exist, may this pass rewrite it, and how far back does its window
-            // reach. Re-reading a row per question would let an edge be ordered by one window and judged
-            // against another. Nothing else writes these rows while a pass runs (the single-flight guard
-            // above, and the owner's form is the other writer — an owner edit mid-pass loses at worst
-            // one judgment, which the next run redoes).
+            // The whole relation graph, ONCE — for ORDERING and WINDOWS only. One consistent view is
+            // what stops an edge being ordered by one window and judged against another.
+            //
+            // It is deliberately NOT the authority on whether an edge may be written: the single-flight
+            // guard above excludes another PASS, not the owner's persona form, and this pass runs long
+            // enough (uncapped, synchronous, up to a minute per judgment) that an owner edit landing
+            // mid-run is ordinary rather than exotic. `evolveEdge` therefore re-reads the row at the
+            // judgment site and skips there — see its comment for what trusting this snapshot would
+            // destroy, which is the owner's own words, unrecoverably.
             val graph = stances.findAll()
                 .associate { Edge(it.fromPersona, it.toPersona) to EdgeState(it, judgedAt(it)) }
             val queue = candidates(comments.exchangesSince(coarseFloor(graph.values)), roster.keys, graph)
@@ -496,8 +499,34 @@ class StanceEvolutionService(
      * rather than another pooled connection's.
      */
     private fun evolveEdge(candidate: Candidate, roster: Map<String, String>, readAt: String): Boolean {
-        val (edge, state, exchanges) = candidate
-        val current = state.stance
+        val (edge, _, exchanges) = candidate
+        // RE-READ THE ROW HERE, and do not judge or write from the snapshot. The snapshot decided this
+        // edge's ORDER and its WINDOW — questions about the run as a whole, which want one consistent
+        // view — but "does this edge still exist, and may the pass rewrite it" is a permission, and a
+        // permission expires. The pass is synchronous, uncapped by default and spends up to a minute per
+        // judgment, so the owner is watching a hung tab for as long as it runs, and the persona form in
+        // another tab is where they go while they wait. Trusting the snapshot turns that wait into a
+        // window where `upsert` writes the model's sentence over words the owner typed after the pass
+        // started — with the audit row citing the PRE-EDIT text, so Revert restores a sentence the owner
+        // never wrote and their own is gone from a table that keeps no history. Same for a retraction:
+        // `upsert` is an INSERT … ON CONFLICT, so a stale snapshot resurrects a deleted edge as
+        // system-authored. Both are the class KDoc's absolutes, and one re-read is what makes them true.
+        //
+        // Residual, stated rather than implied: an edit landing inside the judgment call itself is still
+        // overwritten. That is a sixty-second race rather than a whole-pass one, it is what the pass did
+        // before the graph snapshot existed, and closing it properly wants a conditional write
+        // (`UPDATE … WHERE source <> 'owner'`) rather than a re-read.
+        val current = stances.find(edge.from, edge.to)
+        if (current == null) {
+            // The owner blanked the field mid-pass. S4a moves stances; it does not author them.
+            log.info("event=stance.skipped from={} to={} reason=retracted-mid-pass", edge.from, edge.to)
+            return false
+        }
+        if (current.source == RelationStanceRepository.SOURCE_OWNER) {
+            // Pinned after the queue was built. Skipped BEFORE the judgment, so it costs nothing.
+            log.info("event=stance.skipped from={} to={} reason=owner-authored-mid-pass", edge.from, edge.to)
+            return false
+        }
         val raw = judge(edge, roster, current.stance, exchanges) ?: return false
         return when (val verdict = StanceJudge.parse(raw, current.stance)) {
             is StanceJudge.Verdict.Changed -> {

@@ -461,6 +461,99 @@ class StanceEvolutionServiceTest {
     }
 
     /**
+     * The never-clobber contract has to survive the pass's own DURATION, which is the part a
+     * single-pair test cannot reach. The pass reads the graph once (ordering and windows need one
+     * consistent view), runs uncapped and synchronous, and spends up to a minute per judgment — so the
+     * owner is looking at a hung browser tab for as long as the run takes, and the persona form in
+     * another tab is exactly where they go while they wait.
+     *
+     * Here the owner pins paul→sol WHILE dana→sol is being judged. Nothing in the snapshot knows, so a
+     * pass that trusts it writes the model's sentence over the owner's words with `SOURCE_EVOLVED`, and
+     * the audit row it leaves cites the PRE-EDIT text — so Revert restores a sentence the owner never
+     * wrote and their own words exist nowhere in the system. The stance row keeps no history: this is
+     * unrecoverable, not merely wrong.
+     */
+    @Test
+    fun `a stance the owner pins mid-pass is not overwritten by the pass already running`() {
+        val personas = RosterPersonas(listOf(persona("dana"), persona("paul"), persona("sol")))
+        val stances = FakeStances().apply {
+            seed("dana", "sol", "treats him as weather")
+            seed("paul", "sol", "kindred pessimist")
+        }
+        val changes = FakeChanges()
+        // Neither edge is judged, so the (from, to) tiebreak puts dana first. The owner's edit lands
+        // during dana's judgment — the scripted answer IS that moment — and paul→sol is what they pin.
+        val llm = ScriptedLlm(
+            listOf(
+                {
+                    stances.seed("paul", "sol", OWNER_PINNED, source = RelationStanceRepository.SOURCE_OWNER)
+                    "has started listening properly"
+                },
+                { "reads him with an eyebrow already raised" },
+            ),
+        )
+        val refresher = SpyRefresher(personas, stances)
+        val comments = FakeComments(listOf(exchange("dana", "sol"), exchange("paul", "sol")))
+
+        val changed = service(comments, personas, stances, changes, llm, refresher).evolve(EvolutionSource.MANUAL)
+
+        val pinned = stances.rows.getValue("paul" to "sol")
+        assertEquals(OWNER_PINNED, pinned.stance, "the owner's own words survive a pass that was already running")
+        assertEquals(RelationStanceRepository.SOURCE_OWNER, pinned.source, "and keep their provenance")
+        assertTrue(
+            changes.rows.none { it.fromPersona == "paul" && it.toPersona == "sol" },
+            "no audit row may claim a change to an edge the pass must not touch",
+        )
+        assertEquals(1, changed, "dana's edge still moves — one owner edit costs one edge, not the run")
+        assertEquals(
+            1, llm.received.size,
+            "the skip is decided BEFORE the judgment, so a pinned edge costs nothing even mid-pass",
+        )
+        assertNull(stances.judgedAt("paul", "sol"), "an edge the pass never judged keeps its window open")
+    }
+
+    /**
+     * The other half of the same race, against the other absolute in the class KDoc: "Never invent an
+     * edge." Blanking the field on the persona form DELETES the row
+     * (`PersonaController.applyStanceEdits`), and `upsert` is an `INSERT … ON CONFLICT` — so a pass
+     * holding a stale snapshot resurrects the retracted edge as system-authored, and the owner's
+     * retraction silently un-happens.
+     */
+    @Test
+    fun `an edge the owner retracts mid-pass is not resurrected by the pass already running`() {
+        val personas = RosterPersonas(listOf(persona("dana"), persona("paul"), persona("sol")))
+        val stances = FakeStances().apply {
+            seed("dana", "sol", "treats him as weather")
+            seed("paul", "sol", "kindred pessimist")
+        }
+        val changes = FakeChanges()
+        val llm = ScriptedLlm(
+            listOf(
+                {
+                    stances.rows.remove("paul" to "sol")
+                    "has started listening properly"
+                },
+                { "reads him with an eyebrow already raised" },
+            ),
+        )
+        val refresher = SpyRefresher(personas, stances)
+        val comments = FakeComments(listOf(exchange("dana", "sol"), exchange("paul", "sol")))
+
+        val changed = service(comments, personas, stances, changes, llm, refresher).evolve(EvolutionSource.MANUAL)
+
+        assertFalse(
+            stances.rows.containsKey("paul" to "sol"),
+            "a retracted edge stays retracted — the pass moves stances, it does not author them",
+        )
+        assertTrue(
+            changes.rows.none { it.fromPersona == "paul" && it.toPersona == "sol" },
+            "and leaves no audit row for an edge that no longer exists",
+        )
+        assertEquals(1, changed)
+        assertEquals(1, llm.received.size, "a vanished edge is skipped before the judgment is bought")
+    }
+
+    /**
      * The STORAGE side of the same promise, and the one the LLM guard does not cover: a locked database
      * or a constraint violation on one edge's write must cost that edge and nothing else. Without a
      * per-edge catch it escapes to the run-level one, and the pass returns looking like it finished
@@ -1058,5 +1151,8 @@ class StanceEvolutionServiceTest {
          * that is the real sequence: the members talk, then the pass reads what they said.
          */
         const val RUN_STAMP = "2026-01-01T13:00:00Z"
+
+        /** What the owner types on the persona form while a pass is already running. */
+        const val OWNER_PINNED = "Owner's note: Paul has decided Sol is worth listening to."
     }
 }
