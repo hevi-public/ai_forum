@@ -389,6 +389,29 @@ Because a never-changed edge's window starts at all-time, an unbounded first run
 would paste every comment a pair ever exchanged, at full length, into a single prompt. The cap keeps the
 most recent exchanges, which are also the ones that describe how the relationship stands *now*.
 
+**The window advances on any USABLE judgment, not only on a change** (PR #6 review). The per-edge window
+above still only moved on `Changed` — but `StanceJudgePrompts.SYSTEM` instructs the model to *"say the
+standing view again unchanged"* when the exchanges do not move the attitude, so `Unchanged` is the
+**designed steady state of a settled pair**, and it writes no audit row by design. The window therefore
+never advanced for such a pair, the same exchanges re-qualified every run, and each one bought another
+judgment nightly, forever — with the shipped cap at unlimited. The watermark moved to
+`persona_stance.judged_at` (V26), stamped on `Changed` *and* `Unchanged`, and deliberately **not** on
+`Rejected` or a seam failure: a disobedient answer and a rate limit both deserve another look, which is
+the same retry semantics the per-edge window was built for. Three comments claiming "a quiet forum costs
+nothing" were true only after an edge had moved once, and now say what is actually true.
+
+**Candidates are ordered by window age, not alphabetically**, so a cap rotates rather than starving the
+tail of the graph. Pinned by a test that fails against name ordering.
+
+**Known limitation — a persistently refused edge keeps its place in the queue.** Because a refusal
+deliberately does not close the window, an edge whose judgments keep coming back unusable holds a null
+window, and null sorts first: with a cap set, it can hold that slot indefinitely. Both ways out are worse
+at this size — stamping a refusal silences exactly the case that most deserves retrying, and ordering by
+"last attempted" wants a second persisted timestamp whose only job is fairness. The shipped cap is
+unlimited, so nothing starves unless the owner sets one, and an edge refusing every judgment is worth
+noticing rather than quietly rotating past. Characterised by a Tier-2 test so it is found here, not in
+production.
+
 **Known limitation, deliberately not fixed here:** reverting a *superseded* audit row restores that row's
 old text over a newer change that remains marked un-reverted. The natural fix — only offering revert on an
 edge's newest standing change — is a UI restriction that wants its own thinking about what the history

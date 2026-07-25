@@ -71,9 +71,14 @@ aiforum:
     # run ("let it rip", the 2026-07-25 owner call). It is a knob rather than a code change so turning the
     # spend down later is a one-line edit; clamped at the use site like every other tunable here.
     max-edges-per-run: 0
-    # How many exchanges a directed pair must have produced since the last change before it is worth a
-    # judgment. 1 by default: the window already bounds the pass to what has happened since it last moved
-    # something, so a quiet forum is a free no-op without a threshold on top.
+    # How many exchanges a directed pair must have produced since the pass last looked at it before it is
+    # worth another judgment. 1 by default, because the per-edge window is what keeps the spend bounded:
+    # an edge stops being re-judged as soon as a USABLE judgment lands on it — one that moved the stance
+    # and one that deliberately left it standing are both answers, and both close the window over the
+    # exchanges they were given. So a settled pair drops out of the run instead of re-buying an opinion on
+    # the same old history every night. The two outcomes that leave the window OPEN are the two that
+    # deserve another look: an answer we refused (a digit came back where prose was asked for) and a call
+    # that never landed (a rate limit at 04:00). Raise this to make the room slower to re-read each other.
     min-exchanges: 1
   # Shortcut ticketing integration (https://shortcut.com) — READ-ONLY. Off by default; the forum behaves
   # exactly as before until you enable it. When on, three surfaces light up: a right-rail "Shortcut" box

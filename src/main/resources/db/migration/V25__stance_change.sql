@@ -1,6 +1,7 @@
 -- The audit trail for automatically evolved relation stances (plan_docs/ambient-slice-4a.md D8): one
 -- append-only row per rewritten persona_stance edge, modelled on ambient_run (V21) — INTEGER PRIMARY KEY
--- AUTOINCREMENT, a Clock-stamped ISO-8601 timestamp, an index on it.
+-- AUTOINCREMENT, a Clock-stamped ISO-8601 timestamp, and an index per hot read (two of them here — see
+-- the bottom of this file).
 --
 -- This table is not decoration, it is the ONLY control on the evolution pass. S4a auto-applies with no
 -- approval queue (direction doc §11.5, owner call), so the owner's whole lever is reading old->new on
@@ -44,6 +45,17 @@ CREATE TABLE stance_change (
     changed_at    TEXT NOT NULL,   -- injected Clock, ISO-8601
     reverted_at   TEXT             -- NULL until the owner reverts; blocks double-revert
 );
--- The evolution window is MAX(changed_at) over this table and the admin list is ORDER BY changed_at DESC,
--- so both hot reads are this one column.
+-- TWO INDEXES, because the two hot reads are not the same shape and neither index can answer the other's
+-- question:
+--
+--   * `idx_stance_change_edge` serves the evolution window, which is PER EDGE rather than one global
+--     watermark (see StanceChangeRepository.lastStandingChangeAt on why one boundary for the whole table
+--     lets a single pair's success disinherit every other pair in the run). The read is
+--     `WHERE from_persona = ? AND to_persona = ? AND reverted_at IS NULL`, executed once per candidate
+--     edge on every run — the pass's most-repeated query, and a table scan without this. `reverted_at`
+--     stays out of the index on purpose: it discriminates a handful of rows for one pair, so it is a
+--     cheap residual filter, not a third index column.
+--   * `idx_stance_change_changed_at` serves /admin/stances, which is still ORDER BY changed_at DESC —
+--     a different column in a different direction, which the (from, to) prefix cannot supply.
+CREATE INDEX idx_stance_change_edge ON stance_change(from_persona, to_persona);
 CREATE INDEX idx_stance_change_changed_at ON stance_change(changed_at);

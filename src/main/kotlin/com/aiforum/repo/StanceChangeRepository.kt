@@ -38,8 +38,19 @@ data class StanceChange(
  *
  * Because S4a auto-applies with no approval queue, this log carries the owner's entire control surface:
  * [recent] renders /admin/stances, [find] + [markReverted] back the revert button, and
- * [lastStandingChangeAt] is the *window boundary* for the next run — an edge is judged only on exchanges
- * newer than its own last surviving change, so a quiet forum re-judges nothing and costs nothing.
+ * [lastStandingChangeAt] is *one half* of the window boundary for the next run — an edge is judged only on
+ * exchanges newer than its own last surviving change.
+ *
+ * **Only half**, and the other half is not optional. This table records what CHANGED, and a change is the
+ * minority outcome: the judge is told to repeat a standing view unchanged when the exchanges do not move
+ * the attitude, so "unchanged" is the steady state of a settled pair and it writes no row here — by
+ * design, since an audit of "nothing happened" is noise on the page the owner reads to see what did. That
+ * makes this boundary alone quietly expensive: a settled edge never advances it, so the same exchanges
+ * re-qualify on every run and that pair buys another LLM judgment nightly, forever. The per-edge watermark
+ * in `persona_stance.judged_at` (V26, [RelationStanceRepository.markJudged]) is what closes that hole; it
+ * is stamped on any usable verdict, changed or unchanged. "A quiet forum re-judges nothing and costs
+ * nothing" is a promise the two keep together: this table keeps it for an edge that has moved at least
+ * once, the watermark keeps it for every edge that never has.
  *
  * Note what this class deliberately does NOT offer: no count, no per-pair tally, no aggregate of any kind.
  * The V25 header explains why — an audit table that can be summed is a scoreboard, and a scoreboard is the
@@ -127,10 +138,11 @@ class StanceChangeRepository(
         )
     }
 
-
     /**
      * The window boundary for ONE directed edge: when this pair last actually moved and stayed moved, or
-     * null if it never has — in which case that edge is judged over all of its history.
+     * null if it never has — in which case this table imposes no boundary at all, and the edge's
+     * `persona_stance.judged_at` watermark (V26) is what bounds it. An edge with neither is judged over
+     * all of its history, once.
      *
      * **Per-edge, not one global watermark**, and the difference is not academic. A single boundary that
      * advances whenever *any* pair changes silently disinherits every other pair in the same run: the

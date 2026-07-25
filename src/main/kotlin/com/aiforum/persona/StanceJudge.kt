@@ -75,6 +75,16 @@ object StanceJudge {
      * Then the three refusals — blank, over-long, digit-bearing — before the no-op check, because a
      * rejection is about whether the text may become a stance at all and that question is settled
      * without reference to what the stance says today.
+     *
+     * BOTH sides of the no-op check go through [clean], not just the candidate. The stored stance is
+     * not guaranteed to be tidy: seeds are hand-written prose, the persona form's textarea returns
+     * whatever the owner typed (a double space, a wrapped line), and an older stance may still be
+     * carrying the quotes a judgment wrapped it in. Cleaning one side only makes a model that echoed
+     * the standing view back verbatim — the behaviour [StanceJudgePrompts.SYSTEM] explicitly asks for
+     * when nothing moved — read as [Verdict.Changed]: an audit row on `/admin/stances` recording that
+     * the stance became itself, an upsert restamping the row's provenance as evolved, and an LLM
+     * recompose of the holder's stored prompt, all for text nobody altered. Comparing like with like
+     * costs one extra normalisation per judgment.
      */
     fun parse(raw: String, current: String): Verdict {
         val cleaned = clean(raw)
@@ -83,7 +93,7 @@ object StanceJudge {
             cleaned.length > MAX_STANCE_CHARS -> Verdict.Rejected("the answer was longer than a stance may be")
             cleaned.any { it.isDigit() } ->
                 Verdict.Rejected("the answer carried a number; a relation is prose, never a score")
-            cleaned.equals(current.trim(), ignoreCase = true) -> Verdict.Unchanged
+            cleaned.equals(clean(current), ignoreCase = true) -> Verdict.Unchanged
             else -> Verdict.Changed(cleaned)
         }
     }

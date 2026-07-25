@@ -101,6 +101,30 @@ class StanceJudgeTest {
         assertEquals(Verdict.Unchanged, StanceJudge.parse("\"$current\"", current))
     }
 
+    // The STORED side is the untidy one in the three below, which is the case that actually happens: a
+    // seed or an owner's textarea can hold a double space, a wrapped line or leftover quotes, while the
+    // model — told to restate the standing view when nothing moved — answers in clean prose. Comparing a
+    // cleaned answer against a raw stored stance calls that a change, and a change is not free: an audit
+    // row saying the stance became itself, provenance restamped to evolved, and a recompose of the
+    // holder's prompt, all for text nobody altered.
+
+    @Test
+    fun `parse reports unchanged when the stored stance carries a double space`() {
+        val stored = "kindred pessimist,  quietly enjoys catching him out"
+        assertEquals(Verdict.Unchanged, StanceJudge.parse(current, stored))
+    }
+
+    @Test
+    fun `parse reports unchanged when the stored stance was wrapped across lines`() {
+        val stored = "kindred pessimist,\n  quietly enjoys catching him out"
+        assertEquals(Verdict.Unchanged, StanceJudge.parse(current, stored))
+    }
+
+    @Test
+    fun `parse reports unchanged when the stored stance is the one wearing quotes`() {
+        assertEquals(Verdict.Unchanged, StanceJudge.parse(current, "\"$current\""))
+    }
+
     @Test
     fun `parse strips one pair of straight double quotes`() {
         assertEquals(Verdict.Changed("needles him gently"), StanceJudge.parse("\"needles him gently\"", current))

@@ -20,7 +20,12 @@ import org.springframework.test.context.ActiveProfiles
  * pass auto-applies with no approval queue, so this table is the owner's only control — the assertions
  * below are therefore about *the control still working*: the row round-trips both texts and the old
  * provenance a revert has to restore, the list stays newest-first, a revert stamps exactly once, and the
- * window boundary the next run reads is the real MAX.
+ * per-edge window boundary the next run reads is the real MAX of that pair's standing changes.
+ *
+ * What is NOT pinned here, because it deliberately lives elsewhere: this table only records changes, and
+ * an "unchanged" judgment writes no row by design. The watermark that keeps a settled pair from re-buying
+ * the same judgment every run is `persona_stance.judged_at` (V26), pinned in [RelationStanceRepositoryTest].
+ * A reader who takes the boundary below as the whole cost story will reintroduce that defect.
  *
  * The cascade assertion is real, not decorative: the test datasource URL carries `foreign_keys=on`
  * (application-test.yml), so SQLite enforces the V25 foreign keys per connection. Without that pragma

@@ -64,8 +64,12 @@ Feature: Relation stances evolve from what the members actually did
     Then the profile for "Paul" shows a stance toward "Sol" of "Owner's note: Paul has decided Sol is worth listening to."
     And no LLM call was made
 
-  # A quiet forum must be a cheap forum: no exchanges in the window means the pass costs nothing at
-  # all, rather than re-judging the same old history every night.
+  # A quiet forum must be a cheap forum, and the per-edge window is what makes it one. An edge stops
+  # being re-judged once a judgment has landed on it — one that moved the stance and one that read the
+  # exchanges and left it standing are both answers, and both close the window over the evidence they
+  # were given, so the same old history is not re-bought every night. What stays open is what deserves
+  # another look: an answer we refused, or a call that never landed at all. Here nothing has passed
+  # between the two members since, so there is nothing to ask about and the pass spends nothing.
   Scenario: A pass with nothing to judge makes no LLM call
     Given persona "Paul" has a stance toward "Sol" of "kindred pessimist, quietly enjoys catching him out"
     When the owner runs the stance evolution pass

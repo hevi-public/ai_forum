@@ -45,13 +45,24 @@ class PersonaPromptRefresher(
         }
 
     /**
-     * Recompose one persona and store the result; returns whether the prompt actually moved.
+     * Recompose one persona and store the result; returns whether the compose-AND-store SUCCEEDED — not
+     * whether the wording moved. A recompose that produces byte-identical text is a success and reports
+     * `true`, because the caller's question is "did this member get a fresh prompt written", and the two
+     * counts the callers show (`event=persona.recompose.ok count=`, the button's tally) mean exactly
+     * that. Comparing old to new would need a definition of "moved" that neither caller has a use for.
      *
-     * The whole thing sits inside a `runCatching` because both callers are batches: a flaky seam on
-     * member three must not cost members four through seven their refresh, and — for the evolution pass —
-     * a failed compose must not undo a stance change that is already committed with its audit row. A
-     * failure therefore leaves this persona's stored prompt untouched rather than half-written, and is
-     * reported as `false` plus a logged line, never as a thrown exception the caller has to think about.
+     * **Both the compose and the store are inside the guard**, because both callers are batches: a flaky
+     * seam — or a locked DB — on member three must not cost members four through seven their refresh,
+     * and for the evolution pass a failure here must not undo a stance change that is already committed
+     * with its audit row, nor skip the recompose of every holder still queued behind this one
+     * (`StanceEvolutionService.evolve` states that isolation is this method's job and does not catch).
+     * A failure leaves this persona's stored prompt untouched rather than half-written, and is reported
+     * as `false` plus a logged line, never as a thrown exception the caller has to think about.
+     *
+     * `try/catch (Exception)` rather than `runCatching`: `runCatching` catches [Throwable], so a
+     * `StackOverflowError` or an `OutOfMemoryError` would be swallowed as a routine recompose failure
+     * and the batch would keep spending LLM calls on a JVM that is already broken. Same narrowing the S1
+     * review forced on the ambient tick and `StanceEvolutionService.evolve`.
      */
     fun refresh(personaId: String): Boolean {
         val persona = personas.find(personaId)
@@ -62,16 +73,17 @@ class PersonaPromptRefresher(
             log.warn("event=persona.recompose.failed persona={} reason=unknown-persona", personaId)
             return false
         }
-        return runCatching {
+        return try {
             val spec = PersonaSpec(persona.name, persona.descriptor, persona.abilities, persona.dials)
-            composer.compose(spec, prior = null, stances = storedStances(persona.id))
-        }.onSuccess { prompt ->
+            val prompt = composer.compose(spec, prior = null, stances = storedStances(persona.id))
             personas.update(
                 persona.id, persona.name, persona.descriptor, persona.model, prompt, persona.abilities, persona.dials,
             )
-        }.onFailure { e ->
+            true
+        } catch (e: Exception) {
             log.warn("event=persona.recompose.failed persona={} reason={}", persona.id, e.toString())
-        }.isSuccess
+            false
+        }
     }
 
     /**

@@ -56,6 +56,12 @@ class DiagnosticsController(
         // cap below depends on.
         "stanceEvolutionEnabled" to stanceEvolution.enabled,
         "stanceEvolutionMaxEdgesPerRun" to stanceEvolution.maxEdgesPerRun,
+        // The cadence completes the picture the two rails above start: "off" and "uncapped" only say what
+        // a run costs, not how often one would happen if the switch were flipped. It is also the one
+        // reader this bound value has — the `@Scheduled` annotation resolves the same key itself — so
+        // exposing it here is what keeps `cron` a documented, inspectable setting rather than a string
+        // that exists twice with nothing comparing the copies.
+        "stanceEvolutionCron" to stanceEvolution.cron,
         "activeProfiles" to env.activeProfiles.toList(),
     )
 }

@@ -54,7 +54,7 @@ class MigrationPipelineTest {
             }
         }
 
-        // 3. Upgrade the EXISTING db to the latest schema (Flyway applies the pending V4–V25).
+        // 3. Upgrade the EXISTING db to the latest schema (Flyway applies the pending V4–V26).
         flyway(url, null).migrate()
 
         // 4. The old rows survived, and the new columns carry their migration default / backfill.
@@ -114,17 +114,20 @@ class MigrationPipelineTest {
                     assertEquals(null, rs.getString("updated_at"), "V11 leaves the pre-existing thread unedited (NULL)")
                 }
 
-                // flyway_schema_history records the full V1..V25 chain as applied (V20 thread.author_id +
+                // flyway_schema_history records the full V1..V26 chain as applied (V20 thread.author_id +
                 // V21 ambient_run landed with the ambient loop; V22 added ambient_run.action for S2's
                 // comment action; V23 added the article_seen dedupe registry for S5's feed source,
                 // plan_docs/ambient-slice-5.md; V24 added persona_stance, S3's qualitative relation graph,
                 // plan_docs/ambient-slice-3.md; V25 added stance_change, S4a's append-only audit trail for
                 // the stances V24 introduced — the only control on a pass that auto-applies,
-                // plan_docs/ambient-slice-4a.md). Bump this with every migration — it is the check that a
-                // new migration actually RUNS against an old database rather than only a fresh one.
+                // plan_docs/ambient-slice-4a.md; V26 added persona_stance.judged_at, the per-edge
+                // last-judged watermark, because an "unchanged" judgment is the steady state of a settled
+                // pair and writes no audit row by design — so the audit table alone left that pair buying
+                // an LLM judgment on every run, forever). Bump this with every migration — it is the check
+                // that a new migration actually RUNS against an old database rather than only a fresh one.
                 st.executeQuery("SELECT MAX(CAST(version AS INTEGER)) AS v FROM flyway_schema_history").use { rs ->
                     rs.next()
-                    assertEquals(25, rs.getInt("v"), "the latest migration (V25) should be recorded as applied")
+                    assertEquals(26, rs.getInt("v"), "the latest migration (V26) should be recorded as applied")
                 }
             }
         }
