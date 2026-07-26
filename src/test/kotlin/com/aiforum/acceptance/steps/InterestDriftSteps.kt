@@ -197,10 +197,13 @@ class InterestDriftSteps(
      */
     @Then("the persona {string} still has the descriptor {string}")
     fun personaStillHasDescriptor(name: String, expected: String) {
-        val persona = personas.find(personaId(name)) ?: error("no persona \"$name\"")
-        assertEquals(
-            "$expected descriptor", persona.descriptor,
-            "the drift pass must not touch a member's character",
+        // Read off the PAGE, not the repository: this suite asserts at HTTP level so a scenario proves
+        // what an owner can actually see. `persona.kte` already renders `data-persona-descriptor`, so
+        // going through the repository was a private back door for no gain.
+        val page = profile(name)
+        assertTrue(
+            Html.hasAttr(page, "data-persona-descriptor", "$expected descriptor"),
+            "the drift pass must not touch a member's character — expected the seeded descriptor on the profile",
         )
     }
 

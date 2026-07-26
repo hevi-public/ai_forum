@@ -227,7 +227,7 @@ actual datasource + recursive-CTE wiring — see [[sqlite-spring-jdbc]].
 
 ## The Tier-1 LlmClient seam and its test double
 
-The IO port for generation — one of **four** sibling ports faked the same way in
+The IO port for generation — one of **five** sibling ports faked the same way in
 `acceptance/config/TestBeans.kt` (`ScriptableLlmClient`, `ScriptableImageDescriber`,
 `ScriptableShortcutClient`, `ScriptableGitHubClient`; see [[bdd-tiered-testing]] for the port
 doctrine). The production impl wraps `claude -p` via `ProcessBuilder`; under

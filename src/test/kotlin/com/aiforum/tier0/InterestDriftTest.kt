@@ -10,6 +10,7 @@ import com.aiforum.persona.StanceJudgePrompts
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
@@ -179,6 +180,32 @@ class InterestDriftTest {
         )
     }
 
+    /**
+     * SQLite's `length()` counts CHARACTERS; Kotlin's `String.length` counts UTF-16 units. One non-BMP
+     * character measures 2 to Kotlin and 1 to V27's `length(trim(interest)) BETWEEN 2 AND 80`, so a
+     * lone emoji would clear the floor here and then trip the CHECK — and the trip lands mid-write: the
+     * owner form commits its retractions before its upserts, and the drift path rolls the swap back with
+     * the window unstamped, re-buying that judgment every run. The floor has to be measured the way the
+     * database measures it.
+     */
+    @Test
+    fun `validate counts characters the way SQLite does, so one emoji is too short rather than just long enough`() {
+        assertNotNull(
+            Interests.validate("\uD83D\uDE80"),
+            "a single non-BMP character is ONE character to the CHECK, so it must be refused here too",
+        )
+        // Two real characters, four UTF-16 units — accepted, because the DDL will accept it.
+        assertNull(Interests.validate("\uD83D\uDE80\uD83D\uDE80"))
+    }
+
+    @Test
+    fun `validate refuses a phrase the storage door would unwrap a second time`() {
+        // The owner's form validates and then hands the value to a door that cleans again, so a phrase
+        // that is not already a fixed point of clean is validated as one string and stored as another.
+        assertNotNull(Interests.validate("\"\"x\"\""), "must be refused: it would be stored as a single character")
+        assertNull(Interests.validate("kernel scheduling"))
+    }
+
     @Test
     fun `parse refuses a phrase that is still wrapped after one unwrap, because the store would unwrap it again`() {
         // This USED to assert the doubly-wrapped phrase came back as a Drifted takenUp with its inner
@@ -344,12 +371,22 @@ class InterestDriftTest {
         // is nowhere to put the room: every parameter is about the ONE member being judged. So the
         // parameter list is what gets pinned, and a later "give the judge a little room context" reddens
         // here rather than shipping quietly.
+        // GENERIC types: an erased ["String","String","List","List","List"] is satisfied by
+        // `List<Interest>` (provenance) or a roster-carrying engagement type, so it would survive the
+        // very change it claims to catch.
         val parameters = InterestDriftPrompts::class.java.methods
             .single { it.name == "instruction" }
-            .parameters.map { it.type.simpleName }
+            .genericParameterTypes.map { it.toString() }
 
         assertEquals(
-            listOf("String", "String", "List", "List", "List"), parameters,
+            listOf(
+                "class java.lang.String",
+                "class java.lang.String",
+                "java.util.List<java.lang.String>",
+                "java.util.List<java.lang.String>",
+                "java.util.List<com.aiforum.persona.InterestDriftPrompts\$Engagement>",
+            ),
+            parameters,
             "instruction takes the member, its character, its pinned phrases, its open phrases and its " +
                 "own engagements - and nothing else. A sixth parameter is the cross-member channel D12 denies.",
         )

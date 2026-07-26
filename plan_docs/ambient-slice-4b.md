@@ -1576,6 +1576,31 @@ Everything below is true of the code today and would stay green if it stopped be
   judge), the title is bounded at 120 chars, and the blast radius is one digit-free prose phrase under
   eighty characters that lands on `/admin/interests` with its source cited and a revert button beside it.
 
+### 10.4b Behaviours found in the post-ready review, recorded as decisions
+
+Three things a second review pass surfaced that are **not** defects but would read as surprises if
+nobody wrote them down.
+
+**A retried comment can fall permanently behind a member's window.** `CommentRepository.update` never
+touches `created_at`, so a comment that FAILED before a drift pass and was retried after it keeps its
+original stamp — and the per-member filter is a strict `isAfter`, so that engagement is never judged.
+`drift()`'s comment claims the worst case of reading the clock before the evidence query is "an
+engagement judged twice"; this is the other direction, and it is a silent loss rather than a double
+spend. Left alone at this size: the alternative is stamping a retry with a fresh `created_at`, which
+would reorder the comment in every tree read that orders by it, for a member's single engagement.
+
+**An owner who empties a configured member of ALL its interests gets the seed list back on the next
+boot.** After the first-seed-only-per-member fix (§10.3 item 1), "holds nothing" is indistinguishable
+from "was never seeded". The alternative is a tombstone, which the roster phase deliberately does not
+have either (a persona the owner deletes also comes back). Consistent with the house rule, and now
+stated rather than discovered.
+
+**`GenerationController`'s `/room` fragment has the same shape as the flake fixed in
+`ThreadController`.** It reads only the in-flight registry, so a summon whose drafts all settle before
+the first poll reports a quiescent room with none of the settled replies in it. The `renderThread` fix
+does not cover this path. Pre-existing and outside S4b, recorded here because it is the same bug in the
+same family and the next reader of that fix will want to know it is not general.
+
 ### 10.5 Documentation landed with the slice
 
 Checklist items 40–42 were done at the end rather than alongside: the direction doc's status header,

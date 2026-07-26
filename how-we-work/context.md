@@ -335,6 +335,10 @@ branch, and a 19-test Tier-2 orchestration class. The ambient fan-out flake was 
   be reworked. S4b closed §11.5's two remaining items and left exactly one thing open there,
   deliberately: whether manual create + the room map discharge the requirements' diversity lever, or the
   *synthesised, centre-of-mass-aware* newcomer is a slice of its own.
+- **`GenerationController`'s `/room` fragment carries the flake that `ThreadController.renderThread`
+  was fixed for** (2026-07-26): it reads only the in-flight registry, so a summon whose drafts all
+  settle before the first poll reports a quiescent room with none of the settled replies in it. The
+  read-order fix does not generalise to it. Pre-existing, out of scope when found.
 - **S4b follow-ups (none blocking, all verified against the code).**
   1. **`coarseFloor` is dead under the shipped config.** The floor is the oldest watermark and only when
      *every* member has one, but a member below the engagement floor is skipped before any judgment and

@@ -909,6 +909,53 @@ class InterestDriftServiceTest {
         assertNull(changes.rows.first().revertedAt, "a refused revert leaves the audit row un-reverted")
     }
 
+    /**
+     * Owner provenance is a freeze, and revert is not an exception to it. The pass swapped X for Y; the
+     * owner then typed X back, which is the documented pinning gesture and stamps it `owner`. Reverting
+     * the change would upsert X with its OLD provenance over that row — `upsert` overwrites provenance
+     * by design — and reopen the window, so the next pass could set aside the phrase the owner had just
+     * pinned, with nothing left to show a pin ever existed. The change is not superseded (Y is still
+     * held), so the presence guard passes it.
+     */
+    @Test
+    fun `a revert that would land on an owner-pinned phrase is refused, not applied`() {
+        val personas = RosterPersonas(listOf(persona("sol")))
+        val interests = FakeInterests().apply {
+            seed("sol", "Y")
+            seed("sol", "X", PersonaInterestRepository.SOURCE_OWNER)
+        }
+        val changes = FakeInterestChanges().apply {
+            seedSwap("sol", dropped = "X", takenUp = "Y", changedAt = STAMP)
+        }
+        val svc = service(FakeComments(), personas, interests, changes, ScriptedLlm())
+
+        assertFalse(svc.revert(1L), "restoring X would overwrite the owner's own pin of X")
+        assertEquals(
+            PersonaInterestRepository.SOURCE_OWNER, interests.sourceOf("sol", "X"),
+            "the pin survives, which is the whole of D11's promise",
+        )
+        assertNull(changes.rows.single().revertedAt, "a refused revert leaves the row honestly un-reverted")
+    }
+
+    /**
+     * The mirror of the same hazard: the owner pinned the phrase the pass TOOK UP. Reverting would
+     * `delete` it, which would make revert the only path in the system that removes an owner-authored
+     * row without the owner's own form.
+     */
+    @Test
+    fun `a revert that would delete an owner-pinned phrase is refused`() {
+        val personas = RosterPersonas(listOf(persona("sol")))
+        val interests = FakeInterests().apply { seed("sol", "Y", PersonaInterestRepository.SOURCE_OWNER) }
+        val changes = FakeInterestChanges().apply {
+            seedSwap("sol", dropped = "X", takenUp = "Y", changedAt = STAMP)
+        }
+        val svc = service(FakeComments(), personas, interests, changes, ScriptedLlm())
+
+        assertFalse(svc.revert(1L))
+        assertEquals(listOf("Y"), interests.phrasesOf("sol"), "the owner's phrase is untouched")
+        assertEquals(PersonaInterestRepository.SOURCE_OWNER, interests.sourceOf("sol", "Y"))
+    }
+
     private companion object {
         // The fakes stamp rather than read a Clock, so a test can assert an exact value; the real
         // repositories take these from the injected Clock, which is what keeps src/main at zero

@@ -119,7 +119,11 @@ object InterestDrift {
         // tripping V27's `length(trim(interest)) BETWEEN 2 AND 80` inside the write transaction. That
         // rolls the swap back AND leaves the window unstamped, so the run re-buys the same judgment
         // every week: a cheap parse mistake turning into a permanent cost.
-        if (answer.take.length !in Interests.MIN_CHARS..Interests.MAX_CHARS) {
+        // Code points, not UTF-16 units, for the reason [Interests.validate] spells out: SQLite's
+        // `length()` counts characters, so one emoji measures 2 to Kotlin and 1 to the CHECK — and a
+        // trip here rolls the swap back with the window unstamped, re-buying this judgment every run.
+        val characters = answer.take.codePointCount(0, answer.take.length)
+        if (characters !in Interests.MIN_CHARS..Interests.MAX_CHARS) {
             return Verdict.Rejected("the answer was not the length an interest may be")
         }
         // 4 — I2. Char.isDigit() is Unicode-aware, so an Arabic-Indic or fullwidth digit counts too;

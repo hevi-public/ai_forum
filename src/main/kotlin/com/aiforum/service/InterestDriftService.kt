@@ -289,10 +289,40 @@ class InterestDriftService(
         // the member holds A and C. That breaks the one-for-one count invariant through the owner's own
         // control surface, and the surface offers a Revert button on every unreverted row in the log.
         // The audit row stays un-reverted and readable; what it cannot do is pretend to be undoable.
-        if (interests.phrasesOf(change.personaId).none { it.equals(change.takenUp, ignoreCase = true) }) {
+        // Read the member's CURRENT rows, not the audit row's memory of them — the bed019fe lesson from
+        // S4a applied to the action site rather than the judgment site. An audit row records what was
+        // true when the pass ran; the owner has had every minute since to change it from the persona
+        // form.
+        val current = interests.of(change.personaId)
+        if (current.none { it.interest.equals(change.takenUp, ignoreCase = true) }) {
+            // A SUPERSEDED change cannot be undone, and undoing it half-way is worse than refusing:
+            // the delete finds nothing while the upsert still lands, so A -> B then B -> C then revert
+            // the first leaves the member holding A *and* C. That breaks the one-for-one count invariant
+            // through the owner's own control surface, which offers Revert on every unreverted row.
             log.warn(
                 "event=interest.revert.skipped change={} persona={} reason=superseded",
                 changeId, change.personaId,
+            )
+            return false
+        }
+        // OWNER PROVENANCE IS A FREEZE, AND REVERT IS NOT AN EXCEPTION TO IT. Both writes below can hit
+        // an owner-authored row, because `upsert` overwrites provenance by design and `delete` removes
+        // whatever holds the key:
+        //   * restore-collision — the pass swapped X for Y; the owner then typed X back, which stamps it
+        //     `owner`. Reverting now upserts X with its OLD provenance over the owner's row and reopens
+        //     the window, so the next pass may set aside the phrase the owner just pinned, with nothing
+        //     left to say a pin ever existed.
+        //   * mirror — the owner pinned Y itself. Reverting deletes it outright, which would make this
+        //     the only path in the system that removes an `owner` row without the owner's own form.
+        // Neither is superseded, so the check above passes both. Refusing keeps D11's promise; the audit
+        // row stays readable and un-reverted, which is the honest state.
+        val frozen = current.filter { it.source == PersonaInterestRepository.SOURCE_OWNER }
+            .map { it.interest }
+            .filter { it.equals(change.takenUp, ignoreCase = true) || it.equals(change.dropped, ignoreCase = true) }
+        if (frozen.isNotEmpty()) {
+            log.warn(
+                "event=interest.revert.skipped change={} persona={} reason=owner-collision phrases={}",
+                changeId, change.personaId, frozen,
             )
             return false
         }

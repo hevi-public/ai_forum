@@ -13,7 +13,7 @@ mock), and the place a test lives tells you what it actually exercises.
 ## The one load-bearing rule: mock only at Tier 1
 
 There is exactly one **class** of seam where we substitute fakes: the IO boundary — the
-constructor-injected ports to the outside world. That is currently **four port interfaces**, each
+constructor-injected ports to the outside world. That is currently **five port interfaces**, each
 with a scriptable `@Primary @Profile("test")` fake in `src/test/.../acceptance/config/TestBeans.kt`:
 
 | Port | Abstracts | Test double |
@@ -28,7 +28,7 @@ Alongside them sit a fixed `Clock` and the fault-injection repo wrappers (`Faili
 line runs **real** code against those fakes. If you find yourself mocking a service to test a
 controller, or stubbing an internal method, stop — that hides the very integration the test exists to
 prove. A new external dependency gets a new port + scriptable fake (the pattern has been extended
-three times: vision → Shortcut → GitHub); it never gets mocked mid-stack.
+four times: vision → Shortcut → GitHub → ArticleSource); it never gets mocked mid-stack.
 
 Why this matters: a suite that mocks internally can stay green while the wired-together system is
 broken. By allowing fakes at only the IO edge, a green higher-tier test means the real domain +
@@ -41,7 +41,7 @@ controller + view actually compose correctly.
 | **Tier 0** | Pure functions / logic, no side effects | none | `DepthBudget.isExhausted()`, `ContextAssembler` firewalling `+1`, `GenerationStateMachine` transitions; also the JS pure-core `htmx-error-core.mjs` (toast store + `ageLabel`, deterministic via an injected `now`, jsTest) |
 | **Tier 1** | The IO boundary itself | nothing above it; this *is* the seam | `JdbcCommentRepository` against a real test SQLite DB; the `LlmClient` fake's own behaviour |
 | **Tier 2+** | Controllers / domain orchestration | the Tier-1 port fakes (`LlmClient` et al., `Clock`, a repo fake) | `GenerationService` running real Tier-0 logic, calling the scripted `LlmClient` |
-| **Acceptance / E2E** | Full stack over HTTP | the four scriptable port fakes from `TestBeans.kt` (DB is real test SQLite) | Cucumber scenarios driven via the `HttpClient` support class (`acceptance/support/HttpClient.kt` — Spring Boot 4 removed `TestRestTemplate`) |
+| **Acceptance / E2E** | Full stack over HTTP | the five scriptable port fakes from `TestBeans.kt` (DB is real test SQLite) | Cucumber scenarios driven via the `HttpClient` support class (`acceptance/support/HttpClient.kt` — Spring Boot 4 removed `TestRestTemplate`) |
 
 Run order is **lowest-first** (Tier 0 → 1 → 2 → acceptance). A break low down ripples upward, so the
 lowest failing tier names the culprit — read it first and ignore the cascade above it.
@@ -54,8 +54,8 @@ before any logic exists, which is what lets the team implement without breaking 
 ## Constructor injection is the discipline that keeps the seam intact
 
 The "one mock level" guarantee only holds if the boundary is *injectable*. So every dependency that
-touches the outside world — the four ports (`LlmClient`, `ImageDescriber`, `ShortcutClient`,
-`GitHubClient`), `Clock`, repositories — is passed by **constructor injection**, never reached for
+touches the outside world — the five ports (`LlmClient`, `ImageDescriber`, `ShortcutClient`,
+`GitHubClient`, `ArticleSource`), `Clock`, repositories — is passed by **constructor injection**, never reached for
 internally. The failure mode is gradual: an agent adds an
 `Instant.now()` here, a `new ProcessBuilder()` there, and suddenly a tier can't be tested in
 isolation. Hold the line:

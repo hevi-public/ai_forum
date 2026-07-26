@@ -303,8 +303,11 @@ Feature: What the members are into drifts with what they actually wrote
     Then "Sol"'s system prompt carried the interest "kernel scheduling"
     And no composition call was made
 
-  # The convergence guardrail as behaviour: two members share a phrase, and the judging model is still
-  # shown nothing but the member in front of it. There is no cross-member channel to optimise through.
+  # The convergence guardrail as behaviour. Note what is asserted and what is NOT: the two members hold
+  # DISJOINT phrases, and that is deliberate — the step computes the foreign set as "every phrase held by
+  # somebody else that this member does not hold", so a genuinely shared phrase would be excluded from
+  # the very set being checked and could never redden anything. Sharing is exercised on the room-map
+  # scenario, which seeds it; here the point is that nothing about another member reaches the judge.
   Scenario: Nothing about the rest of the room reaches the judging model
     Given persona "Sol" is into "typography"
     And persona "Paul" is into "release engineering"

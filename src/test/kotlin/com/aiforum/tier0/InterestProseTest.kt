@@ -85,10 +85,13 @@ class InterestProseTest {
         // pinned would know which ones are safe to perform at, which is a lever on its own drift.
         val overloads = InterestProse::class.java.methods.filter { it.name == "block" }
         assertEquals(1, overloads.size, "an overload taking sources would be exactly the leak this pins")
+        // GENERIC types, not erased ones: `List::class.java` alone is satisfied by `List<Interest>`,
+        // which carries `source` — so the assertion would stay green through exactly the retyping it
+        // exists to catch. `genericParameterTypes` renders the type argument.
         assertEquals(
-            listOf(String::class.java, List::class.java),
-            overloads.single().parameterTypes.toList(),
-            "block takes a member name and phrases - nothing that can say which of them are pinned",
+            listOf("class java.lang.String", "java.util.List<java.lang.String>"),
+            overloads.single().genericParameterTypes.map { it.toString() },
+            "block takes a member name and bare phrases - nothing that can say which of them are pinned",
         )
     }
 

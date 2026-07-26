@@ -50,10 +50,25 @@ object Interests {
      */
     fun validate(phrase: String): String? {
         val cleaned = clean(phrase)
+        // CHARACTERS AS SQLITE COUNTS THEM, which is code points — `String.length` is UTF-16 units, so a
+        // single non-BMP character (one emoji) measures 2 here and 1 to `length(trim(interest))`. It
+        // would clear this floor and then trip V27's CHECK, and the trip lands mid-write: the owner
+        // form's reconciliation commits its retractions before its upserts, so the phrase being edited
+        // is already gone when the exception surfaces — and on the drift path the rollback leaves the
+        // watermark unstamped, which re-buys that judgment every run. This measurement IS the guarantee
+        // that a phrase accepted here can be stored.
+        val characters = cleaned.codePointCount(0, cleaned.length)
         return when {
             cleaned.isBlank() -> "an interest cannot be blank"
-            cleaned.length < MIN_CHARS -> "an interest must be at least $MIN_CHARS characters"
-            cleaned.length > MAX_CHARS -> "an interest must be at most $MAX_CHARS characters"
+            // A phrase that is not already a fixed point of [clean] is refused, because the storage door
+            // cleans again: `""x""` arrives here, cleans to `"x"`, measures 3, and is written as `x` at
+            // 1 — validated as one string and stored as another, which is the shape that lets a phrase
+            // slip past the already-held and owner-pinned checks and land on somebody else's row. The
+            // judge refuses this too, with its own wording; this is the same rule for the owner's form
+            // and for every writer added later.
+            clean(cleaned) != cleaned -> "an interest cannot stay wrapped in quotes once unwrapped"
+            characters < MIN_CHARS -> "an interest must be at least $MIN_CHARS characters"
+            characters > MAX_CHARS -> "an interest must be at most $MAX_CHARS characters"
             else -> null
         }
     }
