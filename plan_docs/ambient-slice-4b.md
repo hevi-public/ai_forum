@@ -1,6 +1,6 @@
 # Ambient Slice 4b — interest/trait drift, and the convergence guardrails S4a left open
 
-> **Status:** 📋 designed 2026-07-25 — claims **V27**, not yet built ·
+> **Status:** ✅ built 2026-07-26 (V27) · designed 2026-07-25 ·
 > **Owner:** Hevi · **Created:** 2026-07-25 ·
 > Parent: `ai-driven-forum-direction.md` §6 / §9 (S4b row) / §11.5 · Spec: `ai-forum-requirements.md` §6.2, §4, §7 ·
 > Predecessor: `ambient-slice-4a.md` (V25/V26)
@@ -1325,10 +1325,274 @@ prefix-scanned); `TestBeans.kt` (no new IO port); `build.gradle.kts` (tier membe
 
 ## 10. As built — where the implementation departed from this design
 
-*(To be filled during implementation, and it is mandatory: S4a's b4 defect was doc and comment claims
-wider than the code. Every deviation, every accepted limitation, and every §-numbered requirement
-satisfied at a different address gets a paragraph here — plus the working rule that produced the defect:
-a comment making a behavioural claim needs a test behind it, or it becomes this section.)*
+*(Filled 2026-07-26, after `./gradlew verifyAll` went green and after the review pass that produced
+§10.3. Order is roughly §2 → §6 → §7 → §8; the last two subsections are the ones this section exists
+for.)*
+
+### 10.1 Departures in the shipped code
+
+**`PersonaInterestRepository` has no `openFor()`.** §7 named one and §2.3.2 leaned on it. As built there
+is `of(personaId)` and `phrasesOf(personaId)`, and both callers that need the open/pinned split do it
+themselves — `InterestDriftService.candidates` with `held.none { isOpen(it) }`, `driftMember` with
+`held.filter { isOpen(it) }` / `filterNot`. Mildly better: `driftMember` needs the *rows* (it reads
+`droppedSource` off the one it drops) and both halves of the partition from one read, so an `openFor`
+would have been a second SELECT whose ORDER BY is free to disagree with `of`'s — the exact failure
+`phrasesOf` is documented as avoiding. The cost: the never-clobber skip is a Kotlin predicate rather
+than a SQL clause, pinned at Tier 2 and acceptance but not at Tier 1, and
+`PersonaInterestRepositoryTest` has no "the pass cannot see an owner row" test.
+
+**`sharedInterests()` returns persona IDS; the room map renders NAMES; the controller maps between
+them.** §2.12 said the repository returns phrase → member names. The reason for the change is in the
+repository's KDoc — a `JOIN persona` makes a return value a display concern — but the consequence is
+worth stating plainly: **today `id == name` for every seeded member, so dropping
+`InterestAdminController.addRoomMap`'s map would render correctly by luck and no test in the suite
+would catch it.** The first hand-created member whose id and name diverge is what would expose it.
+
+**`TopicSpread.of` took a different signature and grew a rule the design did not have.** §2.12 wrote
+`of(roster)`; as built it is `of(holdersByPhrase, rosterSize)` — pure over pre-mapped material. The
+added rule: with `rosterSize == 1` the shared list is forced empty, because a single phrase in a
+one-member room satisfies both `holders.size * 2 > rosterSize` and `holders.size == 1` and would render
+as "most of the room is into X" *and* "one member holds a topic nobody else does" about the same
+person. A fresh install has exactly that roster. Not pinned: `InterestProseTest` covers more-than-half,
+exactly-half, sole, ordering, empty roster and the structural no-`Int` assertion, but not
+`rosterSize == 1`.
+
+**The watermark is read per member through `judgedAt()`; `Persona.interestsJudgedAt` was never added.**
+Checklist items 16–19 were dropped wholesale, and `PersonaRepository.kt` is **untouched by this slice**.
+This is a stronger version of D3.1: the design's mechanism was "`update` deliberately does not name the
+column, and a test proves it"; as built `PersonaRepository` has no idea the column exists, so there is
+nothing to tidy into `update` and no projection whose staleness could be mistaken for a live read. The
+window is read once per member per run (`roster.associate { it.id to windowOf(it.id) }`), N+1 selects
+against a seven-row table — accepted. The cost: the guarantee moved from a test to an absence, and an
+absence cannot go red.
+
+**The service takes no `PersonaPromptRefresher` at all.** §7 asked for "a `SpyRefresher` records zero
+calls". The constructor is `(comments, personas, interests, changes, llm, transactions, clock, props)`,
+so there is nothing to spy on and the assertion was not written; the Tier-2 class records the
+substitution in its header. What this does not pin is the negative half of D7 at Tier 0:
+`PersonaTraitsTest` was not extended with "`ComposerPrompts.instruction` mentions no interest", and
+`PromptComposerTest` was not extended with "interests never enter a composed prompt". Both were named
+in §7 and neither exists; the acceptance scenario's `no composition call was made` covers the pass, not
+a future baking attempt on the composer side.
+
+**`max-interests` is bound and inert; the enforced ceiling is a controller constant.**
+`InterestDriftProperties.maxInterests` is read by nothing in `src/main`; the ceiling the owner meets is
+`PersonaController.MAX_INTERESTS = 4`. The split is argued in both KDocs and is reasonable, but the
+honest reading is that **`aiforum.interest-drift.max-interests` currently does nothing**. The binding is
+worth keeping only because an unbound key is worse; if the knob is to mean anything, inject the bean
+into `PersonaController` and delete the constant.
+
+**`Interests.validate` is not shared with the parse — only its constants are.** §2.5 said the pure
+validator is used by both write paths and §7 asked for a Tier-0 test that it is "the single validator
+both the parse and the owner path use". As built, `InterestDrift.judge` bound-checks inline against
+`Interests.MIN_CHARS`/`MAX_CHARS` and never calls `validate`, because `Interests.clean` is deliberately
+not idempotent on quotes and routing the candidate through `validate` would measure one string and
+store another. Defensible, and the agreement between the paths is now "they use the same two constants"
+rather than "they call the same function" — a weaker guarantee no test asserts. The same
+non-idempotency produced a real defect, fixed in review (§10.3).
+
+**Evidence is filtered on the FROM side only.** S4a's `candidates` requires both endpoints on the
+roster; S4b iterates the roster and groups by `fromAuthor`, so the addressee need not be a member. D4
+did not decide this; the implementation did, and the argument holds — what a member *wrote* is evidence
+about that member whoever it was aimed at, and nothing from the other side reaches the prompt because
+`towardBody` is never rendered. Pinned only by fixture construction (the Tier-2 `exchange(...)` helper
+deliberately addresses off-roster members), not by a test named for it.
+
+**The judge cites exactly the engagements the model saw, at the same truncation.** One list
+(`shown = candidate.evidence.takeLast(MAX_EVIDENCE_ENGAGEMENTS)`) feeds both `judge(...)` and
+`renderCited(shown)`, both flattening through `Snippet.oneLine(body, 400)` — deliberately unlike S4a,
+whose prompt takes `takeLast(12)` while `renderCited` gets the untruncated list. No test drives more
+than twelve engagements, so the equality is structural (one variable) rather than asserted.
+
+**`applyInterestEdits` reconciles the whole submitted set rather than acting field-by-field.** §2.11
+specified "blank retracts, non-blank upserts" plus three no-op guards. As built the submitted values are
+cleaned, validated, de-duplicated case-insensitively, and the member's held set is reconciled against
+them; the ceiling is counted after retractions, so swapping one phrase for another on a full member
+works. Stronger — the field name is an index, and index arithmetic on a stale form would delete a phrase
+the owner never saw — but the set semantics also produced a defect (§10.3), and one consequence stands
+after the fix: **a resubmitted, unchanged phrase keeps its source, so an owner can pin a phrase only by
+rewriting it, never verbatim.**
+
+**Two `parseCited` implementations with different semantics, one with no production caller.**
+`InterestAdminController.parseCited` keeps a malformed line as unlinked evidence; the companion-object
+copy in `InterestDriftService` drops it and is called only from `InterestDriftServiceTest`. The
+divergence is intentional and argued in both KDocs; the dead half is the same house wart as
+`StanceEvolutionService.parseCited`.
+
+**`withPersonaContext` joins with `listOfNotNull` rather than the design's `?.let`.** Both blocks go
+into one list and the result is `(listOf(persona.systemPrompt) + blocks).joinToString("\n\n")`. The
+byte-identity guarantee for unwired constructions survives, and block order is fixed by the list rather
+than by which repository happens to be wired — which the old expression could not promise for two
+optional blocks.
+
+**Two things landed that this slice did not design.** `ThreadController.renderThread` now reads the
+in-flight registry *before* the DB tree, fixing a real read-skew bug (a node that persisted and was
+evicted between the two reads appeared in neither); and `TriggerModeSteps`' two count assertions grew a
+room report on failure, which is how that bug was found after three wrong diagnoses. Both are recorded
+in `how-we-work/context.md`. Neither belongs to S4b and neither is pinned by a test — a unit pin wants
+`ThreadController` (eleven constructor deps, private method) and the acceptance scenario catches it
+about one run in four. Carried here because that flake was blocking this slice's green run.
+
+**V27 shipped essentially verbatim.** The only edit to the pre-claimed SQL is reason 3 of the
+why-a-table header, reworded to name the renamed generation seam. No column was added, removed or
+renamed; both CHECKs, the scoped digit rule, the NOCASE collation, the two indexes and the nullable
+`ALTER TABLE` are as designed.
+
+### 10.2 Departures in the tests
+
+**Judgments are docstrings, not one-line strings, and there is a new step for it.** Gherkin does not
+interpret `\n` inside a quoted `{string}`, so the design's `"DROP: typography\nTAKE: kernel scheduling"`
+would have enqueued a literal backslash-n and the parse would have refused an answer the model got
+right. §6.1 listed `the LLM will respond with {string}` as pure REUSE; it is REUSE for the one-line
+`NONE` and the generation replies, plus a new sibling `the LLM will respond with the answer:`
+(`CommonSteps`). The feature file carries a note, since the next multi-line answer will hit the wall.
+
+**Two `Given`s in the immutable-core scenario were `@Then` assertions and needed real authoring steps.**
+Cucumber matches on step *text*, not on the keyword, so `the persona {string} has abilities {string}`
+under a `Given` would have silently run an assertion against a member nobody configured. The authoring
+half got its own wording — `... was authored with abilities {string}` and `... was authored with the
+system prompt {string}` — both in `InterestDriftSteps`, both calling `PersonaRepository.update`.
+
+**`PersonaSteps`' two profile assertions had to be slugified.** They fetched `/personas/$name`; profile
+URLs are the slug (V5), and every caller until now used an all-lowercase single-word name where the two
+coincide. `"Sol"`/`"Paul"` 404s, and the assertion then fails against an empty body complaining about a
+missing attribute rather than a missing page. Now `PersonaRepository.slugFor(name)`. §8's "deliberately
+NOT edited" note held for `saveStanceOnly`, which is untouched; this was a different edit to that file.
+
+**Row-extraction helpers landed in shared support, not private in the step class.** §2.9/§8 item 35 kept
+`latestInterestChangeRow` in `Html.kt` and everything else private. As built `Html` also gained
+`roomMapRow` and `textOf` plus a private `liBlock` that the stance slicer now shares. The direction is
+right (one `<li>`-slicing implementation instead of two) but it widens a surface the design asked to
+keep narrow.
+
+**Five planned Tier-0 files became two.** `InterestDriftPromptsTest`, `InterestsTest` and
+`TopicSpreadTest` were not created; their contents live in `InterestDriftTest` (40 tests: parse,
+`Interests.validate`, prompts, the judge-name collision check) and `InterestProseTest` (15 tests:
+`InterestProse` + `TopicSpread`). Every behaviour §7 named is present except the ones in §10.4.
+
+**The firewall scenario leans on its file's `Background`.** §6 wrote it with its own persona and thread
+Givens; as appended it uses `owner_controls_firewall.feature`'s existing Background. Same assertions,
+same ordering constraint honoured — the summon is last, so `noVoteSignal`'s `received.lastOrNull()`
+reads the generation prompt and not a judge prompt.
+
+**The counts are exactly as predicted.** 19 scenarios in `interest_drift.feature`, one appended to
+`owner_controls_firewall.feature`, one to `config_guardrails.feature` — 21 new. The acceptance task's
+printed count went 213 → 234. Tier 0/1: 71 tests with V27 and the pure objects (40 + 15 + 11 + 5), plus
+12 for the `StubLlmClient` branch; Tier 2: 19. Confirmed against `build/reports/cucumber/report.json`,
+not against the prediction.
+
+### 10.3 Defects found in review and fixed before the PR left draft
+
+Five, all found by reading the shipped code against this document rather than by a red test — which is
+the point of §10.5.
+
+1. **The interest seed phase resurrected every phrase the pass set down.** `seedMissingInterests`
+   checked presence per phrase, and a phrase the pass DROPPED is genuinely absent (unlike an evolved
+   stance, whose `(from,to)` key survives), so each reboot re-inserted it: three seeded phrases, one
+   drift, one restart, four held — climbing past the ceiling run after run and quietly undoing every
+   drift. Fixed by making the phase first-seed-only **per member**, which is what the roster phase
+   already does. D11b's "blank the field and the seed restores it" un-pin path is withdrawn with it:
+   blanking retracts, and there is no un-pin.
+2. **Reverting a superseded change added an interest.** `revert` deleted `takenUp` and upserted
+   `dropped` unconditionally, so undoing `A→B` after `B→C` left the member holding both `A` and `C`.
+   Fixed with a guard: a change whose taken-up phrase the member no longer holds is skipped and logged
+   `reason=superseded`.
+3. **A doubly-quoted answer could un-pin an owner phrase.** The parse cleaned the take once and
+   `upsert` cleaned it again, so a `TAKE: ""release engineering""` compared as one phrase and stored as
+   another — missing both the pinned and the already-held refusals, taking the `DO UPDATE` branch on
+   the owner's own row, and leaving a revert that would delete the owner's phrase outright. Fixed by
+   refusing a take that is not a fixed point of `Interests.clean`, so what the parse hands back is what
+   SQL stores. The Tier-0 test that pinned the old behaviour now pins the refusal, and
+   `InterestDrift`'s KDoc — which stated the hazard backwards — was corrected: cleaning only shortens.
+4. **A refused edit-form value deleted the phrase it was replacing.** The fieldset is reconciled as a
+   set, so an invalid phrase was dropped from the submitted side and the phrase it replaced fell out of
+   the surviving set. Fixed by refusing the whole reconciliation when any field is unusable, so the
+   member's interests are left exactly as they were. The owner write path also gained its first test at
+   any tier — an acceptance scenario that actually submits the form.
+5. **The edit form's own instruction was false.** The note under an open field read *"retype it to make
+   it yours"*, but a resubmitted phrase keeps its source by design, so retyping pinned nothing. Reworded
+   to *"edit the wording to make it yours"*. That an existing phrase cannot be pinned verbatim is a real
+   gap and is recorded as a follow-up rather than papered over.
+
+Three doc/comment claims wider than the code were corrected in the same pass: the scenario title *"and
+the refusal is recorded"* (a refusal writes no audit row by design and reaches only the log), the revert
+step's KDoc claim that it would fail if the template stopped rendering the form (it reads the row's id,
+not the form's action), and `Interests.validate`'s claim about which caller reaches its blank branch (no
+caller does).
+
+### 10.4 Design claims not pinned by any test
+
+Everything below is true of the code today and would stay green if it stopped being true.
+
+- **The rest of the owner authoring path.** After §10.3's scenario, `applyInterestEdits`' keep-your-
+  source rule, the case-folded de-duplication, the ceiling, `InterestFieldView`, `noteFor` and the
+  fieldset remain unasserted; there is still no `PersonaControllerTest`, and D11's central argument —
+  that a bound `@RequestParam` would have broken `saveStanceOnly` — is unproven.
+- **`seedMissingInterests`' remaining claims**: the unknown-persona skip, the NOCASE-keyed presence
+  check, and the deliberate throw on a digit-carrying configured phrase.
+- **`PersonaRepository.update` leaves `interests_judged_at` alone** — true by construction (the column
+  is unknown to that class), asserted nowhere.
+- **`markJudged` no-ops for an unknown id.** Named in §7; not written. `markJudged` touching only the
+  named member *is* covered.
+- **D15's observability contract in full.** No `LogCapture` anywhere in this slice — every `event=`
+  reason is unasserted, including that the two core-violation refusals "read differently" where anyone
+  sees them: Tier 0 pins that the two reason strings differ, and the strings then go only to slf4j.
+- **The `nullsFirst` half of `byWindowAge`**, and the second comparator test §7 asked for: the one
+  ordering test gives both members a watermark, so it passes via the watermark alone.
+- **A skip never eats a budget slot.** No test runs a biting cap alongside a skipped member.
+- **`min-engagements` clamping** (`maxOf(1, …)`), and the count invariant after more than one run.
+- **A newcomer's NULL watermark** — the scenario asserts a newcomer holds zero interests, nothing
+  asserts the window.
+- **`InterestAdminController.parseCited`'s malformed-line branch**, `CitedEngagementView.permalink ==
+  null`, and therefore the template's unlinked-citation `@else`.
+- **Evidence truncation.** `MAX_EVIDENCE_ENGAGEMENTS`, `EVIDENCE_BODY_CHARS` and the "ONE list feeds
+  both the prompt and the citation" guarantee: every fixture uses three short engagements, so widening
+  any of them is green.
+- **`Interests.clean` at the repository door.** No Tier-1 test hands `upsert`/`delete` untidy text, and
+  the Tier-2 fake re-implements the cleaning, so deleting both calls is green.
+- **`TopicSpread`'s `rosterSize == 1` rule**, and **the room map's id → name mapping**, which passes by
+  luck today (§10.1).
+- **Most of the new `data-*` surface** — `data-persona-interests`, `data-interest-source`,
+  `data-interest-was-source`, `data-interest-cited`, `data-room-map`, `data-interests` and
+  `data-admin-link="interest-drift"` are rendered and asserted by nothing.
+- **The `+1`/`vote` substring rule on seeded and stub phrases.** §4 makes it a hard constraint; nothing
+  scans for violations, and the firewall scenario covers one phrase on one member.
+- **The window arithmetic's real instants.** Every clock in the suite is fixed, so `changed_at ==
+  readAt` by construction and the distinction `markJudged`'s `at` parameter exists to protect is
+  invisible — including the revert path, which rolls the window back to a post-LLM write instant rather
+  than to the read instant the judgment consumed (the S4a follow-up already recorded in `context.md`,
+  repeated here).
+- **`coarseFloor` in production.** A skipped member is never stamped, so one permanently quiet member
+  keeps the floor `null` for good and the read-size optimisation never engages; the Tier-2 test that
+  pins the floor pre-stamps both members, which is a state production does not reach.
+- **The judge's blinkers, on a `source: feed` install.** Every member writes in the same ambient article
+  threads, so the same fetched headline reaches every judge prompt through `threadTitle` — the one
+  cross-member channel left in, which makes `InterestDriftService`'s absolute "no cross-member channel"
+  claim wider than the code. The Tier-2 byte-identity test varies interests and holds threads constant,
+  so it cannot see it.
+- **Prompt-injection residual**, unchanged from §4 and restated here as accepted: `threadTitle` is
+  fetched web text, so untrusted content reaches a judging prompt while the Docker jail is deferred.
+  `towardBody` is not rendered (a Tier-2 assertion pins that the article summary never reaches the
+  judge), the title is bounded at 120 chars, and the blast radius is one digit-free prose phrase under
+  eighty characters that lands on `/admin/interests` with its source cited and a revert button beside it.
+
+### 10.5 Documentation landed with the slice
+
+Checklist items 40–42 were done at the end rather than alongside: the direction doc's status header,
+§6 bullet, §9 built-so-far line and slice-map row, §11.5's two handed-over items and seven §12 decision
+rows; `context.md`'s dated S4b feature-state entry, its rewritten "what's next" bullet and its S4b
+follow-up list; and the four→five port-count re-sync in `bdd-tiered-testing` and `cucumber-spring-bdd`,
+plus the three new SQLite subsections (nullable watermark columns, scoped CHECKs, NOCASE identity) and
+the two new Cucumber step-authoring traps. `jte-spring-kotlin` needed no S4b re-sync.
+
+### 10.6 The working rule that produced this section
+
+S4a's b4 defect was doc and comment claims wider than the code. Three entries in §10.3 are that same
+defect, caught by a review pass rather than by a test — and two of the five code defects in §10.3 were
+found the same way, by reading a KDoc's promise against the statement underneath it. The rule is
+unchanged and worth repeating at the top of the next slice: **a comment that makes a behavioural claim
+needs a test behind it, or it becomes an entry in this section.** Its corollary, learned here: **when
+two objects normalise the same text, one of them is going to do it twice.**
 
 ## 11. Decision log
 

@@ -5,6 +5,8 @@ import com.aiforum.acceptance.support.HttpClient
 import com.aiforum.acceptance.support.ScenarioWorld
 import com.aiforum.acceptance.config.ScriptableLlmClient
 import com.aiforum.acceptance.support.TestData
+import com.aiforum.persona.Dials
+import com.aiforum.repo.PersonaInterestRepository
 import com.aiforum.repo.PersonaRepository
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.Then
@@ -36,6 +38,7 @@ class InterestDriftSteps(
     private val http: HttpClient,
     private val data: TestData,
     private val personas: PersonaRepository,
+    private val interests: PersonaInterestRepository,
     private val llm: ScriptableLlmClient,
 ) {
 
@@ -80,6 +83,16 @@ class InterestDriftSteps(
         )
     }
 
+    /**
+     * Model the state a drift leaves behind: the phrase is gone from the member, and nothing records
+     * that it was ever there except the audit row. The seeding phase must read that as "this member has
+     * been seeded and is done", not as "a configured phrase is missing" — which is the whole point of
+     * the scenario this serves.
+     */
+    @Given("persona {string} has set down the seeded interest {string}")
+    fun personaHasSetDownInterest(name: String, interest: String) =
+        interests.delete(personaId(name), interest)
+
     @When("the owner runs the interest drift pass")
     fun runDriftPass() {
         val resp = http.post(DRIFT_PATH)
@@ -100,6 +113,47 @@ class InterestDriftSteps(
         val resp = http.post("$HISTORY_PATH/$id/revert")
         world.lastStatus = resp.statusCode.value()
         world.lastBody = resp.body
+    }
+
+    /**
+     * Drive the persona EDIT FORM's interest fieldset, the way the owner does — the only path that
+     * stamps `owner` provenance, retracts a phrase by blanking it, and enforces the ceiling.
+     *
+     * Deliberately the real form POST rather than direct SQL: every other Given here writes SQL to keep
+     * the zero-cost scenarios honest, which left `applyInterestEdits` — the pin mechanism, the
+     * reconciliation, all three guards — reachable by no test at any tier. Replacing that method's body
+     * with `return` left the whole suite green.
+     *
+     * The full field list is replayed (descriptor, model, abilities, systemPrompt, every dial), because
+     * the edit endpoint binds absent params to blank and a partial POST would wipe what it omits — the
+     * same reason `PersonaSteps.saveStanceOnly` replays a fixed list.
+     */
+    @When("the owner saves {string}'s interests as {string}")
+    fun ownerSavesInterests(name: String, phrasesCsv: String) {
+        val existing = personas.find(personaId(name)) ?: error("no persona \"$name\"")
+        val phrases = phrasesCsv.split("|").map { it.trim() }
+        val form = mutableMapOf<String, Any?>(
+            "descriptor" to existing.descriptor,
+            "model" to existing.model,
+            "abilities" to existing.abilities.joinToString(", "),
+            "systemPrompt" to existing.systemPrompt,
+        )
+        Dials.KEYS.forEach { key -> form["dial_$key"] = existing.dials[key] ?: Dials.DEFAULT }
+        phrases.forEachIndexed { i, phrase -> form["interest_$i"] = phrase }
+        val resp = http.postForm("/personas/${PersonaRepository.slugFor(existing.name)}/edit", form)
+        world.lastStatus = resp.statusCode.value()
+        world.lastBody = resp.body
+    }
+
+    @Then("the profile for {string} shows the interest {string} as the owner's")
+    fun profileShowsOwnerInterest(name: String, interest: String) {
+        val page = profile(name)
+        val tag = Regex("<span[^>]*data-interest=\"${Regex.escape(interest)}\"[^>]*>").find(page)?.value
+            ?: error("no interest tag for \"$interest\" on $name's profile:\n${interestsOn(page)}")
+        assertTrue(
+            tag.contains("data-interest-source=\"owner\""),
+            "expected \"$interest\" to be marked as the owner's, got: $tag",
+        )
     }
 
     // --- the profile, which is where an owner actually reads what a member is into ------------------

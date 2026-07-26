@@ -333,3 +333,33 @@ Feature: What the members are into drifts with what they actually wrote
     When the owner adds a persona "Mira" described as "asks who this is actually for"
     And the owner runs the interest drift pass
     Then the profile for "Mira" shows 0 interests
+
+  # The owner's own write path, which nothing else in this feature exercises: every other Given here
+  # writes SQL so the zero-cost scenarios stay honest, and that left the whole edit-form mechanism —
+  # pinning, retraction, the ceiling, the guards — reachable by no test at any tier.
+  #
+  # Three properties in one save, because they are one interaction: a NEW phrase is authored as the
+  # owner's (which is how pinning happens at all), a phrase left out of the submission is retracted, and
+  # a phrase resubmitted unchanged keeps the provenance it had — without that last rule, opening the
+  # form and pressing Save would freeze every phrase the member holds, which is not a decision the owner
+  # made.
+  Scenario: The owner authors, pins and retracts interests on the edit form
+    Given persona "Sol" is into "typography"
+    And persona "Sol" is into "small tools"
+    When the owner saves "Sol"'s interests as "typography | kernel scheduling"
+    Then the profile for "Sol" shows the interest "kernel scheduling" as the owner's
+    And the profile for "Sol" shows the interest "typography"
+    And the profile for "Sol" shows no interest "small tools"
+    And the profile for "Sol" shows 2 interests
+
+  # One unusable field must not take the phrase it was editing with it. The fieldset is RECONCILED, so
+  # dropping just the bad value would delete whatever it replaced — the owner retypes a prefilled phrase,
+  # overshoots the length, and the interest disappears with no message and no undo. Leaving the set
+  # exactly as it was costs a resubmit instead of a phrase.
+  Scenario: A save carrying an unusable phrase changes nothing at all
+    Given persona "Sol" is into "typography"
+    And persona "Sol" is into "small tools"
+    When the owner saves "Sol"'s interests as "x | small tools"
+    Then the profile for "Sol" shows the interest "typography"
+    And the profile for "Sol" shows the interest "small tools"
+    And the profile for "Sol" shows 2 interests

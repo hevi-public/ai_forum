@@ -282,6 +282,20 @@ class InterestDriftService(
             log.info("event=interest.revert.skipped change={} reason=already-reverted", changeId)
             return false
         }
+        // A SUPERSEDED change cannot be undone, and undoing it half-way is worse than refusing.
+        // Reverting restores `dropped` and removes `takenUp` — but if a later drift already moved
+        // `takenUp` on, the delete is a no-op while the upsert still lands, so the member ENDS UP WITH
+        // ONE MORE interest than it started with: A -> B, then B -> C, then revert the first change and
+        // the member holds A and C. That breaks the one-for-one count invariant through the owner's own
+        // control surface, and the surface offers a Revert button on every unreverted row in the log.
+        // The audit row stays un-reverted and readable; what it cannot do is pretend to be undoable.
+        if (interests.phrasesOf(change.personaId).none { it.equals(change.takenUp, ignoreCase = true) }) {
+            log.warn(
+                "event=interest.revert.skipped change={} persona={} reason=superseded",
+                changeId, change.personaId,
+            )
+            return false
+        }
         transactions.execute {
             interests.delete(change.personaId, change.takenUp)
             interests.upsert(change.personaId, change.dropped, change.droppedSource)

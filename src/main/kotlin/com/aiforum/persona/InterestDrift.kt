@@ -97,6 +97,19 @@ object InterestDrift {
      * for a phrase you pinned", and one shared malformed message makes those two the same event.
      */
     private fun judge(answer: Answer.Swap, open: List<String>, pinned: List<String>): Verdict {
+        // 2b — WHAT THE PARSE HANDS BACK MUST BE WHAT SQL STORES. `clean` strips ONE wrapping quote pair
+        // and is deliberately not idempotent, while `PersonaInterestRepository.upsert` cleans again at
+        // the write door — so a doubly-wrapped answer is compared here in one form and stored in
+        // another. That is not cosmetic: the already-held and owner-pinned refusals below both compare
+        // the candidate against stored phrases, so `""release engineering""` slips past them, and the
+        // upsert then cleans it onto the owner's PINNED `release engineering` row and relabels it
+        // `drifted`. The pin is gone, the member holds one fewer, and revert would delete the owner's
+        // own phrase — `persona_interest` keeps no history, so none of it comes back.
+        // Refusing a phrase that is not already a fixed point of `clean` closes it at the one place the
+        // two forms can differ.
+        if (Interests.clean(answer.take) != answer.take) {
+            return Verdict.Rejected("the answer's phrase was still wrapped after unwrapping it once")
+        }
         // 3 — the length rule lives in Interests, so the parse and the owner's form agree with the DDL.
         //
         // Bound-checked on the string this verdict will actually HAND BACK, not by routing it through

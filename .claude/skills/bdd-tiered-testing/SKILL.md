@@ -234,6 +234,32 @@ establish the happens-before the post-await assertions rely on (worker writes, t
 inside the port line: `RecordingComments` is the repo test-double the tier already uses; the hook is a
 probe on it, not a new mock.
 
+## A test that cannot fail is not coverage
+
+Two shapes get written by accident, are green forever, and read as protection. S4b shipped one of each
+before a cross-check caught them. The detector is one question asked of every new assertion: **what
+implementation would make this red?** If the answer is "none", rewrite it or delete it.
+
+- **Asserting the absence of something that was never passed in.** "the rendered instruction contains no
+  other member's interest" is true of *every possible implementation* of a function with no parameter
+  carrying another member's interest — including the future one that grows a roster argument, which is
+  the exact regression the test existed to catch. Rewrite it **structurally**: pin the function's
+  parameter list, so the change that would create the leak reddens instead of shipping quietly.
+- **Comparing a value against the expression that defines it.** A repository test asserting
+  `phrasesOf(id) == of(id).map { it.interest }` restates the implementation and passes even when the SQL
+  underneath is wrong. Assert against **independently authored** expected data — the rows the test
+  inserted, or a literal.
+
+Two habits keep the rest honest:
+
+- **Mutation-verify every assertion that guards a cost, an ordering, or an invariant.** Break the
+  mechanism locally, confirm the *named* test reddens, restore. "Remove the unchanged-verdict watermark
+  stamp → the two-run cost test fails" is a fact you check once and record in the plan doc. "The test
+  covers it" is a belief.
+- **A guard whose only witness is a KDoc is not guarded.** S4b's repository cleaned every phrase at "the
+  one door every writer comes through" and said so in three paragraphs; deleting both calls was green.
+  If a comment says a line prevents something, the something is a test case.
+
 ## Logging is IO — assert it
 
 Log output is an **output surface**, the same as an HTTP body or a rendered `data-*` hook — an operator

@@ -180,10 +180,17 @@ class InterestDriftTest {
     }
 
     @Test
-    fun `parse strips only the outer pair, so quoted words inside the phrase survive`() {
-        assertEquals(
-            Verdict.Drifted(dropped = "typography", takenUp = "\"release engineering\""),
-            InterestDrift.parse("DROP: typography\nTAKE: \"\"release engineering\"\"", open, pinned),
+    fun `parse refuses a phrase that is still wrapped after one unwrap, because the store would unwrap it again`() {
+        // This USED to assert the doubly-wrapped phrase came back as a Drifted takenUp with its inner
+        // quotes intact. That looked like careful quote handling and was the un-pin hole: the repository
+        // cleans again at the write door, so the phrase compared here (quoted) and the phrase stored
+        // (unquoted) were different values, and the unquoted one could land on an owner-pinned row and
+        // relabel it. What the parse hands back must be what SQL stores.
+        val verdict = InterestDrift.parse("DROP: typography\nTAKE: \"\"release engineering\"\"", open, pinned)
+        assertTrue(verdict is Verdict.Rejected, "expected a refusal, got: $verdict")
+        assertTrue(
+            (verdict as Verdict.Rejected).reason.contains("wrapped"),
+            "the owner reads this reason on the log, so it has to name the actual problem: ${verdict.reason}",
         )
     }
 

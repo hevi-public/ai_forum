@@ -42,3 +42,15 @@ Feature: The forum is seeded with a default persona team
     When only the predefined stances are re-seeded
     Then the profile for "Sol" shows a stance toward "Saul" of "Fond of him, doesn't take his layer seriously - treats frontend problems as backend problems in a costume, and says so just often enough to sting."
     And the profile for "Sol" shows no stance toward "Quackers"
+
+  # S4b: the interest phase is FIRST-SEED-ONLY PER MEMBER, and the distinction is load-bearing. An
+  # interest is keyed by its own text, so a phrase the drift pass legitimately set down reads as
+  # "missing" from the config's point of view — and a per-phrase check would put it straight back on the
+  # next boot. That would grow the member past its ceiling, silently undo every drift a restart followed,
+  # and re-converge the room on the seed list, which is the opposite of what this slice is for.
+  Scenario: A phrase a member no longer holds is not re-seeded on the next boot
+    Given an empty forum
+    And the predefined personas are seeded
+    And persona "Sol" has set down the seeded interest "storage engines under real load"
+    When the predefined personas are seeded again
+    Then the profile for "Sol" shows no interest "storage engines under real load"

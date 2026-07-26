@@ -9,6 +9,7 @@ import com.aiforum.persona.PriorComposition
 import com.aiforum.persona.PromptComposer
 import com.aiforum.repo.PersonaInterestRepository
 import com.aiforum.repo.PersonaRepository
+import org.slf4j.LoggerFactory
 import com.aiforum.repo.RelationStanceRepository
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -125,6 +126,11 @@ class PersonaController(
     // form; the drift pass writes the same table from its own service.
     private val interests: PersonaInterestRepository,
 ) {
+
+    // Re-added for the interest fieldset: a submission abandoned because one phrase is unusable leaves
+    // the owner's set untouched by design, and that decision has to be visible to an operator wondering
+    // why a save appeared to do nothing.
+    private val log = LoggerFactory.getLogger(PersonaController::class.java)
 
     // Profile URLs use the slug (V5) so multi-word names ("Ada Lovelace") work without %20 noise.
     @GetMapping("/personas/{slug}")
@@ -366,11 +372,20 @@ class PersonaController(
             // through `upsert`, the one door that cleans, and `Interests.clean` is deliberately not
             // idempotent on quotes — cleaning it again would strip a pair the owner meant to keep.
             .map { Interests.clean(it) }
-            .filter { it.isNotBlank() && Interests.validate(it) == null }
             // Two fields carrying the same phrase are one interest; the PRIMARY KEY folds case, so this
             // must too, or the second field would upsert over the first and restamp its provenance.
             .distinctBy { it.lowercase() }
-        val typedKeys = typed.mapTo(mutableSetOf()) { it.lowercase() }
+        // ONE UNUSABLE FIELD ABANDONS THE WHOLE SUBMISSION, because this fieldset is RECONCILED: every
+        // held phrase not in the submitted set is retracted below. Dropping just the bad value would
+        // therefore delete the phrase that value was editing — the owner retypes a prefilled phrase, gets
+        // it one character too long, and the interest they were editing disappears with no message and no
+        // undo. Leaving the set exactly as it was is the only outcome that cannot lose the owner's data,
+        // and it costs them a resubmit rather than a phrase.
+        if (typed.any { it.isNotBlank() && Interests.validate(it) != null }) {
+            log.warn("event=persona.interests.rejected persona={} reason=unusable-phrase", personaId)
+            return
+        }
+        val typedKeys = typed.filter { it.isNotBlank() }.mapTo(mutableSetOf()) { it.lowercase() }
         val held = interests.of(personaId)
         held.filter { it.interest.lowercase() !in typedKeys }
             .forEach { interests.delete(personaId, it.interest) }
@@ -397,7 +412,12 @@ class PersonaController(
      */
     private fun noteFor(source: String): String =
         if (source == PersonaInterestRepository.SOURCE_OWNER) "yours — the drift pass skips it for good"
-        else "open to drift — retype it to make it yours"
+        // NOT "retype it to make it yours": retyping a phrase verbatim submits a value already held, and
+        // the keep-your-source rule (D11) deliberately leaves such a phrase's provenance alone — so the
+        // instruction would name a no-op on the one surface that defends the per-member immutable core.
+        // Editing the text is what stamps it: the new phrase is authored as the owner's, and the old one
+        // is retracted by the same reconciliation.
+        else "open to drift — edit the wording to make it yours"
 
     // Hand the model the PREVIOUS values + prompt so an edit adjusts rather than regenerates (continuity).
     private fun priorOf(existing: PersonaRepository.Persona) =

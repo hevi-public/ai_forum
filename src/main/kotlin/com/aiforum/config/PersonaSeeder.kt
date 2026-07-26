@@ -118,12 +118,25 @@ class PersonaSeeder(
             log.warn("event=seed.interest.skipped persona={} reason=unknown-persona", seed.id)
             return 0
         }
-        val held = interests.phrasesOf(seed.id).mapTo(mutableSetOf()) { key(it) }
+        // FIRST SEED ONLY, PER MEMBER — presence of ANY interest means this member has been seeded, and
+        // this phase is done with them forever. Not per phrase, which is the trap: the interest key
+        // includes the phrase TEXT, so a phrase the drift pass legitimately set down reads as "missing"
+        // on the next boot and comes straight back. Sol holds {P,Q,R}; a pass swaps P for X; the restart
+        // re-seeds P and Sol holds four, then five, with no bound — the repository enforces no ceiling
+        // and MAX_INTERESTS lives on the controller. Every drift would be silently undone by a restart
+        // and the room would re-converge on the seed list, which is the opposite of this slice.
+        //
+        // The stance seeder cannot hit this because its key is (from, to): an edge the pass rewrote is
+        // still present, so its per-row check is a genuine first-seed test. Ours is not, so the member
+        // is the unit.
+        val held = interests.phrasesOf(seed.id)
+        if (held.isNotEmpty()) return 0
+        val seen = mutableSetOf<String>()
         return seed.interests.count { phrase ->
-            // `add` returns true only when the phrase was genuinely absent — the missing test and the
-            // guard against a duplicated config entry in one statement.
-            held.add(key(phrase)).also { missing ->
-                if (missing) interests.upsert(seed.id, phrase, PersonaInterestRepository.SOURCE_SEEDED)
+            // `add` returns true only when the phrase was genuinely absent — here it guards a duplicated
+            // config entry only, since the member is known to hold nothing.
+            seen.add(key(phrase)).also { fresh ->
+                if (fresh) interests.upsert(seed.id, phrase, PersonaInterestRepository.SOURCE_SEEDED)
             }
         }
     }

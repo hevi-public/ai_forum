@@ -183,6 +183,14 @@ class InterestDriftServiceTest {
             )
         }
 
+        /** A seeded row whose phrases are named, for the chains where which phrase moved is the point. */
+        fun seedSwap(personaId: String, dropped: String, takenUp: String, changedAt: String) {
+            rows += InterestChange(
+                rows.size + 1L, personaId, dropped, PersonaInterestRepository.SOURCE_SEEDED,
+                takenUp, "", changedAt, null,
+            )
+        }
+
         override fun record(
             personaId: String,
             dropped: String,
@@ -860,7 +868,10 @@ class InterestDriftServiceTest {
     @Test
     fun `an unknown id and a second revert are both no-ops`() {
         val personas = RosterPersonas(listOf(persona("sol")))
-        val interests = FakeInterests().apply { seed("sol", "typography") }
+        // The member must actually HOLD the phrase the audit row says it took up, or the revert is
+        // refused as superseded before either guard under test is reached. The old fixture seeded an
+        // unrelated phrase, which made this test pass while describing a state the pass cannot produce.
+        val interests = FakeInterests().apply { seed("sol", "now") }
         val changes = FakeInterestChanges().apply { seed("sol", STAMP) }
         val llm = ScriptedLlm()
         val svc = service(FakeComments(), personas, interests, changes, llm)
@@ -872,6 +883,30 @@ class InterestDriftServiceTest {
         // actually intervened to whenever they last double-clicked.
         assertEquals(REVERT_STAMP, changes.rows.single().revertedAt)
         assertTrue(llm.received.isEmpty(), "no revert path touches the seam")
+    }
+
+    /**
+     * A SUPERSEDED change cannot be undone. Reverting restores `dropped` and removes `takenUp` — but a
+     * later drift has already moved `takenUp` on, so the delete finds nothing while the upsert still
+     * lands, and the member ends up holding one MORE phrase than it started with. That breaks the
+     * one-for-one count invariant through the owner's own control surface, and the log offers a Revert
+     * button on every unreverted row.
+     */
+    @Test
+    fun `reverting a superseded change is refused, rather than adding an interest back`() {
+        val personas = RosterPersonas(listOf(persona("sol")))
+        // A -> B happened, then B -> C: the member now holds C, and the FIRST change's takenUp (B) is
+        // long gone.
+        val interests = FakeInterests().apply { seed("sol", "C") }
+        val changes = FakeInterestChanges().apply {
+            seedSwap("sol", dropped = "A", takenUp = "B", changedAt = SURVIVING_CHANGE)
+            seedSwap("sol", dropped = "B", takenUp = "C", changedAt = STAMP)
+        }
+        val svc = service(FakeComments(), personas, interests, changes, ScriptedLlm())
+
+        assertFalse(svc.revert(1L), "the first change is superseded and cannot be undone")
+        assertEquals(listOf("C"), interests.phrasesOf("sol"), "and the member's set is untouched")
+        assertNull(changes.rows.first().revertedAt, "a refused revert leaves the audit row un-reverted")
     }
 
     private companion object {
