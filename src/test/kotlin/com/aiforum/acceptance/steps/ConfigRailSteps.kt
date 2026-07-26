@@ -107,8 +107,9 @@ class ConfigRailSteps(
     // spends LLM calls gets the same rail as the other three, on its own switch. All three keys read
     // off the bound MemoryProperties bean — readable under test at all only because that bean is bound
     // from a NON-profiled @Configuration (the InterestDriftProperties pattern), so a future @Profile on
-    // it fails here rather than quietly leaving the rail unreadable. None of the keys exists on
-    // /__diag yet, so each fails honestly on a missing key, not on a wiring/404 error.
+    // it fails here rather than quietly leaving the rail unreadable. Written before any of the three
+    // keys existed on /__diag, and shaped so each failed honestly on a missing key rather than on a
+    // wiring/404 error — DiagnosticsController emits all three now.
     @Then("memory consolidation is disabled")
     fun memoryConsolidationDisabled() =
         assertTrue(

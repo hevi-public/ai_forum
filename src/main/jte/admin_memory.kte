@@ -84,7 +84,7 @@
                              at the storage layer, and offering a dead control invites doubt about
                              what the member currently remembers. --%>
                         @if(!change.reverted)
-                            <form method="post" action="/admin/memory/revert/${change.id}" data-memory-revert>
+                            <form method="post" action="/admin/memory/${change.id}/revert" data-memory-revert>
                                 <button class="btn btn--ghost" type="submit">Revert</button>
                             </form>
                         @endif

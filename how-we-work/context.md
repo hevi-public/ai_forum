@@ -334,19 +334,45 @@ recorded owner call). Records resurface deterministically when the scoped contex
 words (binary whole-word overlap + one associative hop, ≤3 matched + parents, ≤5 total, injected
 as the fourth `withPersonaContext` block live at settle) and every scribe write is audited at
 `/admin/memory` with revert — which deletes but deliberately does NOT roll the watermark back.
-Suite 237 → 261 scenarios; tier 0/1/2: 392/243/154.
+Suite 237 → 263 scenarios; tier 0/1/2: 397/243/154. The slice then went through a
+**seven-dimension adversarially-verified review** (0 blockers, 0 majors, 9 minors, 10 nits — all
+addressed in the follow-up commit, plan doc §10.7), which is where two of the learnings below come
+from.
 
-Three durable learnings, the close-out audit's yield (plan doc §10.3):
+Durable learnings, the close-out audit's and the review's yield (plan doc §10.3, §10.7):
 
 - **The NUL divergence class — a THIRD way validated-vs-stored splits.** S4b left us two (a
   non-idempotent door cleaner; cleaning at two sites). The third is two measuring sites agreeing
   on every input except one: Kotlin's `trim`/`isBlank`/`\s+`/`codePointCount` all pass U+0000
   through, while SQLite's `length()` counts characters only **up to the first NUL** — so a
   NUL-opening body passed `MemoryText.validate`, then tripped V28's `CHECK (length(body) > 0)`
-  mid-write as an uncaught 500 on the owner's own form. The rule: when a design says two sides
-  "agree by construction", name the input domain the agreement holds over — and refuse NUL at any
-  door whose bound a SQLite length CHECK backstops. (Only NUL truncates the count; refusing other
-  control characters is over-rejection, its own defect class.)
+  mid-write as an uncaught 500 on the owner's own form. **Only a LEADING NUL is that loud**: a
+  MID-NUL body satisfies both CHECKs (`length('a'||char(0)||'b')` is 1) and would have stored
+  SILENTLY with an undercounted length — the divergence itself rather than a crash, and the worse
+  half precisely because nothing goes red. Refuse on the character, never on its position. The
+  rule: when a design says two sides "agree by construction", name the input domain the agreement
+  holds over — and refuse NUL at any door whose bound a SQLite length CHECK backstops. (Only NUL
+  truncates the count; refusing other control characters is over-rejection, its own defect class.)
+- **A doctrine file may not carry an impossibility claim nobody re-ran.** The review found two in
+  `sqlite-spring-jdbc`, both introduced by this slice: "FK adds are impossible" and "CHECKs are
+  `CREATE TABLE`-only". Both are folk versions of much narrower truths, re-tested at the shell and
+  against the shipped xerial 3.53.2 before rewriting: a **new** column MAY carry a `REFERENCES`
+  clause and it IS enforced (only table-level/composite FKs, and FKs on existing columns, are
+  refused — and the new column must default to NULL); a CHECK **can** be retrofitted, it just
+  validates the whole table and aborts on the first violator, and the table-level
+  `ALTER … ADD CHECK` syntax is missing on older engines. Skills are read *instead of* checking, so
+  an overstatement there costs a future session a full table rebuild on a live file for what one
+  `ADD COLUMN` does. The decisions those claims propped up (V28's root CHECK at table birth) all
+  survived the correction — the rationale was wrong, not the call.
+- **"Mutation X reddens test Y" is a claim, and the only way to know is to run it.** The close-out
+  audit reads code against docs; it cannot see a ledger entry that is accurate about the code and
+  false about the *fixture*. Persona memory's §7 credited an acceptance scenario with a mutation it
+  could not detect (the root body shared no word with the fixture, so dropping the picker's
+  `kind='record'` filter left it unmatched and green), and a second entry named a mutation that
+  reddened nothing at all. Both were found by execution, not reading. Fifteen pins were
+  mutation-verified at build time and were all correct; the two that were not are exactly the two
+  that were wrong. Related, same review: a class the audit patches at ONE site usually has more —
+  the lexicographic-ISO cut was fixed at one of four and shipped live at the other three.
 - **The records-only parent-candidate rule is the root-protection pattern.** The design review's
   one blocking finding: every surface that offers parent candidates — retrieval's hop, the
   scribe's letter list, the profile picker, the form endpoint, the repository belt — draws from
@@ -370,6 +396,17 @@ Three durable learnings, the close-out audit's yield (plan doc §10.3):
   create + the room map discharge the requirements' diversity lever, or the *synthesised,
   centre-of-mass-aware* newcomer is a slice of its own. Memory's own deferred aspiration
   (graph-walk recall, FTS/embeddings, root INJECTION) has no slice and no owner call yet.
+- **Memory recall is categorically dead for an unspaced-script persona** (found by the persona-memory
+  review, 2026-07-26; characterized, not fixed — plan doc §10.4). `MemoryRecall`'s ≥5-code-point word
+  floor plus a tokenizer that splits only on `NON_WORD` means a CJK-language member matches on
+  verbatim recurrence of a whole glued run and nothing else: individually meaningful CJK words are
+  1–4 code points (日本語 is 3) so they all fall under the floor, and unspaced prose offers no split
+  characters — while Latin members recall normally. The script-change boundary logic `WholeWords` was
+  extracted to carry is therefore unreachable from `wordsOf` for its own motivating case. Nothing
+  reddens (it is deterministic, and no fixture is CJK). Deliberately out of scope for that slice
+  because `wordsOf` feeds a matcher shared with `AmbientGate`, so redefining "word" moves ambient
+  gating for every non-Latin ability string too. A per-script floor is the shape of the fix and it is
+  a slice of its own — pick it up with any recall rework (FTS/embeddings would dissolve it).
 - **`GenerationController`'s `/room` fragment carries the flake that `ThreadController.renderThread`
   was fixed for** (2026-07-26): it reads only the in-flight registry, so a summon whose drafts all
   settle before the first poll reports a quiescent room with none of the settled replies in it. The

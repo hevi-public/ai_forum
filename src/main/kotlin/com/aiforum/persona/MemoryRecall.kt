@@ -89,12 +89,20 @@ object MemoryRecall {
             .distinct()
 
     /**
-     * Newest first on PARSED stamps, id tiebreak. `nullsLast` inside `compareByDescending` is what
-     * puts a null (= unparseable) stamp FIRST in the descending result — kept, like the scribe's
-     * [com.aiforum.service.MemoryScribeService] keeps an engagement whose stamp will not parse,
-     * and unlike a silent drop, which would make a malformed timestamp cost the member a memory.
+     * Newest first on PARSED stamps, id tiebreak. **Exported**, because the scribe's offered-parent
+     * cut ([com.aiforum.service.MemoryScribeService], `take(MAX_PARENT_LETTERS)`) needs exactly this
+     * ordering: a second comparator over [PersonaMemory] is how two cuts come to disagree about
+     * which row is the newest, and shared *behaviour* is the guarantee shared constants were not
+     * (the S4b §10.1 lesson).
+     *
+     * `nullsLast` inside `compareByDescending` is what puts a null (= unparseable) stamp FIRST in
+     * the descending result — kept, like the scribe's `isAfter` keeps an engagement whose stamp will
+     * not parse, and unlike a silent drop, which would make a malformed timestamp cost the member a
+     * memory. That polarity is pinned Tier 0 on the comparator ITSELF, not only through [select]:
+     * `nullsFirst` reads right at a glance, leaves every other test green, and shows up only as a
+     * row quietly vanishing at whichever cut runs next.
      */
-    private val NEWEST_FIRST: Comparator<PersonaMemory> =
+    val NEWEST_FIRST: Comparator<PersonaMemory> =
         compareByDescending(nullsLast<Instant>()) { record: PersonaMemory -> instantOf(record.createdAt) }
             .thenBy { it.id }
 

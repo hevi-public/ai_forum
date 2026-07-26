@@ -57,6 +57,26 @@ class WholeWordsTest {
     }
 
     @Test
+    fun `combining marks free an adjacent edge and bind as the word's own edge - the asymmetry`() {
+        // The half of the rules the class comment used to state backwards, pinned so a future
+        // "correction" to the code moves a red test rather than gate and recall semantics.
+        // Escaped, never typed: the whole test turns on which spelling is which, and an invisible
+        // normalisation difference inside a source literal is not something a reviewer can see.
+        val nfd = "cafe\u0301"          // c-a-f-e + COMBINING ACUTE — what NFD text arrives as
+        val precomposed = "caf\u00e9"   // c-a-f-é, one code point
+        // ADJACENT: Mn is neither letter nor digit, so freeEdge returns before the script test is
+        // consulted — one char of lookahead cannot see the "s" hiding behind the mark.
+        assertTrue(WholeWords.contains("${nfd}s brew coffee", "cafe"), "an adjacent mark frees the edge")
+        // The precomposed spelling answers false for an entirely different reason: "cafe" does not
+        // occur in it at all. Two falses, one rule each — not two readings of one rule.
+        assertFalse(WholeWords.contains("${precomposed}s brew coffee", "cafe"))
+        // AS THE WORD'S OWN EDGE CHAR: the mark is script INHERITED, which glues to anything, so
+        // the trailing "s" blocks the match — the same answer the precomposed pair gives.
+        assertFalse(WholeWords.contains("${nfd}s brew coffee", nfd), "a mark on the word's edge binds")
+        assertTrue(WholeWords.contains("$nfd ist gut", nfd))
+    }
+
+    @Test
     fun `a script change is the word boundary in unspaced CJK text`() {
         // Han → Hiragana frees the edge; Han → Han glues.
         assertTrue(WholeWords.contains("日本語のスレッド", "日本語"))

@@ -243,16 +243,21 @@ class StubLlmClient(
             "reading other people's code",
         )
 
-        // Varied GFM so the rendering pipeline (headings, fences + highlighting, tables, task lists,
-        // links, blockquotes) all get exercised by simply talking to the forum. Paragraphs are single
-        // source lines on purpose: the renderer honours soft breaks GitHub-style (newline → <br>), so a
-        // hard-wrapped string would show mid-sentence line breaks in the rendered reply.
         /**
          * Canned stance prose for the judgment path — short, in the holder's voice, and carrying no
          * digits so the parser accepts them (see [judgeStance]). Kept varied enough that a demo run
          * over several edges reads as a room whose relationships moved, rather than one sentence
          * pasted seven times.
          */
+        private val STANCES = listOf(
+            "has started treating their posts as claims to be checked rather than news to read",
+            "warmed to them after that exchange, and would rather not admit it",
+            "finds their certainty harder to take at face value than it used to be",
+            "keeps meaning to push back properly and keeps deciding it is not worth the afternoon",
+            "reads them now with an eyebrow already half raised",
+            "has quietly started waiting for their reply before forming an opinion",
+        )
+
         /**
          * Canned memory records for the scribe path — one sentence of first-person experiential
          * prose each, digit-free, `vote`-free (rules out *devoted*, *pivoted*, *voting* — these
@@ -269,15 +274,10 @@ class StubLlmClient(
             "Realised nobody in the room reads the linked article before the third reply",
         )
 
-        private val STANCES = listOf(
-            "has started treating their posts as claims to be checked rather than news to read",
-            "warmed to them after that exchange, and would rather not admit it",
-            "finds their certainty harder to take at face value than it used to be",
-            "keeps meaning to push back properly and keeps deciding it is not worth the afternoon",
-            "reads them now with an eyebrow already half raised",
-            "has quietly started waiting for their reply before forming an opinion",
-        )
-
+        // Varied GFM so the rendering pipeline (headings, fences + highlighting, tables, task lists,
+        // links, blockquotes) all get exercised by simply talking to the forum. Paragraphs are single
+        // source lines on purpose: the renderer honours soft breaks GitHub-style (newline → <br>), so a
+        // hard-wrapped string would show mid-sentence line breaks in the rendered reply.
         private val BODIES = listOf(
             """
             Good question — two things stand out immediately.

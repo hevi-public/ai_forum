@@ -27,10 +27,13 @@ import org.springframework.jdbc.core.JdbcTemplate
  * **The seeding Givens write SQL directly** (TestData.insertMemory) rather than driving the profile
  * form — the InterestDriftSteps choice for the InterestDriftSteps reason: form-driven arranging
  * couples every scenario to the owner surface under test and, for the persona endpoints, buys LLM
- * calls a cost assertion would then see. The one deliberate exception is
- * `the owner authors the memory … for …`, which exists precisely to exercise the real form POST
- * (scenario 20) and carries distinct wording from the seeding step because Cucumber matches on step
- * TEXT, not on the Given/When/Then keyword.
+ * calls a cost assertion would then see. The deliberate exceptions are the steps whose SUBJECT is
+ * the write surface itself — `the owner authors the memory … for …` (scenario 20), `the owner sets
+ * the root … for …` and its second-attempt sibling (scenario 25), and the over-long submission
+ * (scenario 26) — each of which exists precisely to exercise the real form POST. All of them carry
+ * distinct wording from the seeding Givens, because Cucumber matches on step TEXT, not on the
+ * Given/When/Then keyword: `was given the root …` seeds a root by SQL, `sets the root …` authors
+ * one through the form, and the two must never be readable as the same sentence.
  *
  * **Spy selection (plan doc §4, both inherited traps):** the generation-prompt steps select the spy
  * call by `persona.name == <member>`, NEVER by "the last non-dispatcher call" (`personaCall()`):
@@ -48,7 +51,15 @@ import org.springframework.jdbc.core.JdbcTemplate
  * body, a `data-memory-cited` block with permalinked snapshot lines, and
  * `data-memory-reverted="true|false"`. Endpoint contracts: `POST /personas/{slug}/memories` with a
  * `body` param authors a record; `POST /personas/{slug}/memories/{id}/delete` deletes one;
- * `POST /admin/memory/run` runs the pass; `POST /admin/memory/revert/{id}` reverts a change.
+ * `POST /admin/memory/run` runs the pass; `POST /admin/memory/{id}/revert` reverts a change (the
+ * grammar both sibling audit logs speak).
+ *
+ * **Two of those surfaces are driven by the CONTROL, not by a rebuilt path**: the revert step POSTs
+ * the newest audit row's own form `action`, and the Set-root step POSTs the profile's Set-root form
+ * `action`. Both were once assembled from a constant, and both then pinned nothing — a template
+ * that stopped rendering the form left every scenario green while the owner lost the only lever the
+ * surface offers. Where a step names a row by id instead (delete), the fixed endpoint is deliberate
+ * and argued at the step.
  *
  * Persona profile URLs are SLUGS (V5) — always `PersonaRepository.slugFor(name)`, never the raw
  * name (the S4b 404-on-capitalised-name lesson).
@@ -99,16 +110,24 @@ class PersonaMemorySteps(
     }
 
     /**
-     * Revert the newest audited change. The id is read off the rendered log rather than guessed, so
-     * the step fails here — loudly — if the template stops rendering audit rows, instead of
-     * reverting by a fabricated id (the S4a/S4b reasoning, carried).
+     * Revert the newest audited change by POSTing the CONTROL the newest row actually renders — its
+     * form's own `action`, not a path this step builds from the row id. Reading the id and
+     * hand-assembling the URL (the first cut) left the owner's one-click undo pinned by nothing:
+     * deleting the `data-memory-revert` form from admin_memory.kte, or breaking its
+     * `@if(!change.reverted)` condition, kept the whole suite green while the entire control surface
+     * §2.12 offers for an auto-applied write stopped rendering. Now the same deletion fails here,
+     * loudly, in scenarios 18 and 19 — and scenario 19's drop-after-revert branch is pinned too,
+     * since a row that still offered the control after being reverted would be a form this step
+     * finds where the template promises none.
      */
     @When("the owner reverts the latest memory change")
     fun revertLatestMemoryChange() {
-        val page = http.get(HISTORY_PATH).body ?: ""
-        val id = Regex("data-memory-change=\"([^\"]+)\"").find(page)?.groupValues?.get(1)
-            ?: error("no memory-change row to revert on $HISTORY_PATH:\n$page")
-        val resp = http.post("$HISTORY_PATH/revert/$id")
+        val row = latestRow()
+        val form = Regex("<form[^>]*data-memory-revert[^>]*>").find(row)?.value
+            ?: error("no revert control (data-memory-revert) on the newest memory-change row:\n$row")
+        val action = Regex("action=\"([^\"]+)\"").find(form)?.groupValues?.get(1)
+            ?: error("the revert control renders no action to POST:\n$form")
+        val resp = http.post(action)
         world.lastStatus = resp.statusCode.value()
         world.lastBody = resp.body
     }
@@ -120,6 +139,53 @@ class PersonaMemorySteps(
      */
     @When("the owner authors the memory {string} for {string}")
     fun ownerAuthorsMemory(body: String, name: String) {
+        val resp = http.postForm("/personas/${slug(name)}/memories", mapOf("body" to body))
+        world.lastStatus = resp.statusCode.value()
+        world.lastBody = resp.body
+    }
+
+    /**
+     * The owner's OTHER authoring path, driven through the control the profile renders: the step
+     * reads the Set-root form's own `action` and POSTs that, so a profile that stops offering the
+     * form fails here instead of leaving the create-once endpoint driven by nothing (the
+     * `data-memory-revert` lesson, applied to the surface that has no data-* hook of its own — the
+     * action's `/memories/root` tail is what identifies it among the profile's other memory forms).
+     */
+    @When("the owner sets the root {string} for {string}")
+    fun ownerSetsRoot(body: String, name: String) {
+        val page = profile(name)
+        val action = Regex("action=\"([^\"]*/memories/root)\"").find(page)?.groupValues?.get(1)
+            ?: error("no Set-root form on $name's profile — the owner has no way to author a root:\n$page")
+        val resp = http.postForm(action, mapOf("body" to body))
+        world.lastStatus = resp.statusCode.value()
+        world.lastBody = resp.body
+    }
+
+    /**
+     * A SECOND Set-root submission, POSTed at the endpoint directly — deliberately not through the
+     * form, because there is none: the profile drops the control the moment a root stands, so a
+     * second attempt can only ever arrive from a stale page or a hand-crafted POST. That is exactly
+     * the create-once path under test (the V28 partial unique index is the enforcement; the
+     * controller's `rootOf` pre-check is what keeps it a readable no-op instead of a 500).
+     */
+    @When("the owner sets a second root {string} for {string}")
+    fun ownerSetsSecondRoot(body: String, name: String) {
+        val resp = http.postForm("/personas/${slug(name)}/memories/root", mapOf("body" to body))
+        world.lastStatus = resp.statusCode.value()
+        world.lastBody = resp.body
+    }
+
+    /**
+     * An unusable authored body, SIZED rather than spelled out: a 300+ code-point sentence written
+     * into the feature would drown the scenario it belongs to, and the length is the whole subject
+     * (MemoryText.MAX_CODE_POINTS — the bound the feature names in words). Built from repeated
+     * whole words separated by single spaces and trimmed, so it is already a fixed point of
+     * MemoryText.clean: the one reason it can be refused is the one the scenario claims, never an
+     * accidental second one the assertion would then be blind to.
+     */
+    @When("the owner authors a memory longer than {int} characters for {string}")
+    fun ownerAuthorsOverLongMemory(limit: Int, name: String) {
+        val body = generateSequence { FILLER_WORD }.take(limit).joinToString(" ").take(limit * 2).trimEnd()
         val resp = http.postForm("/personas/${slug(name)}/memories", mapOf("body" to body))
         world.lastStatus = resp.statusCode.value()
         world.lastBody = resp.body
@@ -240,6 +306,18 @@ class PersonaMemorySteps(
         assertTrue(
             Html.hasAttr(page, "data-memory-root", body),
             "expected \"$name\"'s profile to show the root \"$body\" (data-memory-root), in:\n$page",
+        )
+    }
+
+    /** Create-once has to be asserted from BOTH sides: that the first root still stands is only half
+     *  of it — the second submission must not have landed anywhere either. */
+    @Then("the profile for {string} shows no root {string}")
+    fun profileShowsNoRoot(name: String, body: String) {
+        val page = profile(name)
+        assertTrue(
+            !Html.hasAttr(page, "data-memory-root", body),
+            "expected \"$name\"'s profile NOT to show the root \"$body\" — the root is create-once, " +
+                "and a second submission must change nothing:\n$page",
         )
     }
 
@@ -475,6 +553,10 @@ class PersonaMemorySteps(
          *  pinned Tier 0 against the four other synthetic identities. */
         const val SCRIBE_NAME = "MemoryScribe"
         const val DISPATCHER_NAME = "Moderator"
+
+        /** The word the over-long body is built out of — any whole word does; it is spelled with no
+         *  resemblance to the fixtures so a reader never reads meaning into the filler. */
+        const val FILLER_WORD = "sprawling"
 
         /** The MemoryProse frame opener (plan doc §2.9) — the frame text whose absence is scenario
          *  1's HTTP-level decay of "byte-identical". */

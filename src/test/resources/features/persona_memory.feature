@@ -329,21 +329,36 @@ Feature: Each member privately remembers what it lived through, and the memory r
 
   # 20. Three root rules in one test (§2.3's recorded owner call and §2.2's parent-candidate rule):
   # the root SHIPS (it renders on the profile), the root does NOT inject (prompt identity stays the
-  # composed system prompt), and a root standing over records never leaks through the hop. The
-  # owner-authoring half drives the real profile form — the only path that stamps owner provenance
-  # over HTTP. The two "none of the root's" halves are the parity assertions exempt from RED-first
-  # by name (see the preamble).
-  Scenario: The owner authors a memory and a root, and only the memory ever reaches a prompt
+  # composed system prompt), and a root standing over records never leaks through the hop. Only the
+  # RECORD is authored here — through the real profile form, the only path that stamps owner
+  # provenance over HTTP; the root is SEEDED by SQL, the way every other arrange in this file is
+  # (§6.1's wording rule: "was given" seeds, and the title must not claim otherwise — scenario 25 is
+  # the one that authors a root). The two "none of the root's" halves are the parity assertions
+  # exempt from RED-first by name (see the preamble).
+  #
+  # The root's words are load-bearing: "stalling" is a whole word of the fixture reply, so this root
+  # WOULD surface the moment anything hands it to recall — which is exactly what this scenario
+  # catches. With the first draft's root — farm machinery, sharing no word with the context — the
+  # no-leak half only reddened on UNCONDITIONAL root injection, and a review found the ledger
+  # crediting it with more.
+  #
+  # What it pins, precisely (§7 states this too, after the close-out's verifier ran both mutations):
+  # the reachable regression is a CALL SITE feeding recall the root — GenerationService hands over
+  # recordsOf(id), whose SQL already says kind='record', and adding rootOf(id) there reddens the
+  # final Then by name. Dropping MemoryRecall's own kind filter does NOT redden it and never could:
+  # behind that SQL the filter is a belt no production path reaches, and it is pinned at Tier 0
+  # (the forged root-parented row) instead.
+  Scenario: The owner authors a memory, the member already holds a root, and only the memory reaches a prompt
     Given a thread "Scaling SQLite" exists
     And a posted reply from "paul" saying "The checkpoint keeps stalling for me"
-    And persona "sol" was given the root "Grew up fixing farm machinery and never lost the habit"
+    And persona "sol" was given the root "Grew up fixing farm machinery that kept stalling, and never lost the habit"
     And the LLM will respond with "Stalls are fixable"
     When the owner authors the memory "Checkpoint stalls once ate a weekend" for "sol"
     Then the profile for "sol" shows the memory "Checkpoint stalls once ate a weekend" with source "owner"
-    And the profile for "sol" shows the root "Grew up fixing farm machinery and never lost the habit"
+    And the profile for "sol" shows the root "Grew up fixing farm machinery that kept stalling, and never lost the habit"
     When the owner summons "sol"
     Then "sol"'s generation prompt carried the memory "Checkpoint stalls once ate a weekend"
-    And "sol"'s generation prompt did not carry the memory "Grew up fixing farm machinery and never lost the habit"
+    And "sol"'s generation prompt did not carry the memory "Grew up fixing farm machinery that kept stalling, and never lost the habit"
 
   # 21. Memory never buys airtime (I2), pinned behaviorally rather than by trust: a scribe run that
   # actually writes a record leaves tick parity (zero ambient_run rows), the home page and both
@@ -377,3 +392,35 @@ Feature: Each member privately remembers what it lived through, and the memory r
     When the owner summons "sol"
     Then "sol"'s generation prompt carried the memory "Ended up distrusting default checkpoint settings"
     And "sol"'s generation prompt carried the memory "Fell down a fsync rabbit hole two winters back"
+
+  # 25 (the numbers here are §6 items, and 23–24 are the two scenarios appended to OTHER feature
+  # files — so the file's 23rd scenario is item 25).
+  # The root's own write surface, driven for real — scenario 20 SEEDS its root by SQL, so until
+  # this scenario existed the Set-root endpoint and its create-once pre-check had no drive at any
+  # tier, and dropping the pre-check (turning a second submission into a 500 off V28's partial
+  # unique index) would have shipped green. The setting step POSTs the form's own action, so a
+  # profile that stops offering the control fails here rather than silently. The second submission
+  # goes at the endpoint directly, deliberately: the profile drops the form the moment a root
+  # stands, so a second attempt can only arrive from a stale page or a crafted POST — which is
+  # exactly what create-once has to survive. The original root standing afterwards is the assertion;
+  # "no 500" alone would pass on a write that overwrote it.
+  Scenario: The owner sets a member's root through the form and a second attempt changes nothing
+    When the owner sets the root "Learned patience rebuilding a tractor engine one winter" for "sol"
+    Then the profile for "sol" shows the root "Learned patience rebuilding a tractor engine one winter"
+    When the owner sets a second root "Actually grew up behind the counter of a print shop" for "sol"
+    Then the profile for "sol" shows the root "Learned patience rebuilding a tractor engine one winter"
+    And the profile for "sol" shows no root "Actually grew up behind the counter of a print shop"
+
+  # 26. The silent-rejection posture of that same write surface, pinned rather than described
+  # (§10.3 item 3 corrected three doc claims to this wording; nothing drove it): an unusable
+  # submission is a NO-OP with a logged reason — never an exception, because a 500 for a too-long
+  # memory would make this the only surface in the app that punishes typing, and never a flash,
+  # because no flash mechanism exists anywhere in the web layer (§10.4). 300 code points is the
+  # bound (MemoryText). The redirect status is asserted first: without it a 500 would still satisfy
+  # every "unchanged" claim below, since a rejected write and a crashed write leave the same rows.
+  Scenario: An over-long authored memory is refused silently and leaves the profile unchanged
+    Given persona "sol" was given the memory "Keeps notes on every failed migration"
+    When the owner authors a memory longer than 300 characters for "sol"
+    Then the response status is 302
+    And the profile for "sol" shows exactly 1 memory
+    And the profile for "sol" shows the memory "Keeps notes on every failed migration" with source "owner"

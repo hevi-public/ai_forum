@@ -9,6 +9,7 @@ import com.aiforum.llm.CancellationToken
 import com.aiforum.llm.LlmClient
 import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.PersonaRef
+import com.aiforum.persona.MemoryRecall
 import com.aiforum.persona.MemoryScribePrompts
 import com.aiforum.persona.MemoryText
 import com.aiforum.persona.ScribeAnswer
@@ -300,13 +301,25 @@ class MemoryScribeService(
     private fun scribeMember(candidate: Candidate, readAt: String): Boolean {
         val member = candidate.persona
         // The snapshot the model is SHOWN: records newest-first, capped to the letter alphabet.
-        // The letter resolves against THIS map — what the model actually saw — and the resolved id
-        // is re-verified against a fresh read at write time (the bed019fe third application).
-        val offered = memories.recordsOf(member.id).take(MemoryScribePrompts.MAX_PARENT_LETTERS)
+        // Re-sorted on PARSED instants before the cut rather than trusted from the SQL `ORDER BY`,
+        // which is lexicographic and only NEAR-chronological — the rule PersonaMemoryRepository's
+        // KDoc states for exactly this case ("any caller whose CUT depends on the order parses
+        // instants instead"). It binds once a member holds more rows than there are letters, which
+        // is reachable: a judged member holds up to 23 scribe rows (24 is a free skip) plus owner
+        // rows the ceiling does not count at all, and past the alphabet a same-second boundary in
+        // the string order drops a genuinely newer record off the end of it. The letter
+        // resolves against THIS map — what the model actually saw — and the resolved id is
+        // re-verified against a fresh read at write time (the bed019fe third application).
+        val offered = memories.recordsOf(member.id)
+            .sortedWith(MemoryRecall.NEWEST_FIRST)
+            .take(MemoryScribePrompts.MAX_PARENT_LETTERS)
         val lettered = offered.mapIndexed { i, row -> ('A' + i).toString() to row }.toMap()
         // ONE list feeds both the prompt and the citation, so the audit shows the owner exactly the
-        // evidence the model was given rather than a superset of it.
-        val shown = candidate.evidence.takeLast(MAX_EVIDENCE_ENGAGEMENTS)
+        // evidence the model was given rather than a superset of it. Sorted for the same reason the
+        // letter list is: `takeLast` keeps the NEWEST tail, and over the raw SQL order a same-second
+        // pair hands that tail the fractionally OLDER engagement while dropping its newer sibling —
+        // the opposite of what [MAX_EVIDENCE_ENGAGEMENTS] promises.
+        val shown = candidate.evidence.sortedWith(BY_STAMP).takeLast(MAX_EVIDENCE_ENGAGEMENTS)
         val raw = judge(member, offered.map { it.body }, shown) ?: return false
         return when (val verdict = ScribeAnswer.parse(raw)) {
             is ScribeAnswer.Verdict.NothingToRemember -> {
@@ -451,7 +464,15 @@ class MemoryScribeService(
      * The engagements as the scribe reads them: the room, and the words, one line each and
      * truncated at the SAME lengths the citation stores, so the audit carries byte-for-byte what
      * the model read. `towardBody` is deliberately dropped — on the top-level branch it is the
-     * fetched article summary, and untrusted web text stays out of the judging prompt (S4a).
+     * fetched article SUMMARY, and that is the web text kept out of the judging prompt (the S4a
+     * posture, which never claimed more than the summary).
+     *
+     * What is NOT kept out, said plainly because the short version of this sentence read as though
+     * it were: `room` is the thread title, and on an ambient article thread the title is fetched
+     * text too. It enters, bounded at [EVIDENCE_ROOM_CHARS] one-lined characters and never trusted
+     * — §4's injection residual, with [MemoryScribePrompts.SYSTEM]'s read-it-as-evidence clause
+     * standing in front of it. Nobody should relax the [ScribeAnswer] refusals or this bound
+     * believing the judging prompt is already clean of web text.
      */
     private fun engagementsOf(evidence: List<PersonaExchange>): List<MemoryScribePrompts.Engagement> =
         evidence.map {
@@ -542,6 +563,31 @@ class MemoryScribeService(
         val BY_WINDOW_AGE: Comparator<Pair<Instant?, String>> =
             compareBy<Pair<Instant?, String>, Instant?>(nullsFirst()) { it.first }
                 .thenBy { it.second }
+
+        /**
+         * OLDEST FIRST over evidence, on PARSED stamps with a comment-id tiebreak — the ordering the
+         * `takeLast` cut in [scribeMember] leans on, and the one `exchangesSince`'s SQL `ORDER BY
+         * c.created_at` cannot supply (string order, the whole-second anomaly).
+         *
+         * NOT a reuse of [MemoryRecall.NEWEST_FIRST], and the reason is the type, not the rule: that
+         * comparator sorts [PersonaMemory] and this one [PersonaExchange], and unifying them would
+         * mean a selector-taking factory whose entire client list is these two lines. What IS shared
+         * is the rule — parse, never string-compare — and the degrade: `nullsLast` on an ASCENDING
+         * compare puts an unparseable stamp at the newest end, where `takeLast` keeps it, exactly as
+         * [isAfter] keeps it and as recall's cut does. Ascending rather than descending because the
+         * prompt renders evidence oldest-first; the cut takes the tail, so the two must agree.
+         */
+        private val BY_STAMP: Comparator<PersonaExchange> =
+            compareBy<PersonaExchange, Instant?>(nullsLast()) { parsedOrNull(it.createdAt) }
+                .thenBy { it.commentId }
+
+        /** The stamp as an [Instant], or null when malformed — the comparator's half of [isAfter]'s
+         *  decision, kept beside it so both express the same degrade. */
+        private fun parsedOrNull(createdAt: String): Instant? = try {
+            Instant.parse(createdAt)
+        } catch (e: java.time.format.DateTimeParseException) {
+            null
+        }
 
         /** Generous but bounded: a judgment is a two-line answer, and an unattended Sunday run must
          *  not hang a scheduler thread all night on a wedged backend. */

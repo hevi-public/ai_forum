@@ -20,6 +20,24 @@ package com.aiforum.ambient
  * "日本語のスレッド", Han → Hiragana, while "日本" does not match inside "日本語", Han → Han).
  * Digits/underscore (script COMMON) bind to everything, preserving the ASCII behaviour ("sqlite"
  * doesn't match inside "sqlite3").
+ *
+ * ## Combining marks cut both ways, and NOT symmetrically
+ *
+ * Worth stating exactly, because this file — not [AmbientGate], where the text came from — is now
+ * the canonical statement of the rules, and it feeds recall as well as the gate:
+ *
+ * - **As the ADJACENT char, a combining mark FREES the edge.** Category Mn is neither letter nor
+ *   digit, so [freeEdge] returns before the script test is ever consulted. `contains` therefore
+ *   finds "cafe" inside the DECOMPOSED (NFD) spelling of "cafés" — one char of lookahead cannot see
+ *   the "s" behind the mark. Against the precomposed spelling the same query is false for an
+ *   entirely different reason: "cafe" does not occur in it at all.
+ * - **As the WORD's own edge char, a combining mark BINDS.** There it is script INHERITED, which
+ *   [distinctScripts] treats as gluing to anything, so decomposed "café" does not match inside
+ *   decomposed "cafés" — the same answer the precomposed pair gives, arrived at by the script rule.
+ *
+ * The asymmetry is inherited behaviour rather than a decision, and it is pinned Tier 0 so that an
+ * editor who "corrects" the code to a tidier rule sees gate AND recall semantics move for NFD text
+ * instead of discovering it later as unexplained matches.
  */
 object WholeWords {
 
@@ -34,7 +52,9 @@ object WholeWords {
     }
 
     /** The char at [pos] does not glue onto the word's [edge] char: out of range, not a word char, or a
-     *  word char of a DIFFERENT script (the CJK script-change boundary). */
+     *  word char of a DIFFERENT script (the CJK script-change boundary). A combining mark arriving as
+     *  the ADJACENT char leaves on the middle branch — Mn is neither letter nor digit — so it frees
+     *  the edge and never reaches [distinctScripts] at all. */
     private fun freeEdge(text: String, pos: Int, edge: Char): Boolean {
         if (pos < 0 || pos >= text.length) return true
         val adjacent = text[pos]
@@ -42,8 +62,10 @@ object WholeWords {
         return distinctScripts(adjacent, edge)
     }
 
-    /** Word chars of two different scripts form a natural boundary; COMMON/INHERITED (digits, '_',
-     *  combining marks) bind to any script, so they never free an edge. */
+    /** Word chars of two different scripts form a natural boundary; COMMON/INHERITED bind to any
+     *  script, so they never free an edge — digits and '_' on either side, and a combining mark in
+     *  the [b] position, which is the ONE way a mark reaches this function (as the word's own edge
+     *  char). A mark on the [a] side was already answered FREE by the caller. */
     private fun distinctScripts(a: Char, b: Char): Boolean {
         val sa = Character.UnicodeScript.of(a.code)
         val sb = Character.UnicodeScript.of(b.code)

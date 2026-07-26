@@ -75,9 +75,15 @@ object MemoryText {
      * The NUL refusal is what keeps I5's "code points on both sides" claim true rather than
      * approximate: `U+0000` is the ONE character Kotlin's trim/`isBlank`/`\s+` all pass through
      * while SQLite's `length()` stops counting at it, so a NUL-bearing body would pass every other
-     * check here and then trip a V28 CHECK mid-write as an uncaught driver exception — the 500 the
-     * owner surface promises can never happen. Other control characters are deliberately NOT
-     * refused: none of them truncates SQLite's count, and over-rejection is its own defect class.
+     * check here and then part company with what SQLite stores. The two halves are not the same
+     * failure, and only one of them is loud: a LEADING NUL measures 0 to the V28 CHECK and trips
+     * `length(body) BETWEEN 1 AND 300` mid-write as an uncaught driver exception — the 500 the
+     * owner surface promises can never happen. A MID-NUL body does NOT trip it: `length('a' ||
+     * char(0) || 'b')` is 1, inside the bound, so it would store SILENTLY with a length nobody can
+     * reconcile with the 3 code points validated here — the I5 divergence itself rather than a
+     * crash, and the worse of the two precisely because nothing goes red. Hence a refusal on the
+     * character, never on its position. Other control characters are deliberately NOT refused: none
+     * of them truncates SQLite's count, and over-rejection is its own defect class.
      *
      * Measured on [candidate] AS PASSED, never on a cleaned copy: a candidate that is not already a
      * fixed point of [clean] is refused outright. Re-cleaning here would validate one string and let

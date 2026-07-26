@@ -144,6 +144,48 @@ class MemoryRecallTest {
     }
 
     @Test
+    fun `a record whose stamp will not parse survives the cut, and two of them tie-break by id`() {
+        // The comparator's polarity, which nothing else here watches: `nullsLast` INSIDE
+        // `compareByDescending` is what sorts an unparseable stamp FIRST — the scribe's degrade
+        // posture, "a memory must not vanish from recall because its timestamp is malformed".
+        // Flipped to `nullsFirst` it reads right at a glance and every other test in this file
+        // stays green while the malformed row silently drops at the MAX_MATCHED boundary. That is
+        // the S4b comparator-polarity gap this slice closed for BY_WINDOW_AGE, reopened here.
+        val broken = record("bad", "checkpoint memory broken", "not-a-timestamp")
+        val n1 = record("n1", "checkpoint memory one", "2026-01-01T10:00:00Z")
+        val n2 = record("n2", "checkpoint memory two", "2026-01-01T11:00:00Z")
+        val n3 = record("n3", "checkpoint memory three", "2026-01-01T12:00:00Z")
+        assertEquals(
+            listOf("bad", "n3", "n2"),
+            MemoryRecall.select(listOf(n1, n2, broken, n3), "checkpoint talk").map { it.id },
+            "the malformed stamp is kept as the newest; the genuinely oldest record drops",
+        )
+        // Two unparseable stamps are ordered by id, not by input order — deterministic, so the
+        // prompt text is byte-stable across runs even in the degraded case.
+        val alsoBroken = record("also", "checkpoint memory also broken", "")
+        assertEquals(
+            listOf("also", "bad", "n3"),
+            MemoryRecall.select(listOf(n1, n2, broken, n3, alsoBroken), "checkpoint talk").map { it.id },
+        )
+    }
+
+    @Test
+    fun `NEWEST_FIRST is exported, and the scribe's letter cut leans on this exact ordering`() {
+        // The comparator is public because MemoryScribeService sorts with it before taking the
+        // letter alphabet; a second comparator over PersonaMemory is how two cuts come to disagree
+        // about which row is newest. Pinned on the comparator ITSELF, not only through select(),
+        // so the shared contract has a test of its own.
+        val whole = record("w", "whole second", "2026-01-01T10:00:00Z")
+        val sub = record("s", "sub second", "2026-01-01T10:00:00.100Z")
+        val broken = record("b", "unparseable", "not-a-timestamp")
+        assertEquals(
+            listOf("b", "s", "w"),
+            listOf(whole, sub, broken).sortedWith(MemoryRecall.NEWEST_FIRST).map { it.id },
+            "unparseable first (so any take keeps it), then the truly newest - never the string order",
+        )
+    }
+
+    @Test
     fun `a surfaced record drags its antecedent in even when the antecedent matches nothing`() {
         val parent = record("p", "Fell down a fsync rabbit hole two winters back")
         val child = record("c", "Checkpoint defaults still feel untrustworthy", parentId = "p")

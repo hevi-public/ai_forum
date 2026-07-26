@@ -67,7 +67,7 @@ data class MemoryChangeView(
  * The Memory Scribe's admin surface (plan_docs/persona-memory.md §2.12):
  *  - GET  /admin/memory             — the audit log, newest first, linked from /admin.
  *  - POST /admin/memory/run         — run one pass by hand, synchronously, then render the fresh log.
- *  - POST /admin/memory/revert/{id} — undo one audited write, 303 back to the log.
+ *  - POST /admin/memory/{id}/revert — undo one audited write, 303 back to the log.
  *
  * This page carries the owner's ENTIRE control over the pass: writes auto-apply with no approval
  * queue (the standing owner override of §6.5), so a record is already live by the time it appears
@@ -115,8 +115,13 @@ class MemoryAdminController(
      * service (action-site re-read, `reverted_at IS NULL` in SQL), so this ignores the boolean and
      * redirects either way — the log itself shows what happened, and a failed revert on a stale
      * page must not become an error page the owner has to back out of.
+     *
+     * `{id}/revert`, not `revert/{id}` — the grammar both sibling audit logs already speak
+     * ([InterestAdminController.revert], [StanceAdminController.revert]). A third spelling for the
+     * third instance of the same surface is how a reader who generalises from the siblings builds a
+     * 404.
      */
-    @PostMapping("/admin/memory/revert/{id}")
+    @PostMapping("/admin/memory/{id}/revert")
     fun revert(@PathVariable id: Long): ResponseEntity<Void> {
         scribe.revert(id)
         return ResponseEntity.status(HttpStatus.SEE_OTHER).location(URI.create(LOG_PATH)).build()

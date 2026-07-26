@@ -95,6 +95,25 @@ effectively one-shot. The two `ADD COLUMN` forms differ in how they treat existi
 - `ADD COLUMN body TEXT NOT NULL DEFAULT ''` — **existing rows backfill to `''`** (a `NOT NULL` add
   *requires* a DEFAULT).
 
+**A NEW column MAY carry a `REFERENCES` clause; an existing one may not.** "SQLite can't add foreign
+keys" is the folk version, and it is wrong in the direction that costs the most —
+`ALTER TABLE t ADD COLUMN pid TEXT REFERENCES p(id)` is accepted *and enforced* (re-verified at the V28
+review close-out on the system `sqlite3` and on the shipped xerial 3.53.2: the violating insert comes
+back `SQLITE_CONSTRAINT_FOREIGNKEY`, the satisfying one lands). Two real limits sit behind the myth:
+
+- **The new column must default to NULL.** Under `PRAGMA foreign_keys=ON`,
+  `ADD COLUMN pid TEXT NOT NULL DEFAULT 'x' REFERENCES p(id)` is refused — *"Cannot add a REFERENCES
+  column with non-NULL default value"* — because the backfill would fabricate a reference nobody
+  checked. Nullable-and-empty is the only honest backfill for a relationship that did not exist.
+- **Table-level (composite) FKs cannot be added at all.** `ALTER TABLE t ADD CONSTRAINT … FOREIGN KEY
+  (…)` is a *syntax* error, on every version we tested. V28's composite same-persona parent FK is
+  exactly that shape, which is why it ships inside `CREATE TABLE` — and an FK on a column that already
+  exists is just the general "constraints are one-shot" rule above.
+
+The paragraph earns its space because the blunt version sends the next session into a full table
+rebuild — the riskiest migration shape there is on a live file — for what one `ADD COLUMN` does
+correctly.
+
 If two lineages of the same migration disagree (nullable vs `NOT NULL DEFAULT`), one carries `NULL`s the
 other can't produce — and a non-null Kotlin field reading that column NPEs. Coalesce forward with a
 follow-up data migration (`UPDATE t SET col='' WHERE col IS NULL`); it's a harmless no-op on the
@@ -104,9 +123,10 @@ canonical lineage (whose column is `NOT NULL`, so no `NULL`s exist).
 
 When a scheduled pass needs a per-row "when did we last look" marker (V26 `persona_stance.judged_at`,
 V27 `persona.interests_judged_at`, V28 `persona.memory_judged_at`), add it as
-`ALTER TABLE … ADD COLUMN x TEXT` — nullable, **no default**. That's the only shape SQLite's ALTER
-reliably supports (a `NOT NULL` add demands a literal default; UNIQUE/PK adds are refused; FK adds are
-impossible) — and it's also the right semantics: **NULL means "never judged → read this row's whole
+`ALTER TABLE … ADD COLUMN x TEXT` — nullable, **no default**. That's the shape SQLite's ALTER takes
+with no conditions attached (a `NOT NULL` add demands a literal default; UNIQUE/PK adds are refused
+outright; a `REFERENCES` clause is allowed but only on a column defaulting to NULL — see the FK note
+above) — and it's also the right semantics: **NULL means "never judged → read this row's whole
 history once"**, bounded by an explicit horizon so a never-judged member is never an unbounded read
 (V28 clamps at 90 days). Traps, all paid for:
 
@@ -124,8 +144,11 @@ history once"**, bounded by an explicit horizon so a never-judged member is neve
 - **Compare stamps as parsed `Instant`s, not strings, wherever a cut or floor depends on the order.**
   `Instant.toString()` prints no fraction on a whole second and `'Z' > '.'`, so a fraction-less stamp
   sorts lexicographically AFTER every sub-second stamp of the same second. `ORDER BY created_at` for
-  display tolerates the one-row swap; a window floor or a newest-N cut does not (the memory scribe's
-  `isAfter` and `MemoryRecall`'s newest-3 both parse for exactly this reason).
+  display tolerates the one-row swap; a window floor or a newest-N cut does not. The rule is **every
+  cut, not the one you happened to notice**: persona memory shipped with four — the scribe's `isAfter`
+  window floor, `MemoryRecall`'s newest-3, the scribe's offered-parent `take(26)` and its evidence
+  `takeLast(12)` — and the review found the last two still trusting the SQL string order after the
+  close-out audit had already patched the first two. Grep for the cuts; don't patch the reported one.
 
 ### Scoped CHECKs — aim a constraint at the writer it exists to stop
 
@@ -136,16 +159,37 @@ throws a `DataAccessException` in whatever controller happens to write first —
 interest writes *before* the prompt logic in `PersonaController.edit`, so an unscoped digit ban would
 cost the owner their descriptor and dial edits for typing "web3". Two more facts that shape these:
 
-- **CHECKs are CREATE TABLE-only.** SQLite cannot add one by ALTER, which is why a guarded table ships
-  with its CHECKs at birth even when the feature needing them is deferred (V28's owner-only root CHECK
-  landed with the table precisely because it could never be added later).
+- **A CHECK is free at table birth and *conditional* afterwards — so ship it at birth.** The blunt
+  version of this line ("CHECKs are CREATE TABLE-only") was here and is false; it was corrected
+  empirically at the V28 review close-out. `ADD COLUMN c TEXT CHECK (…)` is accepted and enforced,
+  cross-column predicates included, and on the SQLite we actually ship (xerial 3.53.2) even the
+  table-level `ALTER TABLE t ADD [CONSTRAINT n] CHECK (…)` works. What makes the retrofit a bad bet is
+  the three things attached to it:
+  - **The retrofit validates the whole table and aborts on the first violator** (`SQLITE_CONSTRAINT`,
+    the ALTER rolled back). A constraint is therefore only addable while the data already happens to
+    obey it — the one thing a live file cannot promise, and the reason "we'll add the CHECK when the
+    feature lands" is a hope rather than a plan.
+  - **The table-level form is newer-SQLite syntax.** The system `sqlite3` on this machine (3.51)
+    rejects `ALTER TABLE … ADD CHECK` as a *syntax error* while happily enforcing the identical
+    constraint once it is in the schema text. Writing a migration that way quietly raises the engine
+    floor for every other tool that ever opens the file.
+  - **On an engine without that syntax, a CHECK over already-existing columns needs the full table
+    rebuild** (create → `INSERT … SELECT` → drop → rename), on a live DB.
+
+  V28's owner-only root CHECK landed with the table for those three together — *not* because a retrofit
+  was impossible. "Free now, conditional later" is enough of an argument; overstating it to
+  "impossible" bought nothing and cost a false fact in doctrine.
 - **`length()` counts code points — but only up to the first NUL.** Match it Kotlin-side with
   `codePointCount` (never `String.length`, which counts UTF-16 units and disagrees on every emoji),
-  AND refuse U+0000 at the validator: `length('a'||char(0)||'b')` is 1, so a NUL-bearing body passes a
-  code-point validator and then trips the CHECK mid-write as an uncaught driver exception (the
-  persona-memory close-out defect — a crafted POST 500'd the owner form). A validator that "agrees
-  with the CHECK by construction" agrees only over the input domain that excludes NUL; refuse it at
-  the door and say so in the comment.
+  AND refuse U+0000 at the validator, on the CHARACTER and never on its position — because the two
+  halves fail differently and only one is loud. A **leading** NUL measures 0, trips a
+  `length(body) BETWEEN 1 AND 300` CHECK mid-write and surfaces as an uncaught driver exception (the
+  persona-memory close-out defect — a crafted POST 500'd the owner form). A **mid** NUL does not trip
+  anything: `length('a'||char(0)||'b')` is 1, comfortably inside the bound, so the row stores SILENTLY
+  with a length nobody can reconcile against the code points that were validated — the divergence
+  itself rather than a crash, and the worse of the two precisely because nothing goes red. A validator
+  that "agrees with the CHECK by construction" agrees only over the input domain that excludes NUL;
+  refuse it at the door and say so in the comment.
 
 ### NOCASE identity — `COLLATE NOCASE` folds ASCII case and nothing else
 
