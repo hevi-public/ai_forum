@@ -97,4 +97,50 @@ class TestData(private val jdbc: JdbcTemplate, private val clock: Clock) {
             "SELECT interest FROM persona_interest WHERE persona_id = ? ORDER BY interest",
             String::class.java, personaId,
         ).filterNotNull()
+
+    /**
+     * Persona memory (V28, plan_docs/persona-memory.md): one memory record — or, with
+     * [kind] = `root`, the owner-only root — written directly, the same way [insertInterest] seeds an
+     * interest: straight INSERT, so a `Given` never buys an LLM call and never depends on the owner
+     * surface it may be specifying. [source] defaults to `owner` because every seeded row models
+     * something the owner typed (the scribe's rows are what the PASS writes, and scenarios that need
+     * one run the pass for real). Returns the new row's id.
+     *
+     * `created_at` is staggered by the member's existing row count: the test [clock] is FIXED, so two
+     * rows inserted back to back would otherwise share one instant and leave "newest-first" — the
+     * retrieval cap ordering AND the scribe's letter labelling — to a random UUID tiebreak. With the
+     * stagger, seeding order IS age order: the first memory a scenario seeds is the member's oldest.
+     *
+     * FIXTURE HYGIENE, the S4b stance warning one slice on (plan doc §4): no memory body — and no
+     * scripted scribe answer — may contain the substring `vote` (the firewall's noVoteSignal greps
+     * substrings, so "devoted"/"pivoted"/"voting" all trip it), and none may contain another member's
+     * name (the prompt-spy steps select calls by `persona.name` and scan prompt text, so a name inside
+     * a body poisons name-filtered selection and cross-member absence assertions).
+     */
+    fun insertMemory(
+        personaId: String,
+        body: String,
+        source: String = "owner",
+        parentId: String? = null,
+        kind: String = "record",
+    ): String {
+        val existing = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM persona_memory WHERE persona_id = ?", Int::class.java, personaId,
+        ) ?: 0
+        val id = newId()
+        jdbc.update(
+            "INSERT INTO persona_memory(id, persona_id, parent_id, kind, body, source, created_at) VALUES (?,?,?,?,?,?,?)",
+            id, personaId, parentId, kind, body, source,
+            clock.instant().plusSeconds(existing.toLong()).toString(),
+        )
+        return id
+    }
+
+    /** The id of the one memory row holding exactly [body] — for steps that act on a record by its
+     *  prose (the way the owner recognises it) but drive an endpoint that speaks ids. */
+    fun memoryIdOf(personaId: String, body: String): String =
+        jdbc.queryForList(
+            "SELECT id FROM persona_memory WHERE persona_id = ? AND body = ?",
+            String::class.java, personaId, body,
+        ).singleOrNull() ?: error("expected exactly one persona_memory row for \"$body\" of $personaId")
 }

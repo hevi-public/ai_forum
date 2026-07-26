@@ -49,3 +49,16 @@ Feature: Config guardrails
     When the test diagnostics are read
     Then interest drift is disabled
     And the interest drift member cap is unlimited by default
+
+  # The FOURTH scheduled job in this app that spends LLM calls (plan_docs/persona-memory.md §2.13),
+  # writing into every member's private store with nobody watching — so it gets the same rail the
+  # other three have, on its own switch (an owner who wants articles, stance drift and interest
+  # drift but not memory must be able to say exactly that). The cap and the cron are asserted beside
+  # the switch for the same subtler reason as always: they can only be read at all if the properties
+  # bean was bound from a non-profiled @Configuration, which is what keeps this rail readable under
+  # a profile where the scheduler itself can never wire.
+  Scenario: The test profile gates the memory consolidation pass off
+    When the test diagnostics are read
+    Then memory consolidation is disabled
+    And the memory pass member cap is unlimited by default
+    And the memory pass cron is readable

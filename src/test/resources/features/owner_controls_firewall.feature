@@ -47,3 +47,19 @@ Feature: Owner controls — the +1 firewall
     And the owner summons "sol"
     Then "sol"'s system prompt carried the interest "kernel scheduling"
     And the model's context contained no vote signal
+
+  # Same boundary, a third slice on: a RESURFACED memory (plan_docs/persona-memory.md) is the newest
+  # thing deliberately inside the context the +1 is kept out of — injected at generation time from
+  # the member's own private store when the conversation shares the record's words, with no compose
+  # bought anywhere. The summon is again deliberately the LAST call in the scenario: `the model's
+  # context contained no vote signal` reads the spy's most recent call, so a memory pass running
+  # after it would put the SCRIBE's prompt under the firewall assertion instead of the generation
+  # prompt, and the scenario would pass while proving the wrong thing.
+  Scenario: A resurfaced memory is injected into the very context the +1 is kept out of
+    Given a posted reply from "sol" saying "Checkpoint stalls keep biting us"
+    And persona "sol" was given the memory "Spent a weekend chasing checkpoint stalls"
+    And the LLM will respond with "That stall pattern is familiar"
+    When the owner gives a +1 to "sol"'s reply
+    And the owner summons "sol"
+    Then "sol"'s generation prompt carried the memory "Spent a weekend chasing checkpoint stalls"
+    And the model's context contained no vote signal

@@ -102,4 +102,31 @@ class ConfigRailSteps(
             (world.lastBody ?: "").contains("\"interestDriftMaxPersonasPerRun\":0"),
             "interest drift member cap not at its unlimited default: ${world.lastBody}",
         )
+
+    // Persona memory (plan_docs/persona-memory.md §2.13, scenario 24): the FOURTH scheduled loop that
+    // spends LLM calls gets the same rail as the other three, on its own switch. All three keys read
+    // off the bound MemoryProperties bean — readable under test at all only because that bean is bound
+    // from a NON-profiled @Configuration (the InterestDriftProperties pattern), so a future @Profile on
+    // it fails here rather than quietly leaving the rail unreadable. None of the keys exists on
+    // /__diag yet, so each fails honestly on a missing key, not on a wiring/404 error.
+    @Then("memory consolidation is disabled")
+    fun memoryConsolidationDisabled() =
+        assertTrue(
+            (world.lastBody ?: "").contains("\"memoryEnabled\":false"),
+            "memory consolidation not disabled: ${world.lastBody}",
+        )
+
+    @Then("the memory pass member cap is unlimited by default")
+    fun memoryCapUnlimited() =
+        assertTrue(
+            (world.lastBody ?: "").contains("\"memoryMaxPerRun\":0"),
+            "memory pass member cap not at its unlimited default: ${world.lastBody}",
+        )
+
+    @Then("the memory pass cron is readable")
+    fun memoryCronReadable() =
+        assertTrue(
+            Regex("\"memoryCron\":\"[^\"]+\"").containsMatchIn(world.lastBody ?: ""),
+            "memory pass cron not readable (expected a non-empty \"memoryCron\" key): ${world.lastBody}",
+        )
 }

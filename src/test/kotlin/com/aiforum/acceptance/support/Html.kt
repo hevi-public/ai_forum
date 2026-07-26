@@ -234,6 +234,16 @@ object Html {
     fun roomMapRow(html: String, interest: String): String? =
         liBlock(html, "data-room-topic=\"${Regex.escape(interest)}\"")
 
+    /**
+     * The newest memory-change row (plan_docs/persona-memory.md §2.12; /admin/memory lists
+     * newest-first, so the first `<li data-memory-change="…">` in document order is the latest), or
+     * null when the history is empty. A whole block for the same reason as its two siblings above: an
+     * audit row is read as a unit — the snapshot body, the cited evidence and the reverted marker all
+     * have to be asserted against the SAME change, and a page-wide probe would happily satisfy a claim
+     * about the newest change with an older row's field.
+     */
+    fun latestMemoryChangeRow(html: String): String? = liBlock(html, "data-memory-change")
+
     /** The visible text of a fragment: tags stripped, entities left alone, whitespace collapsed. */
     fun textOf(html: String): String =
         html.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()

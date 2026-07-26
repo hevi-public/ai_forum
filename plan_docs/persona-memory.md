@@ -729,8 +729,10 @@ bounds the one remaining unbounded read the prior slices shipped twice.
 ## 6. Acceptance scenarios, RED-first
 
 New file `src/test/resources/features/persona_memory.feature` (22 scenarios), plus one appended to
-`owner_controls_firewall.feature` and one to `config_guardrails.feature`. **24 new; the suite goes
-234 → 258** — the robust check is the printed count rising by exactly 24 (§9 step 13). Every
+`owner_controls_firewall.feature` and one to `config_guardrails.feature`. **24 new; the printed
+baseline at spec time was 237, so the suite goes 237 → 261** (the 234 the design counted was the
+S4b-recorded figure; three scenarios merged from the ambient-slice PRs in between — which is why
+the robust check is the printed count rising by exactly 24, §9 step 13, not any absolute). Every
 scenario confirmed failing **behaviorally** before implementation (the profile shows no Memories
 section, `/admin/memory` 404s, the prompt never carries a memory) — never merely as undefined
 steps. Scribe answers with more than one line are **docstrings**. Zero-cost scenarios seed via
@@ -811,12 +813,15 @@ only, §7 — precedent followed rather than a per-scenario config mechanism inv
 | Step | REUSE (file) / NEW |
 |---|---|
 | `a persona {string} exists` | REUSE `CommonSteps` (TestData direct INSERT — what keeps zero-cost scenarios honest) |
-| `a thread {string} exists` / `the thread was authored by {string}` | REUSE `CommonSteps` / `AmbientSteps` |
-| `a posted reply from {string} saying {string}` | REUSE `CommonSteps` |
+| `a thread {string} exists` | REUSE `CommonSteps` |
+| `the thread was authored by {string}` | REUSE `AmbientSteps` — **listed, deliberately unused.** §2.4's either-direction evidence rule makes a persona thread-author a second judgeable member whose scribe call would consume the FIFO answers meant for the first; scribe fixtures nest the member's replies under an `owner` comment instead, so exactly one member is judgeable under either reading (recorded at spec time, not discovered at build) |
+| `a posted reply from {string} saying {string}` (+ the `under {string}'s reply` variant) | REUSE `CommonSteps` — the variant threads the scribe fixtures |
+| `the owner asks the room {string}` | REUSE `GenerationSteps` (scenario 7's dispatcher trigger) |
+| `the owner replies under {string} with {word} scope` | REUSE `ContextScopingSteps` (scenario 8). **Gotcha carried with the row:** the step hard-codes `personaIds ["sol"]`, invisible in the feature text — scenario 8's member must be sol, or the step silently summons sol anyway |
 | `the LLM will respond with {string}` | REUSE `CommonSteps` (one-liners: `NOTHING`, generation replies) |
 | `the LLM will respond with the answer:` (docstring) | REUSE `CommonSteps` (added in S4b — multi-line answers MUST use it; `\n` inside `{string}` is a literal backslash-n) |
 | `the LLM will fail with a {failureMode}` | REUSE `GenerationSteps` |
-| `no LLM call was made` | REUSE `ValidationSteps` (GLOBAL emptiness — no composing Given allowed) |
+| `no LLM call was made` | REUSE `ValidationSteps` — **listed, deliberately unused.** No §6 scenario asserts global spy emptiness; free-skip/zero-cost is pinned at Tier 2 (§7), where the call count is read off the spy directly |
 | `the owner navigates to {string}` | REUSE `AdminSteps` |
 | `the owner summons {string}` | REUSE `GenerationSteps` |
 | `the owner gives a +1 to {string}'s reply` / `the model's context contained no vote signal` | REUSE `OwnerControlSteps` |
@@ -827,8 +832,11 @@ only, §7 — precedent followed rather than a per-scenario config mechanism inv
 | `the owner runs the memory pass` | **NEW** — `POST /admin/memory/run`, synchronous, no settle helper |
 | `the owner reverts the latest memory change` | **NEW** — reads the id off the rendered log |
 | `the owner authors the memory {string} for {string}` | **NEW** — drives the profile form (a COMPOSING-free POST; distinct from the seeding step by wording) |
-| `the profile for {string} shows the memory {string} with source {string}` | **NEW** — counts `data-memory` hooks |
-| `{string}'s generation prompt carried the memory {string}` / `…did not carry…` | **NEW** — `OwnerControlSteps` sibling; **selects by `persona.name == <member>`**, KDoc names the `personaCall()` trap |
+| `the profile for {string} shows the memory {string} with source {string}` (+ variants: exactly-N count / shows no memory / beneath {parent} / at top level / shows the root) | **NEW** — counts `data-memory` hooks; the tree variants read `data-memory-parent`/`data-memory-root` |
+| `the owner deletes the memory {string} of {string}` | **NEW** — drives the profile delete form (scenario 19's owner-retraction arrange) |
+| `the owner snapshots the forum activity` / `the forum activity is unchanged` | **NEW** — scenario 21's before/after rail capture |
+| `{string}'s generation prompt carried the memory {string}` / `…did not carry…` / `…carried no memory block` | **NEW** — `OwnerControlSteps` sibling; **selects by `persona.name == <member>`**, KDoc names the `personaCall()` trap; the no-block variant is scenario 1's frame-text-absence guard |
+| `the dispatcher's prompt did not carry the memory {string}` | **NEW** — scenario 7's negative, selected on the dispatcher seam identity |
 | `the scribe prompt for {string} carried {string}` / `…did not carry…` | **NEW** — selects the spy call by `persona.name == "MemoryScribe"` |
 | `the memory history records …` / `…cites…` / `…is marked reverted` / `…is empty` | **NEW** — `PersonaMemorySteps` via an `Html` row-slicer sibling |
 | `no ambient run was recorded` / rails-unchanged assertions | **NEW** (scenario 21) — asserts `ambient_run` count and rail contents before/after the run |
