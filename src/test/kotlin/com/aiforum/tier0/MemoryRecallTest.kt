@@ -128,6 +128,22 @@ class MemoryRecallTest {
     }
 
     @Test
+    fun `the newest-three cut compares parsed instants, not ISO strings - the whole-second anomaly`() {
+        // Instant.toString() prints NO fraction on a whole second, and 'Z' (0x5A) beats '.'
+        // (0x2E) in a byte compare — so the fraction-less stamp below, chronologically the
+        // OLDEST of the four, sorts lexicographically as the newest. Under string comparison
+        // the cut keeps it and drops s1, a genuinely newer record, at the MAX_MATCHED boundary
+        // (the S4b anomaly the scribe's isAfter dodges; the close-out audit's §10.3 item 2).
+        // Every stamp here is inside one second: only instant parsing tells them apart honestly.
+        val whole = record("w", "checkpoint memory whole", "2026-01-01T10:00:00Z")
+        val s1 = record("s1", "checkpoint memory one", "2026-01-01T10:00:00.100Z")
+        val s2 = record("s2", "checkpoint memory two", "2026-01-01T10:00:00.200Z")
+        val s3 = record("s3", "checkpoint memory three", "2026-01-01T10:00:00.300Z")
+        val selected = MemoryRecall.select(listOf(whole, s1, s2, s3), "checkpoint talk")
+        assertEquals(listOf("s3", "s2", "s1"), selected.map { it.id }, "the whole-second stamp is the oldest and must drop")
+    }
+
+    @Test
     fun `a surfaced record drags its antecedent in even when the antecedent matches nothing`() {
         val parent = record("p", "Fell down a fsync rabbit hole two winters back")
         val child = record("c", "Checkpoint defaults still feel untrustworthy", parentId = "p")

@@ -3,6 +3,8 @@ package com.aiforum.persona
 import com.aiforum.ambient.WholeWords
 import com.aiforum.repo.PersonaMemory
 import com.aiforum.repo.PersonaMemoryRepository
+import java.time.Instant
+import java.time.format.DateTimeParseException
 
 /**
  * Deterministic memory retrieval (`plan_docs/persona-memory.md` §2.7): which of a member's records
@@ -16,7 +18,13 @@ import com.aiforum.repo.PersonaMemoryRepository
  *   never kept, compared across records, persisted, or rendered. Two matches rank no higher than
  *   one; there is nothing here a model could game into ranking (I4).
  * - **The tie-break is a clock, not a magnitude.** Over [MAX_MATCHED] matches keep the newest by
- *   `created_at` (id tiebreak) — a backend-side ordering over injected-Clock stamps.
+ *   `created_at` (id tiebreak) — a backend-side ordering over injected-Clock stamps, compared as
+ *   **parsed [Instant]s, never as raw ISO strings**: `Instant.toString()` prints no fraction on a
+ *   whole second, and `'Z' > '.'` lexicographically, so a fraction-less stamp sorts AFTER every
+ *   sub-second stamp of the same second — the S4b anomaly `MemoryScribeService.isAfter` dodges,
+ *   dodged here too since the close-out audit caught this cut sorting strings (§10.3 item 2). An
+ *   unparseable stamp sorts as newest — the scribe's degrade posture (a memory must not vanish
+ *   from recall because its timestamp is malformed) — and the id tiebreak keeps that deterministic.
  * - **One associative hop, records only.** Each surfaced record pulls its [PersonaMemory.parentId]
  *   antecedent into the result — recall is a *chain*, §6.3's threading payoff — but parents resolve
  *   ONLY among the `kind='record'` rows this function loaded (§2.2's parent-candidate rule, the
@@ -54,7 +62,7 @@ object MemoryRecall {
         val records = memories.filter { it.kind == PersonaMemoryRepository.KIND_RECORD }
         val matched = records
             .filter { record -> wordsOf(record.body).any { WholeWords.contains(contextText, it) } }
-            .sortedWith(compareByDescending<PersonaMemory> { it.createdAt }.thenBy { it.id })
+            .sortedWith(NEWEST_FIRST)
             .take(MAX_MATCHED)
         val recordById = records.associateBy { it.id }
         val selected = mutableListOf<PersonaMemory>()
@@ -79,6 +87,23 @@ object MemoryRecall {
             .split(NON_WORD)
             .filter { it.isNotEmpty() && MemoryText.codePoints(it) >= MIN_WORD_CODE_POINTS }
             .distinct()
+
+    /**
+     * Newest first on PARSED stamps, id tiebreak. `nullsLast` inside `compareByDescending` is what
+     * puts a null (= unparseable) stamp FIRST in the descending result — kept, like the scribe's
+     * [com.aiforum.service.MemoryScribeService] keeps an engagement whose stamp will not parse,
+     * and unlike a silent drop, which would make a malformed timestamp cost the member a memory.
+     */
+    private val NEWEST_FIRST: Comparator<PersonaMemory> =
+        compareByDescending(nullsLast<Instant>()) { record: PersonaMemory -> instantOf(record.createdAt) }
+            .thenBy { it.id }
+
+    /** The stamp as an [Instant], or null when malformed — the degrade, decided in one place. */
+    private fun instantOf(createdAt: String): Instant? = try {
+        Instant.parse(createdAt)
+    } catch (e: DateTimeParseException) {
+        null
+    }
 
     private val NON_WORD = Regex("[^\\p{L}\\p{N}_]+")
 }

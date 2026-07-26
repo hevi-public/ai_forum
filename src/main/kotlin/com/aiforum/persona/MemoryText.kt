@@ -49,7 +49,12 @@ object MemoryText {
 
     /**
      * Length as SQLite `length()` measures it: Unicode code points, so a surrogate pair (one emoji)
-     * counts 1 here and 1 to the V28 CHECK — the two sides agree by construction (I5).
+     * counts 1 here and 1 to the V28 CHECK. The two sides agree by construction (I5) **because
+     * [validate] refuses NUL first**: SQLite documents `length(X)` as counting characters only up
+     * to the first `U+0000` (`length('a'||char(0)||'b')` is 1; this counts 3), so the agreement
+     * claim is true of exactly the strings the validator lets through — the close-out audit found
+     * the unqualified version of this claim false (persona-memory.md §10.3 item 1; V28's header
+     * carries the old wording, immutable because applied).
      */
     fun codePoints(text: String): Int = text.codePointCount(0, text.length)
 
@@ -62,8 +67,17 @@ object MemoryText {
 
     /**
      * Returns the reason [candidate] may not be stored, or `null` when it may — a reason rather than
-     * a boolean because both callers show it (the pass's rejection log, the owner's form flash), and
-     * "invalid" on a page tells the owner nothing about what to type instead.
+     * a boolean because both callers log it (the pass's rejection event, the owner form's
+     * `memory.author.rejected` warn), and an undifferentiated "invalid" on a log tells the reader
+     * nothing about what was wrong. There is no form flash: every owner-form rejection is a silent
+     * no-op with the reason logged, uniform with the S4b interest form (§10.3 item 3, §10.4).
+     *
+     * The NUL refusal is what keeps I5's "code points on both sides" claim true rather than
+     * approximate: `U+0000` is the ONE character Kotlin's trim/`isBlank`/`\s+` all pass through
+     * while SQLite's `length()` stops counting at it, so a NUL-bearing body would pass every other
+     * check here and then trip a V28 CHECK mid-write as an uncaught driver exception — the 500 the
+     * owner surface promises can never happen. Other control characters are deliberately NOT
+     * refused: none of them truncates SQLite's count, and over-rejection is its own defect class.
      *
      * Measured on [candidate] AS PASSED, never on a cleaned copy: a candidate that is not already a
      * fixed point of [clean] is refused outright. Re-cleaning here would validate one string and let
@@ -71,6 +85,7 @@ object MemoryText {
      */
     fun validate(candidate: String): String? = when {
         candidate.isBlank() -> "a memory cannot be blank"
+        '\u0000' in candidate -> "a memory cannot contain the NUL character"
         clean(candidate) != candidate ->
             "a memory must arrive already cleaned; it is refused, never re-cleaned"
         codePoints(candidate) > MAX_CODE_POINTS ->

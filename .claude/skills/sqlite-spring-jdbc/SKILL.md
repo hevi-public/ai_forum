@@ -100,6 +100,71 @@ other can't produce — and a non-null Kotlin field reading that column NPEs. Co
 follow-up data migration (`UPDATE t SET col='' WHERE col IS NULL`); it's a harmless no-op on the
 canonical lineage (whose column is `NOT NULL`, so no `NULL`s exist).
 
+### Nullable watermark columns — NULL is the semantics, not a compromise
+
+When a scheduled pass needs a per-row "when did we last look" marker (V26 `persona_stance.judged_at`,
+V27 `persona.interests_judged_at`, V28 `persona.memory_judged_at`), add it as
+`ALTER TABLE … ADD COLUMN x TEXT` — nullable, **no default**. That's the only shape SQLite's ALTER
+reliably supports (a `NOT NULL` add demands a literal default; UNIQUE/PK adds are refused; FK adds are
+impossible) — and it's also the right semantics: **NULL means "never judged → read this row's whole
+history once"**, bounded by an explicit horizon so a never-judged member is never an unbounded read
+(V28 clamps at 90 days). Traps, all paid for:
+
+- **Don't backfill a default stamp.** An epoch default turns "never looked" into "looked at the dawn
+  of time" and silently skips the first full read.
+- **One repository owns the column.** `PersonaRepository.update` never learns these columns exist, so
+  an owner pressing Save can't masquerade as a fresh judgment. The strongest form is the column staying
+  *unknown* to the entity's own repository class (the as-built S4b lesson) — nothing to tidy in, no
+  projection to go stale.
+- **A malformed stamp reads as NULL + WARN, never a throw** — a corrupt watermark must degrade to
+  "look again", not break the whole run.
+- **Stamp with the caller's PRE-QUERY read instant, passed as a parameter.** A clock read inside the
+  repository sits a minute of LLM latency after the evidence read, and anything posted in that gap
+  falls permanently behind a watermark that never saw it.
+- **Compare stamps as parsed `Instant`s, not strings, wherever a cut or floor depends on the order.**
+  `Instant.toString()` prints no fraction on a whole second and `'Z' > '.'`, so a fraction-less stamp
+  sorts lexicographically AFTER every sub-second stamp of the same second. `ORDER BY created_at` for
+  display tolerates the one-row swap; a window floor or a newest-N cut does not (the memory scribe's
+  `isAfter` and `MemoryRecall`'s newest-3 both parse for exactly this reason).
+
+### Scoped CHECKs — aim a constraint at the writer it exists to stop
+
+`CHECK (source = 'owner' OR interest NOT GLOB '*[0-9]*')` (V27) and
+`CHECK (source = 'owner' OR length(body) BETWEEN 1 AND 300)` (V28): when a CHECK exists to bound a
+MODEL-written row, scope it by provenance so the owner's path can never trip it. Unscoped, the CHECK
+throws a `DataAccessException` in whatever controller happens to write first — V27's case runs
+interest writes *before* the prompt logic in `PersonaController.edit`, so an unscoped digit ban would
+cost the owner their descriptor and dial edits for typing "web3". Two more facts that shape these:
+
+- **CHECKs are CREATE TABLE-only.** SQLite cannot add one by ALTER, which is why a guarded table ships
+  with its CHECKs at birth even when the feature needing them is deferred (V28's owner-only root CHECK
+  landed with the table precisely because it could never be added later).
+- **`length()` counts code points — but only up to the first NUL.** Match it Kotlin-side with
+  `codePointCount` (never `String.length`, which counts UTF-16 units and disagrees on every emoji),
+  AND refuse U+0000 at the validator: `length('a'||char(0)||'b')` is 1, so a NUL-bearing body passes a
+  code-point validator and then trips the CHECK mid-write as an uncaught driver exception (the
+  persona-memory close-out defect — a crafted POST 500'd the owner form). A validator that "agrees
+  with the CHECK by construction" agrees only over the input domain that excludes NUL; refuse it at
+  the door and say so in the comment.
+
+### NOCASE identity — `COLLATE NOCASE` folds ASCII case and nothing else
+
+V27's `interest TEXT NOT NULL COLLATE NOCASE` under `PRIMARY KEY (persona_id, interest)` makes
+"Storage engines" and "storage engines" one row — the point — but two limits are load-bearing:
+
+- **NOCASE is ASCII-only.** `'É'` ≠ `'é'` to it. Any application-side duplicate or equality comparison
+  needs its own Unicode-aware fold (`lowercase()`; `MemoryText.fold` owns it for memories) and must
+  not lean on the DB collation — the two folds answer different questions, and only the app-side one
+  is Unicode-correct.
+- **NOCASE folds case, not whitespace.** `" agents"` and `"agents"` are two primary keys — a duplicate
+  the DDL cannot see. Clean (trim + collapse) at the ONE repository door every writer comes through,
+  or two writers will quietly disagree about identity.
+
+V28's `persona_memory.body` deliberately does NOT collate NOCASE: duplicate refusal there is a
+Kotlin-side fold at the pass, so the DB collation never participates in a memory comparison. Decide
+per column where identity lives — in the DDL (then clean at the door) or in code (then keep the DDL
+out of it) — and never half in each.
+
 ## Profile-isolated datasource
 
 Three profiles, three databases. `test` must never touch prod, and backups are disabled under `test`.

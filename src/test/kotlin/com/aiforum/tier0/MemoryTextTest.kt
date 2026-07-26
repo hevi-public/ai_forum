@@ -4,6 +4,7 @@ import com.aiforum.persona.MemoryText
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 
@@ -85,6 +86,24 @@ class MemoryTextTest {
         // The bound is therefore a code-point bound: 300 emoji validate, 301 refuse.
         assertNull(MemoryText.validate("🙂".repeat(300)))
         assertNotNull(MemoryText.validate("🙂".repeat(301)))
+    }
+
+    @Test
+    fun `validate refuses a NUL-bearing body, wherever the NUL sits`() {
+        // U+0000 is the ONE character every other check passes through — not Kotlin whitespace
+        // (so trim/isBlank/\s+ keep it) and one honest code point to codePointCount — while
+        // SQLite length() stops counting at it. Unrefused, a leading-NUL body reads as length 0
+        // to the V28 CHECK (length(body) > 0) and a mid-NUL one undercounts against BETWEEN 1
+        // AND 300: the validated string and the stored string part company, and the owner form
+        // 500s on an uncaught driver exception (the close-out audit's medium, §10.3 item 1).
+        val nul = Char(0).toString()
+        val leading = MemoryText.validate(nul + "hello")
+        assertNotNull(leading, "a leading-NUL body must be refused at the door")
+        val mid = MemoryText.validate("a" + nul + "b")
+        assertNotNull(mid, "a mid-NUL body must be refused at the door")
+        // The reason is owner-readable, never a bare rejection: both callers log it.
+        assertTrue(leading!!.isNotBlank(), "the NUL refusal must carry a readable reason")
+        assertEquals(leading, mid, "one reason for the one defect class, wherever the NUL sits")
     }
 
     @Test

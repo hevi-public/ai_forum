@@ -18,8 +18,11 @@ import org.springframework.web.bind.annotation.RequestParam
  *  - `POST /personas/{slug}/memories/{id}/delete` — delete one node (records reparent-then-delete)
  *
  * Its own controller rather than more weight on [PersonaController]: these are three write
- * endpoints over a table that controller only reads, and the delete/author postures here (no-op
- * flash, never an exception) are this slice's, not the persona form's.
+ * endpoints over a table that controller only reads, and the delete/author postures here (silent
+ * no-op with a logged reason, never an exception) are this slice's, not the persona form's. There
+ * is no flash mechanism anywhere in the web layer: a rejected submission reloads the profile with
+ * no message, uniform with the S4b interest form — the recorded UX debt (persona-memory.md §10.4),
+ * not an accident.
  *
  * **Form params are prefix-scanned out of `allParams`, never bound `@RequestParam(defaultValue="")`**
  * (the S4b blank-replay wipe, 4b D11): a bound param arrives blank on every replayed fixed-field

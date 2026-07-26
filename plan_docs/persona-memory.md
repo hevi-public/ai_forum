@@ -1,6 +1,7 @@
 # Persona Memory — the stable-personality floor, and the first honest increment of recall
 
-> **Status:** 📋 designed 2026-07-26 — claims **V28**, not yet built · **Owner:** Hevi
+> **Status:** ✅ built 2026-07-26 (V28) — `./gradlew verifyAll` green, suite 237 → 261 scenarios,
+> tier 0/1/2: 392/243/154 · designed 2026-07-26 · **Owner:** Hevi
 > Parent: `ai-driven-forum-direction.md` §9 ("off-map but near-term: persona memory, pulled forward
 > 2026-07-21", `:200-201`), §11.7 Stays-Cut · Spec: `ai-forum-requirements.md` §6.3 (`:277-285`),
 > decision `:472` · Predecessors: `ambient-slice-4a.md` (V25/V26), `ambient-slice-4b.md` (V27)
@@ -531,7 +532,9 @@ lost, acceptable at one memory per member per week.
 `MAX_INTERESTS`. The arithmetic: at ≤1 record/week that is ≈ six months of accumulation;
 24 × 300 chars ≤ 7.2KB, so the full per-member store stays a trivial in-memory scan for retrieval
 and a bounded context for the scribe prompt. At ceiling: **free skip decided before any LLM
-spend**, `event=memory.at_capacity`; the owner deletes to make room. Owner rows do **not** count —
+spend**, `event=memory.skip.at_capacity` *(corrected at close-out: this line originally said
+`memory.at_capacity`, disagreeing with §2.16's list; §2.16 is the stated observability contract
+and won — §10.1)*; the owner deletes to make room. Owner rows do **not** count —
 the ceiling bounds the model, not the owner; the owner's own authoring ceiling lives on the
 controller, not in the DB.
 
@@ -563,9 +566,12 @@ section — root first (`data-memory-root`), records nested by parent (`data-mem
   or delete any row (the pass only inserts), and the duplicate refusal treats owner rows as
   collision targets. Form params **prefix-scanned out of `allParams`**, never
   `@RequestParam(defaultValue="")` (the S4b blank-replay wipe, 4b D11); an unusable field refuses
-  the whole submission as a no-op flash, never an exception (writes run before nothing here, but
-  the posture is uniform). Validation uses the same `MemoryText` **function** as the parse path —
-  one function, not shared constants (§2.15).
+  the whole submission as a **silent no-op with the reason logged** (`event=memory.author.rejected`),
+  never an exception (writes run before nothing here, but the posture is uniform). *Corrected at
+  close-out: this sentence originally promised a "no-op flash" — no flash mechanism exists anywhere
+  in the web layer, and every owner-form rejection is log-only, uniform with the S4b interest form
+  (§10.3 item 3; the log-only feedback is the recorded UX debt, §10.4).* Validation uses the same
+  `MemoryText` **function** as the parse path — one function, not shared constants (§2.15).
 - **Author / delete the root** — create once (the partial unique index is the enforcement), delete
   + re-author to change (no in-place edit, uniform with records). Because nothing can be parented
   on the root (§2.2), delete-and-re-author never cascades a subtree.
@@ -1016,19 +1022,197 @@ gate on Regenerate) · `TestBeans.kt` (no new IO port) · `build.gradle.kts`.
 
 ## 10. As built — where the implementation departed from this design
 
-> **MANDATORY, not optional.** This section is filled at the end of the build, after
-> `./gradlew verifyAll` is green and after a review pass that reads the shipped code against this
-> document — the pass that found five defects in S4b before its PR left draft. Do not merge
-> without it. Required subsections, per the S4b form:
->
-> - **§10.1 Departures in the shipped code** — every place the code differs from §2, argued.
-> - **§10.2 Departures in the tests** — counts confirmed against the printed suite output, never
->   against the prediction.
-> - **§10.3 Defects found in review and fixed before the PR left draft.**
-> - **§10.4 Design claims not pinned by any test** — seeded from §7's pre-budgeted list, extended
->   with what the build discovers.
-> - **§10.5 Documentation landed with the slice** (direction doc, context.md, skill subsections).
-> - **§10.6 The working rule that produced this section.**
+*(Filled 2026-07-26 at close-out, after `./gradlew verifyAll` went green and after the three-angle
+audit pass that produced §10.3 — the step that found five defects in S4b before its PR left draft.
+Sources: the four commit messages' "recorded for §10" ledgers, kept as they landed rather than
+reconstructed, and the audit's full record in the PR.)*
+
+### 10.1 Departures in the shipped code
+
+**The parse's refusal WORDING is fixed nowhere in this document, and shipped that way deliberately.**
+§2.5 fixes the refusal *categories*; the strings follow the InterestDrift house style, and the body
+refusals are BYTE-IDENTICAL to `MemoryText.validate`'s output — pinned as the one-function witness,
+which is §2.15's "one function, not shared constants" claim made testable: if the parse's reason
+ever drifts from the validator's, the byte-equality test reds.
+
+**`MemoryRecall`'s output order is pinned tighter than specced.** §2.7 fixed membership and caps;
+Tier 0 pins the full order — matched newest-first, each antecedent immediately after the record
+that dragged it in, dedup by id, truncation from the end. Stated so the next reader knows the order
+is a contract, not an accident of implementation.
+
+**`ScribeAnswer` hands the EXTENDS selector back RAW.** The parse neither resolves nor validates
+the letter; the service does, so `memory.parent.unknown` logs what the model actually wrote rather
+than a sanitised token.
+
+**A rating label hiding inside the REMEMBER line is refused like a standalone one.** §2.5 named
+rating-shaped *lines*; as built the stripped REMEMBER body is re-checked too, so
+`REMEMBER: … importance: 7/10` cannot smuggle the shape past the per-line filter.
+
+**§2.11 and §2.16 named the capacity event differently; §2.16 won.** The code logs
+`memory.skip.at_capacity` (siblings `memory.skip.below_floor` / `memory.skip.no_exchanges`) —
+§2.16 is the stated observability contract. §2.11's stray `memory.at_capacity` is reconciled in
+place above with a marked correction.
+
+**`POST /admin/memory/run` answers 200 rendering the fresh log, not the interest-precedent 303.**
+Scenario 13 pins the 200; the feature file is the executable contract, and this doc fixed no shape
+for that endpoint. Revert keeps its PRG.
+
+**Duplicate targets include the root, per this doc's own §2.5 table.** The orchestrator's build
+brief said records-only; the doc won, and Tier 2 pins the root-target refusal (a REMEMBER equal to
+the root's body is refused — and stamps the window, like every duplicate).
+
+**Every quiet member logs its own `memory.skip.no_exchanges`.** One line per member with no
+evidence in the window, not an aggregate per run — the free skip is visible at the same grain as
+the other two.
+
+**`MAX_OWNER_MEMORIES = 24` is a controller constant the doc left numberless.** §2.11 said the
+owner's ceiling "lives on the controller, not in the DB" and gave no figure; the shipped figure
+mirrors the scribe's for the same prompt-budget arithmetic, as a separate constant on the write
+surface that owns it (the `PersonaController.MAX_INTERESTS` split). Pinned by no test — §10.4.
+
+**`threadTitle` is wired per checklist item 7, but its distinct contribution is unpinnable.** Every
+call site's OP node already carries the title in its body, so no test can distinguish title
+matching from OP-body matching — named as unpinnable rather than claimed (§10.4).
+
+**Spec-phase decisions recorded when the executable spec landed (step 2), kept here rather than
+lost:** the §6.1 thread-author row is "listed, deliberately unused" — a persona thread-author would
+become a second judgeable member consuming the scripted FIFO answers meant for the first; the
+endpoint and hook contracts this doc left open were fixed by the spec and KDoc'd in
+`PersonaMemorySteps` (`POST /personas/{slug}/memories` (+ `/{id}/delete`),
+`POST /admin/memory/revert/{id}`, the `data-memory` / `data-memory-parent` / `data-memory-root`
+hooks); and `DatabaseResetHooks` deliberately did NOT gain the two tables until V28 landed in step
+3 — adding the DELETEs earlier would have redded all 237 pre-existing scenarios on the missing
+table.
+
+### 10.2 Departures in the tests
+
+**The counts, confirmed against the printed suite output, never the prediction.** 22 scenarios in
+`persona_memory.feature` plus one appended to each of `owner_controls_firewall.feature` and
+`config_guardrails.feature` = 24 new; printed acceptance count 237 → 261. The doc's 234 → 258
+absolutes were stale at spec time — three scenarios merged from the ambient-slice PRs between
+design and spec; the +24 delta was always the robust check, and it held. Tier 0: **392** (43 with
+step 3, 2 more at close-out — §10.3's pins); Tier 1: **243**; Tier 2: **154**. RED-first held: 23
+of 24 landed red, and the preamble's named absence-guard exemption (scenario 1) was the
+exactly-one green.
+
+**Scenario 13 asserted only half its contract until the pre-commit spec verification caught it** —
+"leaves the window open AND the pass completes" pinned the window but never the completion, so a
+pass that 500s on the seam failure went green as long as run 2 succeeded. It asserts the 200
+between the runs now. Recorded here because the fix shaped the feature file before any code
+existed.
+
+**Fifteen pins were mutation-verified** (break → named test red → restore): five with step 3, ten
+with step 4 — six of those redden a NAMED acceptance scenario and nothing else (NOTHING-stamp →
+scenario 11, persona_id filter → 6, reparent → 22, hop → 4, ambient_run write → 21) — plus the two
+close-out fixes, verified the same way (§10.3).
+
+**Rotation is Tier-2-only, per the S4a/S4b precedent §7 recorded in advance** — properties are
+static in the single Spring context, so no feature file can set a biting cap. It held; no
+per-scenario config mechanism was invented.
+
+### 10.3 Defects found in the close-out audit and fixed
+
+The close-out audit read the shipped slice against this document from three angles (data-loss,
+cost/window, leak/Stays-Cut), each finding then handed to an independent refutation pass. Twelve
+raw findings: **seven claims were refuted on verification** (one line here, no details — the full
+record, refutation arguments and the checked-ok list included, is in the PR), two hand-SQL-only
+lows were recorded as decisions rather than fixed (§10.4), and three were confirmed — all fixed
+here, sequence then fix, before the PR leaves draft.
+
+1. **A NUL-bearing body passed `validate` and 500'd the owner form — the one posture the
+   controller KDoc forbids (medium; verified end-to-end on the shipped dependency versions).**
+   Sequence: a crafted POST (curl — a browser form never sends one) delivers a `%00`-opening body;
+   Kotlin's `trim`/`isBlank`/`\s+` all pass U+0000 through and `codePointCount` counts it, so
+   `MemoryText.validate` returned null — but SQLite's `length()` counts characters only up to the
+   first NUL, so `length(body)` read 0 and V28's `CHECK (length(body) > 0)` threw an uncaught
+   `DataAccessException` out of `PersonaMemoryController.author` as a 500. I5's "code points agree
+   on both sides by construction" was false for every NUL-bearing string (`a\0b`: 3 to Kotlin, 1
+   to SQLite). Fix: `validate` refuses any candidate containing U+0000, with an owner-readable
+   reason, ahead of the fixed-point rule; the `codePoints` KDoc now states the agreement holds
+   BECAUSE NUL is refused at the door. Other control characters are deliberately still admitted —
+   only NUL truncates SQLite's count, and over-rejection is its own defect class. Tier-0 pins:
+   leading NUL, mid NUL, readable reason. **The V28 header's "agree by construction (I5)" note
+   still carries the unqualified claim and stays as applied** — an applied migration is immutable
+   (the S4a V25 lesson: editing one strands every existing DB on a checksum mismatch), so the
+   correction lives in `MemoryText`'s comment and in this entry, not in the SQL file.
+2. **Recall's newest-3 cut sorted `created_at` lexicographically — the exact whole-second anomaly
+   this same slice documents and dodges in the scribe (low).** Sequence: `Instant.toString()`
+   prints no fraction on a whole second and `'Z' > '.'` byte-wise, so a fraction-less stamp
+   (produced whenever `clock.instant()` lands on nanos == 0) sorts AFTER every sub-second stamp of
+   the same second; at the `MAX_MATCHED` boundary an older record could displace a genuinely newer
+   one — §2.7's "newest created_at first" inverted at the cut — while `MemoryScribeService.isAfter`
+   names and dodges the same anomaly forty lines away and `PersonaMemoryRepository`'s KDoc claimed
+   "lexicographic == chronological". Fix: the cut compares parsed `Instant`s with an id tiebreak;
+   an unparseable stamp sorts as newest — the scribe's degrade posture (evidence must not vanish
+   because a timestamp is malformed), kept deterministic by the tiebreak — and the repository KDoc
+   now states the near-chronological truth and which callers may rely on what. Tier-0 pin: four
+   same-second stamps, whole-second oldest; reddens under string comparison (mutation-verified).
+3. **"No-op flash" was an overclaim in three places — no flash mechanism exists anywhere in the
+   web layer (low).** Every owner-form rejection branch is `log.warn` + bare redirect: the typed
+   text is discarded and the profile reloads with no message. That is the shipped posture, uniform
+   with the S4b interest form — but §2.12 promised a "no-op flash", `MemoryText.validate`'s KDoc
+   said the owner's form flash shows the reason, and the controller KDoc echoed it. Fix: all three
+   claims now state the log-only posture. No flash was built — a page-visible refusal reason is
+   the §10.4 UX debt and an owner call, not a silent default.
+
+### 10.4 Design claims not pinned by any test
+
+Everything below is true of the code today and would stay green if it stopped being true. The
+first five are §7's pre-budgeted list, carried; the rest is what the build and the close-out audit
+added.
+
+- **The `List<String>` signatures of `MemoryProse` and the scribe's own-material block** — no
+  behavioral test sees a parameter type; signature-is-the-enforcement, stated.
+- **"No other read path reaches a prompt"** — an absence claim, held by the NOT-edited list and
+  review.
+- **The composite-FK CASCADE firing specifically under persona-cascade ordering** — Tier 1 pins
+  the end state, not which mechanism cleaned up.
+- **The scribe's "experiential, not attitudinal" steer** — prompt-only; a memory shading into
+  stance territory is caught by the owner, not by code.
+- **The ≥5-code-point word floor's recall QUALITY** — only its determinism is pinned.
+- **The root-authoring FORM has no acceptance coverage.** The root Given seeds by SQL (§6.1), so
+  `POST /personas/{slug}/memories/root` is exercised by no scenario, and the form's create-once
+  semantics are Tier-1 only (the partial unique index). Earmarked at spec time, recorded here.
+- **`MAX_OWNER_MEMORIES = 24`** — the owner's authoring ceiling is enforced and unpinned; no test
+  authors a twenty-fifth owner record.
+- **`threadTitle`'s distinct contribution** — indistinguishable from OP-body matching at every
+  call site (§10.1); wired per the checklist, unprovable as a separate behaviour.
+- **Owner-form rejection feedback is log-only — the recorded UX debt.** A rejected memory (too
+  long, at ceiling, stale parent) silently discards the owner's typed text with only a logged
+  reason; nothing on the page says a refusal happened. Uniform with the S4b interest form. Whether
+  a page-visible reason is worth building is an owner call; the three claims that promised one are
+  corrected (§10.3 item 3).
+- **Two hand-SQL-only audit findings, recorded as decisions rather than fixed.** (a) The scribe's
+  letter list has no truncation belt: an over-long OWNER record — possible only by hand SQL, the
+  scoped CHECK deliberately exempts owner rows and §2.9 names the hole — reaches the scribe prompt
+  in full; `MemoryProse.truncated` guards the injection door only. (b) A hand-SQL parent CYCLE
+  makes its records invisible on the profile (the tree walk never reaches them) while they keep
+  matching in recall. Both stay as decisions: the DDL cannot see hand-SQL states — SQLite cannot
+  CHECK a cross-row cycle, nor re-scope an applied length CHECK — and the forum's own writers
+  cannot produce either state (`deleteRecord`'s reparent cannot create a cycle; both write doors
+  bound the body). Hand SQL below the belt is the owner operating on their own single-user store.
+
+### 10.5 Documentation landed with the slice
+
+The direction doc marks persona memory built (status header, the §2 ingredient row, §9's off-map
+line and a new slice-map row, four §12 decision rows: the D1 thread-SHAPED re-decision, the D3
+root call, the D10 no-rollback departure, the D8 digit posture); `how-we-work/context.md` gains
+the dated feature-state entry, the durable learnings (the NUL divergence class, the records-only
+parent-candidate rule, the letter-protocol-with-snapshot-re-read shape) and an honest "what's
+next"; `sqlite-spring-jdbc` gains the three subsections S4b's §10.5 claimed but the checked-out
+skill lacked — nullable watermark columns, scoped CHECKs, NOCASE identity — the recorded skill
+drift, closed (checklist 21); and `jte-spring-kotlin` records the flat-rows constraint the
+acceptance row-slicer imposes on templates like `admin_memory.kte`.
+
+### 10.6 The working rule that produced this section
+
+S4b's rule — **a comment that makes a behavioural claim needs a test behind it, or it becomes an
+entry in this section** — held again: all three §10.3 defects were claims wider than the code (an
+invariant comment, an ordering KDoc, a UX promise), found by reading the shipped code against this
+document rather than by a red test. The addition this slice earns: **when a design says two
+measuring sites "agree by construction", name the input domain the agreement holds over.** I5 was
+true for every string anyone imagined and false for the one nobody did, and the audit found it by
+asking *what input makes the two sides disagree*, not by re-reading the argument that they cannot.
 
 ## 11. Decision log
 

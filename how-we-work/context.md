@@ -325,16 +325,51 @@ branch so a stub demo does not look broken. Suite 213 → 234 scenarios (19 in t
 branch, and a 19-test Tier-2 orchestration class. The ambient fan-out flake was fixed in this slice too
 — see the read-skew entry below.
 
+**2026-07-26 (Persona memory, V28):** each member now holds a private, thread-shaped memory tree
+(`plan_docs/persona-memory.md` — off-map §6.3, its own name, not an S-number): prose **records**
+written by the weekly Memory Scribe pass (third instance of the evolution-pass template,
+`aiforum.memory`, **default off**, ungated `POST /admin/memory/run`) or authored by the owner on
+the profile, plus an optional owner-only **root** (storage only — injected NEVER this slice, the
+recorded owner call). Records resurface deterministically when the scoped context shares their
+words (binary whole-word overlap + one associative hop, ≤3 matched + parents, ≤5 total, injected
+as the fourth `withPersonaContext` block live at settle) and every scribe write is audited at
+`/admin/memory` with revert — which deletes but deliberately does NOT roll the watermark back.
+Suite 237 → 261 scenarios; tier 0/1/2: 392/243/154.
+
+Three durable learnings, the close-out audit's yield (plan doc §10.3):
+
+- **The NUL divergence class — a THIRD way validated-vs-stored splits.** S4b left us two (a
+  non-idempotent door cleaner; cleaning at two sites). The third is two measuring sites agreeing
+  on every input except one: Kotlin's `trim`/`isBlank`/`\s+`/`codePointCount` all pass U+0000
+  through, while SQLite's `length()` counts characters only **up to the first NUL** — so a
+  NUL-opening body passed `MemoryText.validate`, then tripped V28's `CHECK (length(body) > 0)`
+  mid-write as an uncaught 500 on the owner's own form. The rule: when a design says two sides
+  "agree by construction", name the input domain the agreement holds over — and refuse NUL at any
+  door whose bound a SQLite length CHECK backstops. (Only NUL truncates the count; refusing other
+  control characters is over-rejection, its own defect class.)
+- **The records-only parent-candidate rule is the root-protection pattern.** The design review's
+  one blocking finding: every surface that offers parent candidates — retrieval's hop, the
+  scribe's letter list, the profile picker, the form endpoint, the repository belt — draws from
+  `kind='record'` rows ONLY, so the owner-only root can never be dragged into a prompt by the
+  associative hop nor cascade-deleted by a re-author, even off hand-SQL rows. Protect a privileged
+  row by making it structurally absent from every candidate set, not by filtering at one site.
+- **Letter protocol + snapshot re-read is the shape for model-chosen references.** Parents are
+  offered as letters A–Z over a snapshot; the selector resolves against THE SNAPSHOT THE MODEL
+  SAW, the resolved id is then re-verified against current rows at write time (the bed019fe rule,
+  applied at both sites), and unknown/out-of-set/vanished selectors degrade to top-level with
+  their own logged events — the paid record is never refused over a stale reference, and letters
+  keep digits out of a model-facing protocol.
+
 ## Open threads / near-term
 
-- **What's next, from the record rather than invention.** S4b landed 2026-07-26, so two things are
-  outstanding and **their order is an owner call nothing in the record has made**: (a) **persona memory**
-  (§6.3) — named on 2026-07-21 as what follows S4b, still with **no slice and no plan doc**; (b) **S6,
-  the feed-style front page** — the only slice left on the direction doc's map (§9), whose own open
-  question (§11.6) is unanswered and for which `home_rail` / `empty_and_unread` are already earmarked to
-  be reworked. S4b closed §11.5's two remaining items and left exactly one thing open there,
-  deliberately: whether manual create + the room map discharge the requirements' diversity lever, or the
-  *synthesised, centre-of-mass-aware* newcomer is a slice of its own.
+- **What's next, from the record rather than invention.** Persona memory landed 2026-07-26
+  (`persona-memory.md`, V28), closing the item named on 2026-07-21 as what follows S4b — so **S6,
+  the feed-style front page, is the only slice left on the direction doc's map** (§9); its open
+  question (§11.6) is unanswered and `home_rail` / `empty_and_unread` are already earmarked for
+  rework. Still deliberately open in §11.5 (S4b's leftover, untouched by memory): whether manual
+  create + the room map discharge the requirements' diversity lever, or the *synthesised,
+  centre-of-mass-aware* newcomer is a slice of its own. Memory's own deferred aspiration
+  (graph-walk recall, FTS/embeddings, root INJECTION) has no slice and no owner call yet.
 - **`GenerationController`'s `/room` fragment carries the flake that `ThreadController.renderThread`
   was fixed for** (2026-07-26): it reads only the in-flight registry, so a summon whose drafts all
   settle before the first poll reports a quiescent room with none of the settled replies in it. The

@@ -285,6 +285,14 @@ styling. Standardize on:
 This keeps the same `.feature` files re-pointable at a Playwright layer later — the hooks survive a
 visual redesign.
 
+**Row-slicer contract: a hooked `<li>` row must stay FLAT.** The acceptance helpers that read one
+audit row as a unit (`Html.latestInterestChangeRow` / `latestMemoryChangeRow` / `roomMapRow`, all over
+the shared `liBlock` slicer) cut from the row's opening `<li data-…>` tag to the **first `</li>`** in
+document order — so a nested `<li>` inside the row truncates the sliced block at the inner close tag,
+and assertions then fail against half a row: loudly, but confusingly. Any template whose rows a slicer
+reads (`admin_memory.kte`'s `data-memory-change` rows and their cited lines, the interest/stance logs)
+renders row internals as flat `<span>`/`<div>` children — one `<li>` per row, never a nested list.
+
 ## JTE syntax cheat-sheet
 
 ```kotlin

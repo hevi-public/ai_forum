@@ -21,8 +21,14 @@ import java.util.UUID
  * repository as the one site SQLite cannot express.
  *
  * [createdAt] stays a raw ISO-8601 [String] for the house reason: the column is TEXT under SQLite's
- * dynamic typing, and callers only display it or order by it (lexicographic == chronological for
- * UTC stamps). Note what this row deliberately has NO room for — no salience, no recall count, no
+ * dynamic typing, and callers only display it or order by it. Lexicographic ordering of these
+ * stamps is NEAR-chronological, not chronological: `Instant.toString()` prints no fraction on a
+ * whole second and `'Z' > '.'`, so a fraction-less stamp sorts after every sub-second stamp of the
+ * same second (the S4b anomaly). The SQL `ORDER BY created_at DESC` reads tolerate that — display
+ * order and the letter list survive a one-row swap inside a single second — but any caller whose
+ * CUT depends on the order parses instants instead ([com.aiforum.persona.MemoryRecall]'s newest-3,
+ * since the close-out audit; the scribe's `isAfter` from birth). Note what this row deliberately
+ * has NO room for — no salience, no recall count, no
  * strength. A magnitude attached to what a member remembers is comparable, therefore rankable,
  * therefore optimisable (V28 header, the fifth slice running).
  */
