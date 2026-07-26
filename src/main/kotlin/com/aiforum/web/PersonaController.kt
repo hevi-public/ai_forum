@@ -8,6 +8,8 @@ import com.aiforum.persona.PersonaSpec
 import com.aiforum.persona.PriorComposition
 import com.aiforum.persona.PromptComposer
 import com.aiforum.repo.PersonaInterestRepository
+import com.aiforum.repo.PersonaMemory
+import com.aiforum.repo.PersonaMemoryRepository
 import com.aiforum.repo.PersonaRepository
 import org.slf4j.LoggerFactory
 import com.aiforum.repo.RelationStanceRepository
@@ -96,6 +98,39 @@ data class StanceFieldView(
 )
 
 /**
+ * One memory record as the profile's Memories tree renders it (plan_docs/persona-memory.md §2.12):
+ * the prose, its provenance (`owner` rows are permanently out of the pass's reach; `scribe` rows
+ * are what the weekly consolidation wrote), the ANTECEDENT's prose when this record extends one
+ * ([parentBody], empty at top level — the `data-memory-parent` hook's value), and the nesting
+ * [depth] the flattened tree renders with.
+ *
+ * A FLAT list of pre-ordered rows rather than a recursive structure, deliberately: JTE renders one
+ * `<li>` per record with every hook on its single opening tag (the probe reads attributes off the
+ * opening tag), and the controller's DFS owns the ordering — children directly beneath their
+ * antecedent. There is no count, no age, no "recalled N times" here and there must never be: a
+ * magnitude on what a member remembers is comparable, therefore rankable (V28 header).
+ */
+data class MemoryRecordView(
+    val id: String,
+    val body: String,
+    val source: String,
+    val parentBody: String,
+    val depth: Int,
+) {
+    /** The visible provenance label, decided here so the template carries no conditional (the
+     *  [InterestTagView.tagClass] pattern — JTE expressions with branches are parser territory). */
+    val sourceLabel: String get() =
+        if (source == PersonaMemoryRepository.SOURCE_OWNER) "memory — yours" else "memory — the scribe's"
+}
+
+/** One option of the authoring form's parent picker: `kind='record'` rows ONLY — the root is never
+ *  a parent candidate (§2.2's rule at its picker site; the repository belt backs it up). */
+data class MemoryParentOptionView(
+    val id: String,
+    val body: String,
+)
+
+/**
  * One row of the edit form's "Currently into" fieldset (S4b D11): a `name="interest_<n>"` input, its
  * current value, and the provenance note beside it.
  *
@@ -125,6 +160,10 @@ class PersonaController(
     // The mutable half of a member's character (S4b). Read on both persona GETs and written by the edit
     // form; the drift pass writes the same table from its own service.
     private val interests: PersonaInterestRepository,
+    // The member's private memory tree (persona-memory §2.12). READ here only — the profile renders
+    // it; the write endpoints live on PersonaMemoryController, and the weekly pass writes from its
+    // own service.
+    private val memories: PersonaMemoryRepository,
 ) {
 
     // Re-added for the interest fieldset: a submission abandoned because one phrase is unusable leaves
@@ -145,6 +184,16 @@ class PersonaController(
         // what the room thinks of them — the same asymmetry the generation prompt uses (a persona is
         // never handed the others' opinions of it).
         model.addAttribute("stances", stanceViews(persona.id))
+        // The private memory tree (persona-memory §2.12): root first, records nested by parent. The
+        // root travels as two flat strings (empty = born absent, §2.3) so the template needs no
+        // nullable navigation; the parent picker's candidate list is `kind='record'` only — the
+        // repository's recordsOf can return nothing else, which is the rule's structural half.
+        val records = memories.recordsOf(persona.id)
+        val root = memories.rootOf(persona.id)
+        model.addAttribute("memories", memoryTree(records))
+        model.addAttribute("memoryRootId", root?.id ?: "")
+        model.addAttribute("memoryRootBody", root?.body ?: "")
+        model.addAttribute("memoryParents", records.map { MemoryParentOptionView(it.id, it.body) })
         return "persona"
     }
 
@@ -404,6 +453,35 @@ class PersonaController(
     /** The member's current interests as profile tags, in the repository's stable `ORDER BY interest`. */
     private fun interestTags(personaId: String): List<InterestTagView> =
         interests.of(personaId).map { InterestTagView(it.interest, it.source) }
+
+    /**
+     * Flatten the member's record tree for the template: depth-first, children directly beneath
+     * their antecedent, siblings in the repository's newest-first order. A record whose parent is
+     * not among the loaded records — hand SQL parenting one on the root is the only way to get one
+     * (§2.2) — is rendered TOP-LEVEL rather than dropped: this page is the owner's only full view
+     * of the store, and a row invisible here is a row the owner cannot delete.
+     */
+    private fun memoryTree(records: List<PersonaMemory>): List<MemoryRecordView> {
+        val byId = records.associateBy { it.id }
+        val byParent = records.groupBy { record ->
+            record.parentId?.takeIf { it in byId }
+        }
+        val out = mutableListOf<MemoryRecordView>()
+        fun walk(parent: PersonaMemory?, depth: Int) {
+            byParent[parent?.id].orEmpty().forEach { record ->
+                out += MemoryRecordView(
+                    id = record.id,
+                    body = record.body,
+                    source = record.source,
+                    parentBody = parent?.body.orEmpty(),
+                    depth = depth,
+                )
+                walk(record, depth + 1)
+            }
+        }
+        walk(null, 0)
+        return out
+    }
 
     /**
      * What the edit form says beside a prefilled field. The owner-authored case states the rule that has no

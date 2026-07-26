@@ -117,6 +117,42 @@ aiforum:
     # something. No judgment can raise it — drift is one-for-one — so this is purely how many the OWNER may
     # author. Raising it makes each member broader and each drift less meaningful; it buys no extra calls.
     max-interests: 4
+  # Persona memory (plan_docs/persona-memory.md) — the Memory Scribe: the weekly pass that reads what each
+  # member lived through in the forum and writes at most ONE private prose memory record per member per
+  # run. Records resurface only into that member's OWN generation prompt, only when the conversation in
+  # front of it shares the record's words — memory changes WHAT a member says, never how often it speaks
+  # (it writes zero ambient_run rows and touches no gate, router or rail). Auto-applied with no approval
+  # queue; every write is on /admin/memory with the exchanges it was kept from and a revert button. Its
+  # OWN switch, the fourth: an owner who wants articles, stance drift and interest drift but does NOT want
+  # the members accumulating memories must be able to say exactly that, and kill this one loop alone.
+  # A member's character, its root, and anything you author on the profile are never touched by it.
+  memory:
+    # SCHEDULER master switch ONLY: it gates MemoryScribeSchedulingConfig + MemoryScribeTicker, not the
+    # /admin/memory "Run a consolidation pass" button, which always works (manual-trigger-first — and it
+    # has to, since the scheduler is @Profile("!test") and the button is the only way the acceptance suite
+    # can reach this slice). Off by default so unattended LLM spend stays opt-in. Costs one judgment per
+    # member the pass actually judges and nothing else — retrieval and injection never make an LLM call.
+    enabled: false
+    # When the scheduler runs, once enabled. WEEKLY, Sunday 05:00 — third in the Sunday queue (04:00
+    # stances, 04:30 interest drift, 05:00 scribe), so the paid passes never share the SQLite file or the
+    # provider rate-limit window. Weekly because memory is consolidation, not commentary — a store that
+    # grows nightly is a transcript wearing a new table name.
+    cron: "0 0 5 * * SUN"
+    # Per-run member budget. 0 (the default) = UNLIMITED — a knowable worst case, not a shrug: the ceiling
+    # is the roster (seven members, one call each, no fan-out), and three free skips fire before any spend
+    # (nothing new lived through, below the engagement floor, at the 24-record capacity). Clamped at the
+    # use site like every other tunable here.
+    max-personas-per-run: 0
+    # How much forum experience a member must have accumulated since the pass last LOOKED before another
+    # judgment is worth buying. 3 — S4b's arithmetic with the same denominator: the ambient loop produces
+    # roughly one engagement per member per day, so three is about three days of one member's attention.
+    # One exchange is not a memory. Clamped maxOf(1, …) at the use site.
+    min-engagements: 3
+    # The evidence horizon in DAYS: a member never consolidates evidence older than this, whatever its
+    # window state — the hard bound that keeps a never-judged member from forcing an all-time history read
+    # (the dead-coarseFloor defect the two prior passes shipped, killed here by construction). Honest for
+    # memory: you don't remember what happened before you started remembering. Clamped maxOf(1, …).
+    max-lookback-days: 90
   # Shortcut ticketing integration (https://shortcut.com) — READ-ONLY. Off by default; the forum behaves
   # exactly as before until you enable it. When on, three surfaces light up: a right-rail "Shortcut" box
   # (the default-query feed) on the home + thread pages, a browsable /shortcut page with a source switcher

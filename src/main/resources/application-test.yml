@@ -34,6 +34,16 @@ aiforum:
   # (/__diag interestDriftEnabled=false).
   interest-drift:
     enabled: false
+  # Persona memory OFF under test, for the fourth time and the same reason (plan_docs/persona-memory.md
+  # §2.13): it is the fourth thing in this app that spends LLM calls on a schedule, and the one that
+  # writes into every member's private store, so its scheduler must be unable to fire during a run.
+  # Redundant with the shipped default, and stated anyway — a rail asserts a value, and a value that
+  # exists only as a Kotlin default is one refactor away from silently becoming true. The
+  # /admin/memory/run trigger still works (acceptance drives it over HTTP — it is the only route into
+  # this slice, since the scheduler pair is @Profile("!test")); the config_guardrails rail asserts this
+  # from the outside (/__diag memoryEnabled=false).
+  memory:
+    enabled: false
   images:
     # Image blobs go under build/ (like the test DB), asserted by ProfileGuard so a test run never writes
     # into the real ~/.ai_forum image store.

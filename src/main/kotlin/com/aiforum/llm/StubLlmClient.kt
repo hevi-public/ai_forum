@@ -3,6 +3,7 @@ package com.aiforum.llm
 import com.aiforum.dto.ReasoningLeak
 import com.aiforum.persona.InterestDrift
 import com.aiforum.persona.InterestDriftPrompts
+import com.aiforum.persona.MemoryScribePrompts
 import com.aiforum.persona.StanceJudgePrompts
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -46,6 +47,7 @@ class StubLlmClient(
         if (request.persona.id == "dispatcher") return route(request)
         if (request.persona.id == StanceJudgePrompts.JUDGE_ID) return judgeStance(request)
         if (request.persona.id == InterestDriftPrompts.JUDGE_ID) return judgeInterest(request)
+        if (request.persona.id == MemoryScribePrompts.SCRIBE_ID) return judgeMemory(request)
 
         val target = targetBody(request.context)
         trigger(target)?.let { return applyTrigger(it, request, cancellation) }
@@ -118,6 +120,27 @@ class StubLlmClient(
         val drop = open[Math.floorMod(seed, open.size)]
         val take = fresh[Math.floorMod(seed, fresh.size)]
         return LlmResponse("DROP: $drop\nTAKE: $take")
+    }
+
+    /**
+     * The memory-scribe path (plan_docs/persona-memory.md §2.13): answer with a `REMEMBER:` line
+     * [com.aiforum.persona.ScribeAnswer] accepts. Exists for [judgeStance]'s reason, two slices on:
+     * without it a judgment falls through to [cannedReply] and comes back as a multi-paragraph forum
+     * essay, which the parse refuses — nothing is corrupted, but every scribe pass in a stub demo
+     * silently does nothing and the feature looks broken in the one mode somebody is most likely to
+     * try it in.
+     *
+     * The canned bodies are digit-free (rating shapes are refused at the parse, and skipping digits
+     * wholesale is the cheapest way for a stub to model an OBEDIENT backend), free of the `vote`
+     * substring (a scribe body lands in `persona_memory` and is injected into that member's next
+     * generation prompt, where the firewall scans exactly that substring), and fixed points of
+     * `MemoryText.clean` (single-line, single-spaced, trimmed) so the parse never refuses a stub
+     * answer as un-cleaned. No `EXTENDS` line: top-level attachment is always legal, while a guessed
+     * letter against an unseen list would model a disobedient model on every second draw.
+     */
+    private fun judgeMemory(request: LlmRequest): LlmResponse {
+        val seed = abs(targetBody(request.context).hashCode())
+        return LlmResponse("REMEMBER: " + MEMORIES[(seed + calls.getAndIncrement()) % MEMORIES.size])
     }
 
     private fun applyTrigger(trigger: String, request: LlmRequest, cancellation: CancellationToken): LlmResponse {
@@ -230,6 +253,22 @@ class StubLlmClient(
          * over several edges reads as a room whose relationships moved, rather than one sentence
          * pasted seven times.
          */
+        /**
+         * Canned memory records for the scribe path — one sentence of first-person experiential
+         * prose each, digit-free, `vote`-free (rules out *devoted*, *pivoted*, *voting* — these
+         * bodies reach generation prompts the firewall scans), and already in `MemoryText.clean`'s
+         * fixed-point form. Varied so a demo run over the roster reads as a room that lived through
+         * different weeks rather than one sentence pasted seven times.
+         */
+        private val MEMORIES = listOf(
+            "Watched a benchmark argument collapse the moment someone posted real measurements",
+            "Learned that the quiet threads are where the actual decisions get made here",
+            "Spent a week defending an unpopular position and ended up half-convinced myself",
+            "Noticed that every scheduler debate in this room eventually turns into a naming debate",
+            "Came away from that migration thread trusting boring rollouts more than clever ones",
+            "Realised nobody in the room reads the linked article before the third reply",
+        )
+
         private val STANCES = listOf(
             "has started treating their posts as claims to be checked rather than news to read",
             "warmed to them after that exchange, and would rather not admit it",
