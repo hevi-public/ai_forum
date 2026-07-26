@@ -54,7 +54,7 @@ class MigrationPipelineTest {
             }
         }
 
-        // 3. Upgrade the EXISTING db to the latest schema (Flyway applies the pending V4–V27).
+        // 3. Upgrade the EXISTING db to the latest schema (Flyway applies the pending V4–V28).
         flyway(url, null).migrate()
 
         // 4. The old rows survived, and the new columns carry their migration default / backfill.
@@ -127,7 +127,20 @@ class MigrationPipelineTest {
                     )
                 }
 
-                // flyway_schema_history records the full V1..V27 chain as applied (V20 thread.author_id +
+                // V28's nullable ALTER, same argument one slice on: NULL means "the memory scribe has
+                // never looked at this member" — bounded by the 90-day evidence horizon rather than an
+                // all-time read (plan_docs/persona-memory.md §2.6). A NOT NULL DEFAULT here would have
+                // declared every pre-existing member freshly consolidated at upgrade time and muted the
+                // pass for them until brand-new engagement arrived.
+                st.executeQuery("SELECT memory_judged_at FROM persona WHERE id = 'Ada'").use { rs ->
+                    rs.next()
+                    assertEquals(
+                        null, rs.getString("memory_judged_at"),
+                        "V28's nullable column reads NULL for the pre-existing persona",
+                    )
+                }
+
+                // flyway_schema_history records the full V1..V28 chain as applied (V20 thread.author_id +
                 // V21 ambient_run landed with the ambient loop; V22 added ambient_run.action for S2's
                 // comment action; V23 added the article_seen dedupe registry for S5's feed source,
                 // plan_docs/ambient-slice-5.md; V24 added persona_stance, S3's qualitative relation graph,
@@ -140,11 +153,15 @@ class MigrationPipelineTest {
                 // persona.interests_judged_at — S4b's mutable interests with per-interest provenance, their
                 // append-only audit trail, and the per-member last-judged watermark, which V26's lesson made
                 // part of the first commit here rather than a post-review fix,
-                // plan_docs/ambient-slice-4b.md). Bump this with every migration — it is the check
-                // that a new migration actually RUNS against an old database rather than only a fresh one.
+                // plan_docs/ambient-slice-4b.md; V28 added persona_memory (the private per-member memory
+                // tree with its composite same-persona parent FK and owner-only root), memory_change (the
+                // append-only audit trail carrying the pre-query read_at) and persona.memory_judged_at —
+                // the per-member consolidation watermark, plan_docs/persona-memory.md). Bump this with
+                // every migration — it is the check that a new migration actually RUNS against an old
+                // database rather than only a fresh one.
                 st.executeQuery("SELECT MAX(CAST(version AS INTEGER)) AS v FROM flyway_schema_history").use { rs ->
                     rs.next()
-                    assertEquals(27, rs.getInt("v"), "the latest migration (V27) should be recorded as applied")
+                    assertEquals(28, rs.getInt("v"), "the latest migration (V28) should be recorded as applied")
                 }
             }
         }
