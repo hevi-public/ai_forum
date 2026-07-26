@@ -6,7 +6,11 @@
     <div class="admin" data-admin-page>
         <h1 class="admin__title">Admin · statistics</h1>
         <p class="admin__lede">A read-only snapshot of the forum. Each figure links to the items behind it.</p>
-        <p class="admin__links"><a href="/admin/stats" data-admin-link="routing-stats">Routing health →</a></p>
+        <%-- One link, deliberately NOT a stat tile (plan_docs/ambient-slice-4b.md D9): a
+             data-stat="interest-changes" count would be four more files for a number nobody acts on, and
+             once the ungrouped total exists the same COUNT grouped by member is one line away — which is a
+             drift-frequency score wearing an auditor's badge. The interest log is read, never reduced. --%>
+        <p class="admin__links"><a href="/admin/stats" data-admin-link="routing-stats">Routing health →</a> <a href="/admin/interests" data-admin-link="interest-drift">Interest drift →</a></p>
 
         <section class="admin__section">
             <h2 class="admin__section-title">Overview</h2>

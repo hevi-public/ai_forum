@@ -72,6 +72,18 @@ class CommonSteps(
     @Given("the LLM will respond with the markdown:")
     fun llmWillRespondMarkdown(markdown: String) = llm.enqueue(Behavior.Respond(markdown))
 
+    /**
+     * Docstring variant for an answer whose SHAPE is multi-line. S4b's interest judgment is a
+     * `DROP:`/`TAKE:` pair on two lines, and a one-line `{string}` cannot carry the newline that
+     * separates them: Gherkin does not interpret `\n` inside a quoted string, so the enqueued text
+     * would hold a literal backslash-n and the parse would refuse an answer the model got right.
+     *
+     * Distinct from the markdown variant above only in what it says it is for — a reply body versus a
+     * structured answer — so a reader of either feature knows which shape is being scripted.
+     */
+    @Given("the LLM will respond with the answer:")
+    fun llmWillRespondAnswer(answer: String) = llm.enqueue(Behavior.Respond(answer))
+
     @Given("the next save will fail")
     fun nextSaveWillFail() {
         failingRepo.failNextWrite = true

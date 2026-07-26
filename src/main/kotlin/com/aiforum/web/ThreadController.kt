@@ -173,6 +173,22 @@ class ThreadController(
         attachmentRepo.forThread(threadId).map(AttachmentView::of)
 
     private fun renderThread(id: String, title: String, body: String, edited: Boolean, author: String?, model: Model): String {
+        // IN-FLIGHT FIRST, THEN THE DB — and the order is the whole point, not tidiness.
+        //
+        // These are two reads at two instants, and a settling node crosses between them: the worker
+        // persists the row and then evicts the registry entry. Read the DB first and a node that
+        // persists AND is evicted in the gap between the two reads appears in NEITHER — it is missing
+        // from the page altogether, neither drafting nor posted, as though the persona never spoke.
+        // Read the registry first and the same node appears in BOTH, which the dedupe below already
+        // handles: the settled row wins and the stale draft view is dropped.
+        //
+        // This is the ambient fan-out flake (how-we-work/context.md): a fast persona's node vanished
+        // from a room the poller then judged quiescent, so the count assertion read a room with a
+        // member missing. It failed roughly one run in four, only under a full suite, and survived a
+        // 4x settle-deadline raise — because no deadline can wait for a node that is not going to
+        // appear. A UI reader would have seen the same thing: a reply that generated fine, silently
+        // absent until the next page load.
+        val inFlight = generation.inFlightViews(id)
         val all = comments.threadComments(id)
         model.addAttribute("threadId", id)
         model.addAttribute("title", title)
@@ -194,7 +210,7 @@ class ThreadController(
         // self-polls /replies/{id} and settles in place. Dedupe by id against the DB tree to avoid a double
         // render in the brief window after a draft's settle-write but before it's evicted from in-flight.
         val rendered = collectIds(tree)
-        val drafting = generation.inFlightViews(id).filter { it.id !in rendered }
+        val drafting = inFlight.filter { it.id !in rendered }
         model.addAttribute("replies", tree + drafting)
         // A create-time summon routes (the dispatcher's "who replies" LLM call) on a worker, so right
         // after the create redirect there may be no drafts yet. While that routing is in flight, the page

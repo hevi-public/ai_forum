@@ -52,7 +52,12 @@ class DatabaseResetHooks(
         // failing somewhere far from here instead of on this line.
         // stance_change (V25) is the same story one slice on — both of its endpoint columns CASCADE from
         // persona(id) — so it precedes persona too, and the wipe stays explicit for the reason just given.
-        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "stance_change", "persona_stance", "persona").forEach {
+        // persona_interest + interest_change (V27) are the S4b pair of the same shape — one CASCADEing FK to
+        // persona(id) each — so both precede persona, and both are wiped explicitly on the same argument: a
+        // scenario that seeds an interest and one that leans on a cascade are indistinguishable from here,
+        // and the day someone drops a CASCADE the resets should fail on this line rather than somewhere far
+        // from it. (`persona.interests_judged_at` needs no wiping — it goes with the persona row.)
+        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "stance_change", "persona_stance", "interest_change", "persona_interest", "persona").forEach {
             jdbc.update("DELETE FROM $it")
         }
     }

@@ -1,6 +1,8 @@
 package com.aiforum.llm
 
 import com.aiforum.dto.ReasoningLeak
+import com.aiforum.persona.InterestDrift
+import com.aiforum.persona.InterestDriftPrompts
 import com.aiforum.persona.StanceJudgePrompts
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -43,6 +45,7 @@ class StubLlmClient(
     override fun generate(request: LlmRequest, cancellation: CancellationToken): LlmResponse {
         if (request.persona.id == "dispatcher") return route(request)
         if (request.persona.id == StanceJudgePrompts.JUDGE_ID) return judgeStance(request)
+        if (request.persona.id == InterestDriftPrompts.JUDGE_ID) return judgeInterest(request)
 
         val target = targetBody(request.context)
         trigger(target)?.let { return applyTrigger(it, request, cancellation) }
@@ -74,6 +77,47 @@ class StubLlmClient(
     private fun judgeStance(request: LlmRequest): LlmResponse {
         val seed = abs(targetBody(request.context).hashCode())
         return LlmResponse(STANCES[(seed + calls.getAndIncrement()) % STANCES.size])
+    }
+
+    /**
+     * The interest-drift judgment path (S4b, `plan_docs/ambient-slice-4b.md` D5): answer with a
+     * `DROP:`/`TAKE:` pair [com.aiforum.persona.InterestDrift] accepts, or the settled sentinel.
+     *
+     * Exists for [judgeStance]'s reason, one slice on: without it a judgment falls through to
+     * [cannedReply] and comes back as a multi-paragraph forum essay, which the parse refuses as "not a
+     * set-down-and-take-up pair" — nothing is corrupted, but every drift pass in a stub demo silently does
+     * nothing and the feature looks broken in the one mode somebody is most likely to try it in.
+     *
+     * **The DROP is read back out of the instruction rather than invented.** The parse refuses a phrase
+     * the member does not hold, so a stub that made one up would model a *disobedient* model and every
+     * stub run would be a rejection — the same failure the branch exists to prevent, one refusal reason
+     * over. Same for the TAKE: candidates already named anywhere in the prompt are filtered out, because
+     * re-taking a phrase the member holds is refused as a degenerate swap (I3), and the pinned line is
+     * part of that prompt so a pinned phrase can never be reached for either.
+     *
+     * The one coupling this buys is to [InterestDriftPrompts.instruction]'s wording. It degrades safely:
+     * a reworded open-interests line (or a phrase containing the `", "` the line joins on) simply yields
+     * no parseable candidates and the answer becomes NONE — a settled member rather than a corrupt swap.
+     * Deliberately digit-free for the reason [judgeStance] states, and free of the `vote` substring
+     * because these phrases are one owner edit away from a generation prompt.
+     */
+    private fun judgeInterest(request: LlmRequest): LlmResponse {
+        val instruction = targetBody(request.context)
+        val openLine = OPEN_INTERESTS.find(instruction)?.groupValues?.get(1).orEmpty()
+        val open = openLine.split(", ").map { it.trim() }.filter { it.isNotEmpty() && it != NO_INTERESTS }
+        // Nothing droppable found: the member is either unjudgeable or the prompt shape moved under us.
+        // Either way "nothing moved" is the honest answer and the only one that cannot corrupt a row.
+        if (open.isEmpty()) return LlmResponse(InterestDrift.NOTHING_MOVED)
+        val fresh = TAKE_UPS.filterNot { instruction.contains(it, ignoreCase = true) }
+        if (fresh.isEmpty()) return LlmResponse(InterestDrift.NOTHING_MOVED)
+        // The same hash + round-robin tiebreak the other canned paths use, so a demo run over several
+        // members reads as a room that moved rather than one swap pasted seven times. `floorMod` rather
+        // than `abs(...) % size`: `abs(Int.MIN_VALUE)` is still negative, and this index is the one place
+        // in the branch that would turn a hash collision into a thrown exception instead of a judgment.
+        val seed = instruction.hashCode() + calls.getAndIncrement()
+        val drop = open[Math.floorMod(seed, open.size)]
+        val take = fresh[Math.floorMod(seed, fresh.size)]
+        return LlmResponse("DROP: $drop\nTAKE: $take")
     }
 
     private fun applyTrigger(trigger: String, request: LlmRequest, cancellation: CancellationToken): LlmResponse {
@@ -143,6 +187,38 @@ class StubLlmClient(
 
         private fun trigger(body: String): String? =
             Regex("""\[stub:([a-z]+)]""").find(body)?.groupValues?.get(1)
+
+        /**
+         * Pulls the droppable phrases out of the rendered judging prompt — the line
+         * [InterestDriftPrompts.instruction] writes as `Interests that are open to change: a, b`. Matched
+         * loosely (a prefix, not the whole line) so a wording tweak on either side of the colon does not
+         * silently take the stub back to canned essays; a change to the LABEL itself is what degrades this
+         * to NONE, which is the safe direction.
+         */
+        // No trailing `$`: `.` never matches a newline, so `(.+)` already stops at the end of the line.
+        private val OPEN_INTERESTS = Regex("""^Interests that are open to change: *(.+)""", RegexOption.MULTILINE)
+
+        /** What [InterestDriftPrompts] renders for a member holding none — never a droppable phrase. */
+        private const val NO_INTERESTS = "(none)"
+
+        /**
+         * Canned interests for the drift path — short prose in a member's own voice, carrying no digit
+         * (the parse refuses one) and no `vote` substring, which also rules out *devoted*, *pivoted* and
+         * *voting*: a taken-up phrase lands in `persona_interest` and is injected into that member's next
+         * generation prompt, where `OwnerControlSteps.noVoteSignal` scans for exactly that substring.
+         *
+         * Kept broad and non-overlapping with the seeded phrases in `application.yml` so a stub demo run
+         * over the whole roster has something to take up for everyone — a candidate already named anywhere
+         * in the prompt is filtered out, because taking up a phrase the member holds is a refused swap.
+         */
+        private val TAKE_UPS = listOf(
+            "kernel scheduling",
+            "release engineering",
+            "the cost of a bad abstraction",
+            "what nobody benchmarks",
+            "how teams decide things",
+            "reading other people's code",
+        )
 
         // Varied GFM so the rendering pipeline (headings, fences + highlighting, tables, task lists,
         // links, blockquotes) all get exercised by simply talking to the forum. Paragraphs are single

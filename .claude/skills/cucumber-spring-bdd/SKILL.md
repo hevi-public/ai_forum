@@ -127,6 +127,55 @@ Wrap raw HTTP calls in the small `support/HttpClient.kt` (a `RestClient` wrapper
 random port lazily) so a future Playwright swap touches one file — never inject a raw HTTP client
 into step classes directly.
 
+### Cucumber matches on step TEXT — the Given/When/Then keyword is decoration
+
+The runner resolves a step purely by its text against every `@Given`/`@When`/`@Then` in the glue. So
+
+```gherkin
+Given the persona "Sol" has abilities "databases, storage"
+```
+
+silently invokes `@Then fun personaHasAbilities(...)` — an **assertion** — and arranges nothing. It does
+not error and does not warn; it asserts against a fixture nobody set up and passes by accident whenever
+the default happens to match. This shipped once (S4b) and was caught only by reading a failure.
+
+The rule: **authoring steps and asserting steps need distinct wording, not distinct keywords.** When a
+scenario needs both halves of the same fact, add `the persona {string} was authored with abilities
+{string}` beside the existing assertion and let each do one job.
+
+### Multi-line scripted answers are docstrings, never `{string}`
+
+Gherkin does **not** interpret escapes inside a quoted `{string}`: `"DROP: x\nTAKE: y"` enqueues a
+literal backslash-n, and a parser expecting two lines then refuses an answer the model got right. Any
+scripted output whose *shape* is multi-line goes in a docstring behind a purpose-named step:
+
+```gherkin
+    And the LLM will respond with the answer:
+      """
+      DROP: typography
+      TAKE: kernel scheduling
+      """
+```
+
+Keep one variant per *kind* of scripted output (`… with the markdown:` for a reply body, `… with the
+answer:` for a structured judgment). The step name is what tells the next reader which shape is being
+scripted.
+
+### Build a persona URL from its SLUG, never its name
+
+`/personas/{slug}` is a slug route (V5). Two long-lived step definitions fetched `/personas/<raw name>`
+and were never wrong because every caller until S4b used a lowercase single-word name where slug and
+name coincide. The first capitalised name 404'd — and the assertion then failed against an **empty body**
+complaining about a missing `data-*` attribute rather than about a missing page, which is the worst kind
+of red. Slugify at the source: `http.get("/personas/${PersonaRepository.slugFor(name)}")`.
+
+### A step that constructs a URL is not exercising the control it names
+
+S4b's revert step read a change id off the row's `data-*` hook and then built
+`POST /admin/interests/{id}/revert` by hand, while its KDoc claimed it would fail if the template
+stopped rendering the revert form. Deleting the form left it green. If the point of a step is that the
+owner's control exists, read the rendered `action`/`href` and submit that.
+
 ## Per-scenario state: @ScenarioScope, never step fields
 
 The trap is storing scenario state (ids, last response, the programmed fake) as fields on a step
@@ -178,7 +227,7 @@ actual datasource + recursive-CTE wiring — see [[sqlite-spring-jdbc]].
 
 ## The Tier-1 LlmClient seam and its test double
 
-The IO port for generation — one of **four** sibling ports faked the same way in
+The IO port for generation — one of **five** sibling ports faked the same way in
 `acceptance/config/TestBeans.kt` (`ScriptableLlmClient`, `ScriptableImageDescriber`,
 `ScriptableShortcutClient`, `ScriptableGitHubClient`; see [[bdd-tiered-testing]] for the port
 doctrine). The production impl wraps `claude -p` via `ProcessBuilder`; under

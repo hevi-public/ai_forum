@@ -130,7 +130,11 @@ class PersonaSteps(
 
     @Then("the persona {string} has abilities {string}")
     fun personaHasAbilities(name: String, abilities: String) {
-        val body = http.get("/personas/$name").body ?: ""
+        // Slugified, not the raw name: profile URLs are the SLUG (V5), and every caller until now
+        // happened to use an all-lowercase single-word name where the two coincide. A capitalised name
+        // 404s, and the assertion then fails against an empty body with a message about a missing
+        // attribute rather than a missing page.
+        val body = http.get("/personas/${PersonaRepository.slugFor(name)}").body ?: ""
         assertTrue(
             Html.hasAttr(body, "data-persona-abilities", abilities),
             "expected data-persona-abilities=\"$abilities\" in:\n$body",
@@ -139,7 +143,8 @@ class PersonaSteps(
 
     @Then("the persona {string} has system prompt {string}")
     fun personaHasSystemPrompt(name: String, prompt: String) {
-        val body = http.get("/personas/$name").body ?: ""
+        // Slugified for the reason given on [personaHasAbilities].
+        val body = http.get("/personas/${PersonaRepository.slugFor(name)}").body ?: ""
         assertTrue(
             Html.hasAttr(body, "data-system-prompt", prompt),
             "expected data-system-prompt=\"$prompt\" in:\n$body",

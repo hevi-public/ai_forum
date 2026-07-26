@@ -1,9 +1,11 @@
+@import com.aiforum.web.InterestFieldView
 @import com.aiforum.web.PersonaView
 @import com.aiforum.web.StanceFieldView
 @import com.aiforum.persona.Dials
 @param persona: PersonaView
 @param dialKeys: List<String>
 @param stanceFields: List<StanceFieldView>
+@param interestFields: List<InterestFieldView>
 
 @template.layout(title = "Edit " + persona.name + " · AI Forum", activeNav = "members", content = @`
     <div data-page="edit-persona">
@@ -16,6 +18,26 @@
             <input class="new-persona__abilities" type="text" name="abilities"
                    value="${persona.abilities.joinToString(", ")}"
                    placeholder="Abilities — comma-separated (e.g. kotlin, systems)">
+            <%-- Currently into (S4b, plan_docs/ambient-slice-4b.md D11): one field per phrase the member
+                 holds, plus one blank to add with. This fieldset IS the member's interest list — a phrase
+                 you blank is retracted, and a phrase you type is stamped as YOURS, which the weekly drift
+                 pass then skips for good. There is deliberately no unpin control: the documented way back
+                 is to blank the field, which deletes the row.
+                 Like the stance fields these do NOT flag the prompt stale. An interest is injected at
+                 generation time and never enters the composed prompt (D7), so editing one must never gate
+                 Save behind a paid Regenerate — which is also why persona-form-core needs no change here:
+                 it classifies an unrecognised field name as inert, which is the correct answer. --%>
+            <fieldset class="new-persona__interests" data-interests>
+                <legend>Currently into</legend>
+                @for(field in interestFields)
+                    <label class="interest-field">
+                        <input type="text" name="${field.name}" data-interest-field="${field.name}"
+                               value="${field.value}"
+                               placeholder="A short phrase — what this member keeps coming back to">
+                        <span class="interest-field__note">${field.note}</span>
+                    </label>
+                @endfor
+            </fieldset>
             <fieldset class="new-persona__dials" data-dials>
                 <legend>Dials</legend>
                 @for(key in dialKeys)

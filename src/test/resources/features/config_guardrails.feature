@@ -39,3 +39,13 @@ Feature: Config guardrails
     When the test diagnostics are read
     Then stance evolution is disabled
     And the stance evolution edge cap is unlimited by default
+
+  # The THIRD scheduled job in this app that spends LLM calls (plan_docs/ambient-slice-4b.md D8), and the
+  # one with the largest blast radius on the room's character — so it gets the same rail the other two
+  # have, on its own switch. The member cap is asserted beside the switch for the same subtler reason: it
+  # can only be read at all if the properties bean was bound from a non-profiled @Configuration, which is
+  # what keeps this rail readable under a profile where the scheduler itself can never wire.
+  Scenario: The test profile gates the interest drift pass off
+    When the test diagnostics are read
+    Then interest drift is disabled
+    And the interest drift member cap is unlimited by default

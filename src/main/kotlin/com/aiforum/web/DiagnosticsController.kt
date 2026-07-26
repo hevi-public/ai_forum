@@ -2,6 +2,7 @@ package com.aiforum.web
 
 import com.aiforum.ambient.AmbientFeedProperties
 import com.aiforum.ambient.ArticleSource
+import com.aiforum.config.InterestDriftProperties
 import com.aiforum.config.StanceEvolutionProperties
 import org.springframework.context.annotation.Profile
 import org.springframework.core.env.Environment
@@ -27,6 +28,10 @@ class DiagnosticsController(
     // @Configuration (StanceEvolutionConfig) for the same reason as the feed properties above — the
     // scheduler itself can never wire under test, so the rail has to read the CONFIG, not the ticker.
     private val stanceEvolution: StanceEvolutionProperties,
+    // S4b (plan_docs/ambient-slice-4b.md D15): the interest-drift knobs, bound from a NON-profiled
+    // @Configuration (InterestDriftConfig) for the third time and the same reason — under `test` the
+    // scheduler pair can never wire, so this bean is the only thing left to assert against.
+    private val interestDrift: InterestDriftProperties,
 ) {
 
     @GetMapping("/__diag")
@@ -62,6 +67,15 @@ class DiagnosticsController(
         // exposing it here is what keeps `cron` a documented, inspectable setting rather than a string
         // that exists twice with nothing comparing the copies.
         "stanceEvolutionCron" to stanceEvolution.cron,
+        // S4b: the THIRD unattended spender, and the one with the largest blast radius on the room's
+        // character — it is the only loop that can change what a member is *into*. Same three-key shape as
+        // the pair above, and read off the bound bean for the same two reasons: it is the key the ticker's
+        // @ConditionalOnProperty resolves, and injecting the bean at all is what proves InterestDriftConfig
+        // stayed un-profiled. A drift toward a live, paid pass running inside the suite fails a scenario
+        // rather than showing up on a bill.
+        "interestDriftEnabled" to interestDrift.enabled,
+        "interestDriftMaxPersonasPerRun" to interestDrift.maxPersonasPerRun,
+        "interestDriftCron" to interestDrift.cron,
         "activeProfiles" to env.activeProfiles.toList(),
     )
 }

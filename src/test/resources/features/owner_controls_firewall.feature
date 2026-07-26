@@ -32,3 +32,18 @@ Feature: Owner controls — the +1 firewall
     And the owner summons "vex"
     Then the model's system prompt carried the stance "needles him about hype"
     And the model's context contained no vote signal
+
+  # Same boundary, one slice on: a DRIFTED interest (S4b) is the other thing deliberately inside the
+  # context the +1 is kept out of — and it arrives without anyone composing a prompt, since interests are
+  # injected at generation time rather than baked in. The summon is deliberately the LAST call in this
+  # scenario: `the model's context contained no vote signal` reads the spy's most recent call, so a drift
+  # pass running after it would put the JUDGE's prompt under the firewall assertion instead of the
+  # generation prompt, and the scenario would pass while proving the wrong thing.
+  Scenario: A drifted interest is injected into the very context the +1 is kept out of
+    Given a posted reply from "sol" saying "Preemption cost decides this"
+    And persona "sol" is into "kernel scheduling"
+    And the LLM will respond with "The wake-up path is the whole story."
+    When the owner gives a +1 to "sol"'s reply
+    And the owner summons "sol"
+    Then "sol"'s system prompt carried the interest "kernel scheduling"
+    And the model's context contained no vote signal

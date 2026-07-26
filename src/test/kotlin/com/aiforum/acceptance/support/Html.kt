@@ -214,4 +214,35 @@ object Html {
             .find(html)?.value ?: return null
         return Regex("${Regex.escape(attr)}=\"([^\"]*)\"").find(tag)?.groupValues?.get(1)
     }
+
+    /**
+     * The newest interest-change row as a self-contained block, sliced from its opening `<li>` to the
+     * FIRST `</li>` (the log renders newest-first, so the first match in document order is the latest
+     * drift), or null when the history is empty.
+     *
+     * A block rather than a single attribute for the S4a reason: an audit row is read as a unit — what
+     * was set down, what was taken up, the cited words and the revert control all have to be asserted
+     * against the SAME change, and a page-wide probe would happily satisfy a claim about the newest
+     * drift with an older row's field.
+     */
+    fun latestInterestChangeRow(html: String): String? = liBlock(html, "data-interest-change")
+
+    /**
+     * The room-map row for one interest phrase, sliced the same way. The map's subject is a PHRASE and
+     * the members holding it, so the row is keyed on the phrase rather than on a member.
+     */
+    fun roomMapRow(html: String, interest: String): String? =
+        liBlock(html, "data-room-topic=\"${Regex.escape(interest)}\"")
+
+    /** The visible text of a fragment: tags stripped, entities left alone, whitespace collapsed. */
+    fun textOf(html: String): String =
+        html.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()
+
+    /** The `<li>` block whose opening tag matches [hookPattern], opening tag through first `</li>`. */
+    private fun liBlock(html: String, hookPattern: String): String? {
+        val open = Regex("<li\\b[^>]*$hookPattern[^>]*>").find(html) ?: return null
+        val close = html.indexOf("</li>", open.range.last + 1)
+        if (close < 0) return null
+        return html.substring(open.range.first, close + "</li>".length)
+    }
 }

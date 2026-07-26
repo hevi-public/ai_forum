@@ -3,7 +3,7 @@
 > **Contract:** this file is the on-repo copy of cross-session memory. Any session (or human) that
 > learns something durable — a convention, a gotcha, a feature landing — updates **this file**, not
 > just private session memory. Private memory may cache it; this file is the record a second human
-> can read. Convert relative dates to absolute. Last full sync: **2026-07-19**.
+> can read. Convert relative dates to absolute. Last full sync: **2026-07-26**.
 
 ## What this project is
 
@@ -245,12 +245,123 @@ Five things worth knowing before touching it:
   run costs one judgment per qualifying pair **plus** one compose per affected persona — the scheduler
   defaulting off is what keeps unattended spend opt-in. Suite 200 → 213 scenarios.
 
+**2026-07-26 (Ambient Slice 4b, V27):** what a member is *into* now moves
+(`plan_docs/ambient-slice-4b.md`). Each member holds up to four **mutable interests** — short prose
+phrases in `persona_interest` (V27), each carrying its own `seeded|owner|drifted` provenance — and a
+weekly pass reads what that member actually wrote (`CommentRepository.exchangesSince`, reused verbatim,
+zero new repository reads), asks the model whether it has moved on from one open interest toward
+something else, and **swaps one for one**. Every swap is audited in `interest_change` with the dropped
+phrase, its **old provenance**, and the cited engagements snapshotted as prose; the owner reads them at
+**`/admin/interests`**, reverts what they disagree with, and sees a room map beside the log. Own prefix,
+own gated scheduler pair (`aiforum.interest-drift.enabled`, **default off**, Sun 04:30), ungated
+`POST /admin/interests/drift` — the only way the acceptance suite can reach the slice.
+
+Seven things worth knowing before touching it:
+
+- **Interests deliberately do NOT feed `AmbientGate.relevance`** — the rejection that shaped the slice.
+  That gate *counts* ability-tag hits, multiplies by talkativeness and argmaxes across the roster, so a
+  model writing tags there writes its own airtime: the cut reward economy with no column named *score*.
+  `AmbientGate`, `AmbientTickService` and `PersonaRouter.rosterLine` are untouched. Drift changes **what**
+  a member says, never how often it gets to say it.
+- **There is no `core` column, and that is a decision.** The immutable core is `descriptor` +
+  `abilities` + `dials` + whichever interests the owner pinned; per-interest `owner` provenance is what
+  makes it **per-persona** (requirements §6.2). Enforced four ways: the pass holds no write path to
+  `PersonaRepository.update` (a Tier-2 fake **fails the test if `update` is called at all**), `owner`
+  rows are skipped before any spend, two *separately named* parse refusals, and a stated prompt frame.
+- **The no-numbers guardrail is now in the DATABASE, and the scoping is the interesting half.**
+  `CHECK (source = 'owner' OR interest NOT GLOB '*[0-9]*')` binds the rows the *pass* writes and lets the
+  owner type "web3". Unscoped it would throw inside `PersonaController.edit`, where interest writes run
+  **before** the prompt logic — so a refused phrase would abort the save and cost the owner their
+  descriptor and dial edits. Note what shipped: the parse and the owner path agree with the CHECK by
+  sharing `Interests`' two **constants**, not by calling one validator; the design said otherwise.
+- **The window is `persona.interests_judged_at`, stamped on `Drifted` AND `Unchanged`, never on a
+  refusal or a seam failure.** S4a's cost defect avoided from day one: the judge is *told* to answer
+  `NONE` when nothing moved, so `NONE` is the steady state of a settled member and writes no audit row.
+  `PersonaRepository` never learns the column exists; `markJudged(id, at)` takes `at` from the instant
+  the evidence was **read**, and `markJudged(…, null)` clears, which is what lets a revert reopen it.
+- **Generation-time injection only; a drift buys no recompose** — deliberately the opposite of S4a.
+  `InterestProse.block` is appended in `GenerationService.withPersonaContext` (renamed from
+  `withStances`) after the stance block and one step **before** `ContextAssembler`, so the vote firewall
+  stays a pure function. The block takes `List<String>` — no provenance — so a model can never learn
+  which of its interests are protected. `ComposerPrompts`, `PersonaSpec`, `inputsChanged` and
+  `persona-form-core.mjs` needed **no change at all**.
+- **Convergence is made visible, never measured.** `TopicSpread` (pure) renders a phrase and the members
+  holding it **by name** — more-than-half is shared, exactly-half is not, exactly-one is sole — with no
+  count keyed to a member, no aggregate on the repository, and no ability to fire anything. Pinned at
+  Tier 0 (structurally, on the instruction's parameter list) and Tier 2 (the judge prompt is
+  byte-identical over a converged and an un-converged roster). It detects **lexical** convergence only.
+- **Five traps this build paid for, all cheap to re-hit:**
+  - **A door normaliser that is not idempotent is a data-corruption bug.** `Interests.clean` strips one
+    matched quote pair; the parse cleans once and `upsert` cleaned again, so a doubly-quoted answer was
+    compared as one phrase and stored as another — missing the already-held and owner-pinned refusals,
+    overwriting the owner's row, and leaving a revert that would delete the owner's own phrase. The rule:
+    the value you hand back must be a fixed point of whatever the door applies.
+  - **Seeding is not idempotent when the key contains the text.** The stance seeder is safe because its
+    key is `(from,to)` and evolution updates in place; the interest key includes the phrase, so a phrase
+    the pass DROPPED is genuinely absent and a per-phrase presence check re-inserts it every boot. The
+    third seed phase is first-seed-only **per member** for that reason.
+  - **`COLLATE NOCASE` folds case and nothing else** — `" agents"` and `"agents"` are two primary keys, a
+    duplicate the DDL cannot see. `upsert`/`delete` clean at the one door every writer comes through.
+  - **Cucumber matches on step TEXT, not on the Given/When/Then keyword.** Two authoring `Given`s
+    resolved to `@Then` assertions and silently asserted against a member nobody had configured.
+    Authoring steps got their own wording (`… was authored with abilities {string}`).
+  - **Profile URLs are the SLUG (V5)**, and **Gherkin does not interpret `\n` inside a quoted string** —
+    a two-line `DROP:`/`TAKE:` answer is a docstring (`the LLM will respond with the answer:`).
+- **Two tests that could not fail were found and replaced** — worth stealing as a review lens. One
+  asserted a string was absent that was never passed in (true against every possible implementation,
+  *including* the future one that grows a roster parameter); it is structural now, pinning
+  `InterestDriftPrompts.instruction`'s parameter list. The other compared `phrasesOf` against the
+  expression `phrasesOf` is defined as. Ask of every new assertion: *what implementation would make this
+  red?*
+
+The judgment is re-read at the judgment site, not from the pass's snapshot (S4a's `df4c183` lesson —
+hence the `no-interests-mid-pass` / `all-owner-authored-mid-pass` skip reasons), candidates are ordered
+oldest-window-first so a cap rotates instead of starving the tail, the four writes are one
+`TransactionTemplate.execute` (injected explicitly — `@Transactional` on a self-invoked private method
+compiles, reads as a guarantee and does nothing), and `StubLlmClient` gained an `__interest_judge__`
+branch so a stub demo does not look broken. Suite 213 → 234 scenarios (19 in the new
+`interest_drift.feature`, one appended to `owner_controls_firewall.feature`, one to
+`config_guardrails.feature`); 71 tier-0/1 tests with V27 and the five pure objects, 12 more for the stub
+branch, and a 19-test Tier-2 orchestration class. The ambient fan-out flake was fixed in this slice too
+— see the read-skew entry below.
+
 ## Open threads / near-term
 
-- **S4b — interest/trait drift**, then **persona memory** (§6.3, revived into the near-term roadmap at
-  the owner's request 2026-07-21; currently has no slice or plan doc). S4b is now the next ambient slice,
-  and it carries the convergence risk S4a deliberately left alone (§11.5's remaining open items: how
-  convergence is measured, and manual newcomer injection as the diversity lever).
+- **What's next, from the record rather than invention.** S4b landed 2026-07-26, so two things are
+  outstanding and **their order is an owner call nothing in the record has made**: (a) **persona memory**
+  (§6.3) — named on 2026-07-21 as what follows S4b, still with **no slice and no plan doc**; (b) **S6,
+  the feed-style front page** — the only slice left on the direction doc's map (§9), whose own open
+  question (§11.6) is unanswered and for which `home_rail` / `empty_and_unread` are already earmarked to
+  be reworked. S4b closed §11.5's two remaining items and left exactly one thing open there,
+  deliberately: whether manual create + the room map discharge the requirements' diversity lever, or the
+  *synthesised, centre-of-mass-aware* newcomer is a slice of its own.
+- **`GenerationController`'s `/room` fragment carries the flake that `ThreadController.renderThread`
+  was fixed for** (2026-07-26): it reads only the in-flight registry, so a summon whose drafts all
+  settle before the first poll reports a quiescent room with none of the settled replies in it. The
+  read-order fix does not generalise to it. Pre-existing, out of scope when found.
+- **S4b follow-ups (none blocking, all verified against the code).**
+  1. **`coarseFloor` is dead under the shipped config.** The floor is the oldest watermark and only when
+     *every* member has one, but a member below the engagement floor is skipped before any judgment and
+     is therefore never stamped — so one permanently quiet member (Dana, `talkativeness: 2`) keeps it
+     `null` for good and every run materialises every persona-to-persona exchange, bodies included. The
+     Tier-2 test that pins the floor pre-stamps both members, a state production never reaches.
+  2. **Revert rolls the window back to `MAX(changed_at)`** — a post-LLM *write* instant — into a column
+     whose contract is the pre-query *read* instant. This is S4a follow-up 2 above, repeated verbatim in
+     a new slice; every fixture clock is fixed, so no test can see it.
+  3. **`aiforum.interest-drift.max-interests` is bound and read by nothing.** The ceiling the owner meets
+     is `PersonaController.MAX_INTERESTS = 4`; changing the yml key changes no behaviour.
+  4. **`PersonaInterestRepository.sharedInterests()` returns persona IDs while the room map renders
+     NAMES.** `InterestAdminController` maps them and documents why, but `id == name` for every seeded
+     member, so no test at any tier can catch a regression — only a hand-created member whose id and name
+     diverge would pin it.
+  5. **An owner cannot pin an existing phrase verbatim.** A resubmitted, unchanged phrase keeps its
+     source by design, so only a *rewritten* phrase is stamped `owner`; the field note was corrected to
+     say so. Whether a verbatim pin should exist is an owner call.
+  6. **Thread titles are the one live cross-member channel.** Every member writes in the same ambient
+     article threads, so on a `source: feed` install one week's headline reaches all seven judge prompts
+     — which makes `InterestDriftService`'s absolute "no cross-member channel" claim wider than the code.
+  7. **The observability contract has no `LogCapture` anywhere**, and `PersonaController` still has no
+     test class; §10.4 of the slice's plan doc is the full list of unpinned claims.
 - **S4a follow-ups (PR #6 review, second pass — none blocking, all verified against the code).** The
   owner-clobber race the second review found was fixed in the PR; these were not:
   1. `StanceEvolutionService.evolveEdge` cites the FULL window (`renderCited(exchanges)`) while the judge
@@ -285,6 +396,43 @@ Five things worth knowing before touching it:
   > ships green. `PersonaPromptRefresher` has no test at any tier (the only double overrides `refresh`
   > wholesale). The `nullsFirst` half of `byWindowAge` has no failing test. The `.feature` diff in the fix
   > commit is comment-only, so acceptance gained no coverage for the root cost defect.
+- **The ambient fan-out flake was a read-skew bug in `ThreadController.renderThread`, fixed 2026-07-26.**
+  The page did two reads at two instants — the DB tree first, the in-flight registry second — and a
+  settling node crosses between them, because the worker persists the row and *then* evicts the registry
+  entry. A node that persisted AND was evicted in that gap appeared in **neither** read: gone from the
+  page entirely, neither drafting nor posted, as though that persona never spoke. The poller then saw no
+  drafting node, called the room quiescent, and the count assertion read a room with a member missing.
+  Reading the registry first closes it: the same node then appears in both, and the existing dedupe drops
+  the stale draft view in favour of the settled row.
+  This is a **UI bug, not only a test bug** — an owner loading a thread at the wrong millisecond would
+  have seen a reply that generated fine silently absent until the next load.
+  How it was found, since three earlier guesses were wrong: the count assertion in `TriggerModeSteps` now
+  reports the whole room on failure (every node with its state, the summoning flag, and the LLM spy's call
+  sequence). The first failure after that printed `nodes=[…=posted, …=failed]` with
+  `llmCalls=[Moderator, sol, vex, pike]` — all four calls made, pike's node nowhere — which named the
+  mechanism immediately. Keep that instrumentation: `expected 2 but was 1` cost three sessions.
+  **Not pinned by a test.** A unit pin wants `ThreadController` (11 constructor deps, private
+  `renderThread`), and the acceptance scenario only catches it intermittently. If this area is touched
+  again, the read order is the invariant: **in-flight first, DB second.**
+- Superseded, kept for the record: **the earlier diagnosis that this was the settle deadline was wrong.**
+  `trigger_modes.feature` → "An ambient article tick fans out to the room; one persona fails, the rest
+  still post" fails intermittently at `TriggerModeSteps.kt:37` with **expected 2 posted, got 1** — the
+  settle helper returns a room that is only partly settled, so the count assertion reads a snapshot
+  rather than an outcome. History: 2026-07-19 (`cb9601c2`), main at `811f430`, twice on the S4a branch,
+  and once locally *after* `43ba812` raised `GenerationSettle.TIMEOUT_MS` from 5s to 20s; three
+  full-suite runs straight after that were clean, so call it roughly one run in four locally.
+  **`43ba812`'s commit message claims the deadline "is what was left" — that claim is wrong**, since a
+  4× deadline still fails. The raise is harmless (a stuck-draft guard, spent only when something is
+  wedged) but it is not the fix.
+  What has been ruled out, with evidence: cross-run contention (`runs-on: ubuntu-latest`, so the two
+  runs a commit starts are separate VMs); scripted-response leakage between scenarios
+  (`DatabaseResetHooks.resetFakes` clears both `script` and `received` at `@Before(order = 10)`);
+  late draft registration (`GenerationService.summonAsync` registers *every* plan before `endSummon`
+  clears `summoning`, so the room poller cannot observe a no-drafts gap mid-round).
+  What is left to look at: what the thread page renders for a node between `settleOne` persisting it
+  and `markDone` evicting it from `InFlightGenerations`, and whether a FAILED settle leaves any
+  rendered trace at all. Next move is to instrument the settle (log the body each poll sees when the
+  count is short) rather than to raise the deadline again.
 - Persona-voice OP upgrade still deferred (needs an OP failure lifecycle).
 - **Feed-fetch socket timeouts** (Assay follow-up on PR #4): `FeedArticleSource`'s RestClient has
   no connect/read timeout — the tick thread is deadline-protected, but a truly hung socket parks

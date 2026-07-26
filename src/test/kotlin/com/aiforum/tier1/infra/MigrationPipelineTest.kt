@@ -54,7 +54,7 @@ class MigrationPipelineTest {
             }
         }
 
-        // 3. Upgrade the EXISTING db to the latest schema (Flyway applies the pending V4–V26).
+        // 3. Upgrade the EXISTING db to the latest schema (Flyway applies the pending V4–V27).
         flyway(url, null).migrate()
 
         // 4. The old rows survived, and the new columns carry their migration default / backfill.
@@ -114,7 +114,20 @@ class MigrationPipelineTest {
                     assertEquals(null, rs.getString("updated_at"), "V11 leaves the pre-existing thread unedited (NULL)")
                 }
 
-                // flyway_schema_history records the full V1..V26 chain as applied (V20 thread.author_id +
+                // V27's nullable ALTER, asserted on a row that predates it — which is this class's whole
+                // point. NULL means "the interest drift pass has never looked at this member", i.e. judge
+                // them over all of their history, once. A NOT NULL DEFAULT here (the only other shape
+                // ADD COLUMN offers) would have declared every pre-existing member freshly judged at upgrade
+                // time and muted drift for them until brand-new engagement arrived.
+                st.executeQuery("SELECT interests_judged_at FROM persona WHERE id = 'Ada'").use { rs ->
+                    rs.next()
+                    assertEquals(
+                        null, rs.getString("interests_judged_at"),
+                        "V27's nullable column reads NULL for the pre-existing persona",
+                    )
+                }
+
+                // flyway_schema_history records the full V1..V27 chain as applied (V20 thread.author_id +
                 // V21 ambient_run landed with the ambient loop; V22 added ambient_run.action for S2's
                 // comment action; V23 added the article_seen dedupe registry for S5's feed source,
                 // plan_docs/ambient-slice-5.md; V24 added persona_stance, S3's qualitative relation graph,
@@ -123,11 +136,15 @@ class MigrationPipelineTest {
                 // plan_docs/ambient-slice-4a.md; V26 added persona_stance.judged_at, the per-edge
                 // last-judged watermark, because an "unchanged" judgment is the steady state of a settled
                 // pair and writes no audit row by design — so the audit table alone left that pair buying
-                // an LLM judgment on every run, forever). Bump this with every migration — it is the check
+                // an LLM judgment on every run, forever; V27 added persona_interest, interest_change and
+                // persona.interests_judged_at — S4b's mutable interests with per-interest provenance, their
+                // append-only audit trail, and the per-member last-judged watermark, which V26's lesson made
+                // part of the first commit here rather than a post-review fix,
+                // plan_docs/ambient-slice-4b.md). Bump this with every migration — it is the check
                 // that a new migration actually RUNS against an old database rather than only a fresh one.
                 st.executeQuery("SELECT MAX(CAST(version AS INTEGER)) AS v FROM flyway_schema_history").use { rs ->
                     rs.next()
-                    assertEquals(26, rs.getInt("v"), "the latest migration (V26) should be recorded as applied")
+                    assertEquals(27, rs.getInt("v"), "the latest migration (V27) should be recorded as applied")
                 }
             }
         }

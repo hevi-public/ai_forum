@@ -55,6 +55,10 @@ class PersonaSeedSteps(
         // gets its own field so the two idempotency stories don't collide.
         world.lastSeedCount = seeder.seedMissing()
         world.lastStanceSeedCount = seeder.seedMissingStances()
+        // Interest phase third (S4b), same ordering rule as stances: a member must exist before its
+        // phrases can hang off it. Not surfaced on `world` — no scenario asserts a count of interests,
+        // and a field nobody reads is one more thing to keep true.
+        seeder.seedMissingInterests()
     }
 
     @Then("every predefined persona appears in the members list")
