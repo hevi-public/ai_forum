@@ -101,6 +101,26 @@ class TestData(private val jdbc: JdbcTemplate, private val clock: Clock) {
     }
 
     /**
+     * The owner's read marker for a thread (V2 `thread_read`), planted [agoSeconds] before the fixed
+     * clock's now — a straight INSERT, for the same reason [setFeedView] is one.
+     *
+     * [com.aiforum.repo.ThreadReadRepository.markRead] cannot serve here: it stamps the clock's NOW, and
+     * the clock is FIXED, so every reply the same scenario seeds shares that instant and
+     * `created_at > last_read_at` is false for all of it. A scenario needing a reply on the UNREAD side
+     * of a marker therefore has no choice but an explicitly aged marker with its replies aged around it
+     * (plan_docs/ambient-slice-6.md §8; the Tier-1 `markReadAgo` helper is the same shape one tier down).
+     *
+     * A plain INSERT with no upsert: the reset hook wipes `thread_read` before every scenario, and a
+     * scenario that marks one thread read twice has stopped saying what it means.
+     */
+    fun markReadAgo(threadId: String, agoSeconds: Long) {
+        jdbc.update(
+            "INSERT INTO thread_read(thread_id, last_read_at) VALUES (?,?)",
+            threadId, stampedAt(agoSeconds),
+        )
+    }
+
+    /**
      * Seed the owner's persisted front-page view (V29 `owner_pref`, plan_docs/ambient-slice-6.md §2.3) —
      * a straight INSERT, the way [insertStance] seeds a relation, so a `Given` that needs the activity
      * view can establish it without driving the toggle it may be the scenario's job to test.

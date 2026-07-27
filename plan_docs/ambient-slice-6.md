@@ -292,10 +292,21 @@ New file `front_page_feed.feature` — 17 scenarios, every one behaviourally RED
 16. **Unread means the same thing in both views** *(the coherence pin)*
 17. The activity view hides the recent-comments box and still shows the other three rails *(D11; the positive twin is what stops it passing by failing to render the rail at all)*
 
-Appended to `empty_and_unread.feature`, discharging the direction doc's pre-authored pair:
+Appended to `empty_and_unread.feature`, discharging the direction doc's pre-authored pair. **These two are
+CHARACTERISATION pins, not RED-first ones — and that is not a compromise, it is the honest reading:**
 
-17. An ambient thread's card carries a persona attribution badge *(twin: an owner thread carries none)*
-18. Owner-unread ambient comments increment the badge
+18. An ambient thread's card carries a persona attribution badge *(twin: an owner thread carries none)*
+19. Owner-unread ambient comments increment the badge
+
+**Why they are green the day they are written.** Both ride hooks D2 keeps *deliberately unchanged* —
+`data-thread-author`, which `index.kte` already emits as a JTE smart attribute, and `data-unread-count`,
+which the front page already computes. Making them red would have meant asserting behaviour §6 never
+asked for (a byline resolved through the persona roster to a display name — a change to what
+`data-thread-author` *means*, which `AmbientSteps` asserts as the raw id). So their job is to stay green
+**across** the slice: they are what catches attribution or the unread badge breaking when the 2N+1 read is
+replaced by the grouped query. `persona_memory.feature` set the precedent of naming its RED-first
+exemptions in its own preamble; these are named in theirs. *(The "every one behaviourally RED today"
+sentence above governs the seventeen in the new file, and only those.)*
 
 **Every absence-shaped assertion carries a positive twin on the same page**, so "shows no X" can never
 pass because the page failed to render.
@@ -340,13 +351,13 @@ two unverified ledger entries and both were wrong; that is why this sentence exi
 | `ORDER BY last_activity` → `t.created_at DESC` | #11's second read |
 | Excerpt subquery `DESC` → `ASC` | #7 |
 | Drop the excerpt's `COALESCE` to `t.body` | #8 |
-| Drop `COALESCE(r.last_read_at,'')`'s empty branch | #18 |
+| Drop `COALESCE(r.last_read_at,'')`'s empty branch | #19 — **only because it was written to carry both branches on one page**: a never-read thread whose two comments all count, *and* a thread read 300s ago where only the later one does. The obvious one-thread version exercises the marker branch alone and would stay green under this mutation |
 | Drop `state='POSTED'` | #14 |
 | Drop the UNION's thread leg | #12 |
 | Add `WHERE t.author_id IS NOT NULL` | #13 |
 | Drop `, is_post DESC, id DESC` | the Tier-1 total-order test *(verified observable)* |
 | `FeedView.DEFAULT = ACTIVITY` | #1 **only** — which is what proves it guards the other nine |
-| `setFeedView` a no-op | #5 but **not** #3 — which is why both exist |
+| `setFeedView` a no-op | #3 **and** #5. *(The row originally claimed "#5 but not #3, which is why both exist". It cannot: the switch step POSTs the control's own action and then **re-GETs `/`**, so a preference that never stored reddens the switch too. Keeping the distinction would mean asserting on the POST's own response and not re-reading — which would stop pinning that the preference was **stored**, the one thing #5 exists for. Measured during the RED phase; the shape was kept and the row corrected.)* #5 still earns its place: it is the only one that re-reads in a **separate** visit, so it is what a cookie or `localStorage` implementation would fail |
 | Remove the 400 refusal | #6 |
 | Delete `feedToggle.kte` | #2 and #3 |
 | Emit `data-thread-title` on an activity card | #3's second clause |
@@ -436,7 +447,10 @@ a **new §10.4 entry**: no tier drives `nav.js`, exactly as no tier drives the h
 
 ## 11. Known gaps this design pre-books for §10.4
 
-Written now so the close-out cannot quietly discover them: the card's visual layout in either theme
+Written now so the close-out cannot quietly discover them: **`data-feed-more` — the stream's own
+truncation disclosure (§5, D7) — is in the hook vocabulary but no scenario of the 19 asserts it**, found
+during the RED phase; it ships pinned at no tier, and either earns a scenario in a later delta or stays a
+recorded gap · the card's visual layout in either theme
 (nothing in `verifyAll` reads CSS) · the htmx delete swap, hover-reveal and Cancel actually working (no
 tier drives htmx) · "the front page issues no per-row repository call" is an absence claim held by the
 constructor's shape and by review, not by a query counter · the measured query plans are a judgement
