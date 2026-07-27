@@ -24,46 +24,13 @@ object AmbientGate {
      * relevance signal both the comment gate and the post-action author pick read; a blank tag never
      * matches.
      *
-     * "Whole word" is UNICODE-AWARE, not `\b` (Java's `\b` treats every non-ASCII letter as a boundary, so
-     * a tag like "café" or "日本語" — abilities are owner-typed free text — would silently pin relevance to
-     * 0 forever). An occurrence counts when neither edge GLUES onto adjacent text: an adjacent
-     * letter/digit/underscore blocks the match ("go" never matches inside "golang", "sql" not inside
-     * "SQLite") — UNLESS it belongs to a different Unicode script than the tag's edge character, because a
-     * script change IS the word boundary in unspaced CJK text ("日本語" matches "日本語のスレッド", Han →
-     * Hiragana, while "日本" does not match inside "日本語", Han → Han). Digits/underscore (script COMMON)
-     * bind to everything, preserving the ASCII behaviour ("sqlite" doesn't match inside "sqlite3").
+     * The matcher itself lives in [WholeWords] (extracted for memory recall, plan_docs/persona-memory.md
+     * §2.7 — the one permitted edit to this file, a pure delegation pinned by this object's unchanged
+     * Tier-0 suite): "whole word" is UNICODE-AWARE, not `\b` — see [WholeWords] for the boundary rules
+     * ("go" never matches inside "golang"; a script change IS the boundary in unspaced CJK text).
      */
     fun relevance(abilities: List<String>, text: String): Int =
-        abilities.count { tag -> tag.isNotBlank() && containsWholeWord(text, tag.trim()) }
-
-    /** True when [tag] occurs in [text] (case-insensitive) with both edges free (see [relevance]). */
-    private fun containsWholeWord(text: String, tag: String): Boolean {
-        var i = text.indexOf(tag, 0, ignoreCase = true)
-        while (i >= 0) {
-            if (freeEdge(text, i - 1, tag.first()) && freeEdge(text, i + tag.length, tag.last())) return true
-            i = text.indexOf(tag, i + 1, ignoreCase = true)
-        }
-        return false
-    }
-
-    /** The char at [pos] does not glue onto the tag's [edge] char: out of range, not a word char, or a
-     *  word char of a DIFFERENT script (the CJK script-change boundary). */
-    private fun freeEdge(text: String, pos: Int, edge: Char): Boolean {
-        if (pos < 0 || pos >= text.length) return true
-        val adjacent = text[pos]
-        if (adjacent != '_' && !adjacent.isLetterOrDigit()) return true
-        return distinctScripts(adjacent, edge)
-    }
-
-    /** Word chars of two different scripts form a natural boundary; COMMON/INHERITED (digits, '_',
-     *  combining marks) bind to any script, so they never free an edge. */
-    private fun distinctScripts(a: Char, b: Char): Boolean {
-        val sa = Character.UnicodeScript.of(a.code)
-        val sb = Character.UnicodeScript.of(b.code)
-        if (sa == Character.UnicodeScript.COMMON || sa == Character.UnicodeScript.INHERITED) return false
-        if (sb == Character.UnicodeScript.COMMON || sb == Character.UnicodeScript.INHERITED) return false
-        return sa != sb
-    }
+        abilities.count { tag -> tag.isNotBlank() && WholeWords.contains(text, tag.trim()) }
 
     /** The gate: `talkativeness * relevance >= THRESHOLD`. Zero relevance can never clear it (§6.4). */
     fun clears(talkativeness: Int, relevance: Int): Boolean =

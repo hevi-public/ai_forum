@@ -16,10 +16,13 @@ import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.PersonaRef
 import com.aiforum.llm.PromptContext
 import com.aiforum.persona.InterestProse
+import com.aiforum.persona.MemoryProse
+import com.aiforum.persona.MemoryRecall
 import com.aiforum.persona.StanceProse
 import com.aiforum.repo.AttachmentRepository
 import com.aiforum.repo.CommentRepository
 import com.aiforum.repo.PersonaInterestRepository
+import com.aiforum.repo.PersonaMemoryRepository
 import com.aiforum.repo.PersonaRepository
 import com.aiforum.repo.RelationStanceRepository
 import com.aiforum.repo.ThreadRepository
@@ -77,6 +80,15 @@ class GenerationService(
     // written between two replies of one fan-out reaches the second; a column on the captured Persona row
     // would not.
     private val interests: PersonaInterestRepository? = null,
+    // Persona memory (plan_docs/persona-memory.md §2.9): the member's own resurfaced records,
+    // appended as the FOURTH block in the same seam as the two above ([withPersonaContext]).
+    // Nullable-defaulted for the identical reason — every construction that doesn't wire it yields
+    // a byte-identical prompt, so no existing test moves. Retrieval is MemoryRecall's binary
+    // whole-word overlap against the scoped context, records-only, one associative hop, capped —
+    // never an LLM call, never a persisted magnitude. Read INSIDE this call, which runs under
+    // [GenPlan.contextOf] at settle time, so recall is live per reply: a record written or deleted
+    // between two replies of one fan-out is honored by the second (never a plan-mint snapshot).
+    private val memories: PersonaMemoryRepository? = null,
 ) {
     private val timeout = Duration.ofSeconds(120)
     private val log = LoggerFactory.getLogger(GenerationService::class.java)
@@ -546,7 +558,7 @@ class GenerationService(
      * boundary [ContextAssembler]. When [attachments] isn't wired (Tier-2 constructions), the map is
      * empty and this is exactly the old text-only assemble.
      *
-     * The persona-context blocks (stances, then interests) are appended HERE, one step BEFORE
+     * The persona-context blocks (stances, then interests, then memories) are appended HERE, one step BEFORE
      * [ContextAssembler.assemble], on purpose: the firewall's single job is keeping owner VOTE signal out
      * of the transcript, and it stays a pure function that receives an already-final system prompt string.
      * Injecting inside it would put prompt authoring into the boundary whose Tier-0 test exists to pin
@@ -559,7 +571,11 @@ class GenerationService(
         contextComments: List<Comment>,
         targetId: String?,
     ) = ContextAssembler.assemble(
-        withPersonaContext(persona, contextComments),
+        // The thread title is threaded through because §2.7 matches memories against exactly what
+        // the persona is about to read — the scoped bodies plus the title, which is the topic
+        // signal and not otherwise in withPersonaContext's scope (plan_docs/persona-memory.md §8
+        // item 7). One parameter is cheaper than pretending the title was already there.
+        withPersonaContext(persona, contextComments, threads?.find(threadId)?.title.orEmpty()),
         contextComments,
         targetId,
         attachmentMap(threadId, contextComments),
@@ -590,13 +606,24 @@ class GenerationService(
      * minted: the pass that rewrites either one runs on its own cadence, and a prompt assembled from a
      * snapshot would serve a member's old character for the rest of the fan-out.
      *
-     * When both blocks render empty (either renderer returns null for an empty list — including every
-     * construction where [stances] or [interests] isn't wired) the result is `persona.systemPrompt`
-     * unchanged, byte for byte: relations and interests must be invisible where there are none, not a
-     * dangling header. Order is stances-then-interests and is fixed by this list, not by which repository
-     * happens to be wired.
+     * **Memories** (persona-memory §2.9) are the member's OWN records resurfaced against exactly what
+     * it is about to read: [MemoryRecall.select] over the scoped context bodies plus [threadTitle] —
+     * binary whole-word overlap, records only (the root never enters), one associative hop, capped at
+     * five. BRANCH_ONLY composes for free: a narrower scoped context is a narrower match text. The
+     * bodies-only handoff to [MemoryProse.block] is the guardrail — no ids, no provenance, no parent
+     * structure can reach the prompt, because there is no parameter to pass them through.
+     *
+     * When all three blocks render empty (each renderer returns null for an empty list — including
+     * every construction where [stances], [interests] or [memories] isn't wired) the result is
+     * `persona.systemPrompt` unchanged, byte for byte: relations, interests and memories must be
+     * invisible where there are none, not a dangling header. Order is stances, then interests, then
+     * memories — fixed by this list, not by which repository happens to be wired.
      */
-    private fun withPersonaContext(persona: PersonaRepository.Persona, contextComments: List<Comment>): String {
+    private fun withPersonaContext(
+        persona: PersonaRepository.Persona,
+        contextComments: List<Comment>,
+        threadTitle: String = "",
+    ): String {
         val present = contextComments.mapTo(mutableSetOf()) { it.authorId }
         val named = stances?.from(persona.id).orEmpty()
             .filter { it.toPersona in present }
@@ -604,9 +631,19 @@ class GenerationService(
             // can attach the attitude to a byline it can see. Falling back to the id keeps a stance
             // toward a since-renamed/unreadable persona readable rather than dropping it silently.
             .map { StanceProse.NamedStance(personas.find(it.toPersona)?.name ?: it.toPersona, it.stance) }
+        // The scoped context as one match text: what the member is about to read, title included.
+        // Recall is unrankable by construction — the select is binary, the tie-break a clock — and
+        // it reads the repository HERE, at settle time, never off a plan-mint snapshot.
+        val recalled = memories?.let { repo ->
+            MemoryRecall.select(
+                repo.recordsOf(persona.id),
+                (contextComments.map { it.body } + threadTitle).joinToString(" "),
+            )
+        }.orEmpty()
         val blocks = listOfNotNull(
             StanceProse.block(persona.name, named),
             InterestProse.block(persona.name, interests?.phrasesOf(persona.id).orEmpty()),
+            MemoryProse.block(recalled.map { it.body }),
         )
         return (listOf(persona.systemPrompt) + blocks).joinToString("\n\n")
     }

@@ -57,7 +57,13 @@ class DatabaseResetHooks(
         // scenario that seeds an interest and one that leans on a cascade are indistinguishable from here,
         // and the day someone drops a CASCADE the resets should fail on this line rather than somewhere far
         // from it. (`persona.interests_judged_at` needs no wiping — it goes with the persona row.)
-        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "stance_change", "persona_stance", "interest_change", "persona_interest", "persona").forEach {
+        // memory_change + persona_memory (V28) follow the same discipline, child first: memory_change holds
+        // only a BARE memory_id (no FK to persona_memory — audit rows must survive deletes), but both
+        // CASCADE from persona(id), so both precede persona and both are wiped explicitly. persona_memory
+        // additionally self-references through its composite same-persona FK; a single DELETE FROM clears
+        // parent and child rows in one statement, so no intra-table ordering is needed.
+        // (`persona.memory_judged_at` needs no wiping — it goes with the persona row.)
+        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "stance_change", "persona_stance", "interest_change", "persona_interest", "memory_change", "persona_memory", "persona").forEach {
             jdbc.update("DELETE FROM $it")
         }
     }

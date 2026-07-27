@@ -275,6 +275,122 @@ class GenerationServiceTest {
         assertEquals("You are Vex.", llm.requests.single().context.personaSystemPrompt)
     }
 
+    /** The member's private memory store, in memory (persona-memory §2.9). Only [recordsOf] is
+     *  overridden because injection asks exactly one question — "what does the persona about to
+     *  speak remember?" — records-only, newest-first, the real repository's order. Mutable so the
+     *  settle-time test can write a record WHILE a round is in flight. */
+    private class ScriptedMemories(
+        val rows: MutableList<com.aiforum.repo.PersonaMemory> = mutableListOf(),
+    ) : com.aiforum.repo.PersonaMemoryRepository(JdbcTemplate(), Clock.systemUTC()) {
+        override fun recordsOf(personaId: String) =
+            rows.filter { it.personaId == personaId && it.kind == KIND_RECORD }
+                .sortedWith(compareByDescending<com.aiforum.repo.PersonaMemory> { it.createdAt }.thenBy { it.id })
+    }
+
+    private fun memory(id: String, personaId: String, body: String, createdAt: String = "2026-01-01T00:00:00Z") =
+        com.aiforum.repo.PersonaMemory(id, personaId, null, "record", body, "owner", createdAt)
+
+    /** What a member is into, scripted — only [phrasesOf] is read on the injection path. */
+    private class ScriptedInterests(private val phrases: Map<String, List<String>>) :
+        com.aiforum.repo.PersonaInterestRepository(JdbcTemplate(), Clock.systemUTC()) {
+        override fun phrasesOf(personaId: String) = phrases[personaId].orEmpty()
+    }
+
+    /** Replays scripted bodies with a side effect per call — how "the world moves mid-round" is
+     *  driven: the Nth persona's own LLM call IS the instant an owner edit lands. */
+    private class EffectLlm(responses: List<() -> String>) : LlmClient {
+        private val deque = ArrayDeque(responses)
+        val requests = mutableListOf<LlmRequest>()
+        override fun generate(request: LlmRequest, cancellation: CancellationToken): LlmResponse {
+            requests += request
+            return LlmResponse(deque.removeFirst()())
+        }
+    }
+
+    @Test
+    fun `with a memory store wired but nothing matching, the system prompt is byte-identical`() {
+        // The §2.9 parity pin in its sharper form: not merely "unwired repo changes nothing" (the
+        // byte-equality test above already covers every unwired construction) but "a WIRED store
+        // whose records share no words with the scoped context injects nothing" — zero when
+        // irrelevant, no header, no blank line, or a formatting change slips into every prompt.
+        val comments = InMemoryComments().apply { insert(postedReply("c1", "Sol", "Indexes help here")) }
+        val llm = ScriptedLlm(listOf("Hype aside, an index is cheap"))
+        val service = GenerationService(
+            llm, comments, roster("Vex", "Sol"),
+            memories = ScriptedMemories(mutableListOf(memory("m1", "Vex", "Prefers boring rollout habits"))),
+        )
+
+        service.generate("t1", null, listOf("Vex"), "", ScopeMode.WHOLE_THREAD)
+
+        assertEquals("You are Vex.", llm.requests.single().context.personaSystemPrompt)
+    }
+
+    @Test
+    fun `the persona-context blocks land in fixed order - system prompt, stances, interests, memories`() {
+        // The fourth-block ordering (persona-memory §2.9), pinned as a prompt-string assertion: the
+        // order is fixed by the listOfNotNull in withPersonaContext, not by which repository
+        // happens to be wired, and an unrelated refactor that reorders it must redden here.
+        val comments = InMemoryComments().apply { insert(postedReply("c1", "Sol", "Checkpoint stalls again")) }
+        val llm = ScriptedLlm(listOf("That stall is familiar"))
+        val service = GenerationService(
+            llm, comments, roster("Vex", "Sol"),
+            stances = ScriptedStances(listOf(stance("Vex", "Sol", "needles him about hype"))),
+            interests = ScriptedInterests(mapOf("Vex" to listOf("kernel scheduling"))),
+            memories = ScriptedMemories(
+                mutableListOf(memory("m1", "Vex", "Watched checkpoint tuning eat a whole weekend")),
+            ),
+        )
+
+        service.generate("t1", null, listOf("Vex"), "", ScopeMode.WHOLE_THREAD)
+
+        val prompt = llm.requests.single().context.personaSystemPrompt
+        assertTrue(prompt.startsWith("You are Vex."), "the stored prompt leads:\n$prompt")
+        val stanceAt = prompt.indexOf("needles him about hype")
+        val interestAt = prompt.indexOf("kernel scheduling")
+        val memoryAt = prompt.indexOf("Watched checkpoint tuning eat a whole weekend")
+        assertTrue(stanceAt in 1 until interestAt, "stances before interests:\n$prompt")
+        assertTrue(interestAt < memoryAt, "interests before memories — the memory block is the fourth:\n$prompt")
+        assertTrue(
+            prompt.contains("Things you remember from past discussions here:"),
+            "the memory frame opens the fourth block:\n$prompt",
+        )
+    }
+
+    @Test
+    fun `a record written between plan mint and settle reaches the later persona's prompt`() {
+        // Recall is LIVE at settle time (persona-memory §2.9): context assembles under
+        // GenPlan.contextOf when the reply settles, never when the plan was minted. Sol's own LLM
+        // call is the instant a record lands in Paul's store — a plan-mint snapshot would miss it,
+        // and Paul settles after Sol in the same round.
+        val comments = InMemoryComments().apply {
+            insert(postedReply("c1", "owner", "My checkpoint config keeps misbehaving"))
+        }
+        val store = ScriptedMemories()
+        val llm = EffectLlm(
+            listOf(
+                {
+                    store.rows += memory("m1", "Paul", "Spent a weekend chasing checkpoint stalls")
+                    "Sol's take"
+                },
+                { "Paul's take" },
+            ),
+        )
+        val service = GenerationService(llm, comments, roster("Sol", "Paul"), memories = store)
+
+        service.generate("t1", null, listOf("Sol", "Paul"), "")
+
+        val solPrompt = llm.requests[0].context.personaSystemPrompt
+        assertFalse(
+            solPrompt.contains("Spent a weekend chasing checkpoint stalls"),
+            "the record did not exist when Sol settled",
+        )
+        val paulPrompt = llm.requests[1].context.personaSystemPrompt
+        assertTrue(
+            paulPrompt.contains("Spent a weekend chasing checkpoint stalls"),
+            "the record written mid-round reaches the member that settles after it:\n$paulPrompt",
+        )
+    }
+
     @Test
     fun `an at-mention on the Anyone path summons that persona and skips the dispatcher`() {
         // Only one scripted body: if the dispatcher were consulted the deque would underflow.

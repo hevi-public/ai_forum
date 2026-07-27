@@ -3,6 +3,7 @@ package com.aiforum.web
 import com.aiforum.ambient.AmbientFeedProperties
 import com.aiforum.ambient.ArticleSource
 import com.aiforum.config.InterestDriftProperties
+import com.aiforum.config.MemoryProperties
 import com.aiforum.config.StanceEvolutionProperties
 import org.springframework.context.annotation.Profile
 import org.springframework.core.env.Environment
@@ -32,6 +33,10 @@ class DiagnosticsController(
     // @Configuration (InterestDriftConfig) for the third time and the same reason — under `test` the
     // scheduler pair can never wire, so this bean is the only thing left to assert against.
     private val interestDrift: InterestDriftProperties,
+    // Persona memory (plan_docs/persona-memory.md §2.13): the Memory Scribe's knobs, bound from a
+    // NON-profiled @Configuration (MemoryConfig) for the fourth time and the same reason — the
+    // scheduler pair is @Profile("!test"), so the bound bean is what the rail reads.
+    private val memory: MemoryProperties,
 ) {
 
     @GetMapping("/__diag")
@@ -76,6 +81,14 @@ class DiagnosticsController(
         "interestDriftEnabled" to interestDrift.enabled,
         "interestDriftMaxPersonasPerRun" to interestDrift.maxPersonasPerRun,
         "interestDriftCron" to interestDrift.cron,
+        // Persona memory: the FOURTH unattended spender, and the one writing into every member's
+        // private store. Same three-key shape as its three siblings above, read off the bound bean
+        // for the same two reasons: it is the key the ticker's @ConditionalOnProperty resolves, and
+        // injecting the bean at all is what proves MemoryConfig stayed un-profiled. Anything that
+        // spends money unattended gets a rail (config_guardrails scenario 24).
+        "memoryEnabled" to memory.enabled,
+        "memoryMaxPerRun" to memory.maxPersonasPerRun,
+        "memoryCron" to memory.cron,
         "activeProfiles" to env.activeProfiles.toList(),
     )
 }

@@ -1708,6 +1708,39 @@ mark.nav-hit {
   background: var(--dark); border: 1px solid var(--line-node); border-radius: var(--r);
   padding: 10px 12px; margin: 12px 0 14px; white-space: pre-wrap;
 }
+/* The private memory tree (persona-memory §2.12). Class-based like everything else — the data-memory*
+   attributes on these nodes belong to the acceptance probe, never to a selector here. Nesting depth
+   arrives as a custom property the controller's DFS sets per row (the --mono-h precedent), so the CSS
+   needs no per-level classes and the template no arithmetic. */
+.persona__memory-root {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+  margin: 12px 0 0; padding: 8px 10px;
+  background: var(--strip); border: 1px solid var(--line); border-radius: var(--r-sm);
+}
+.persona__memory-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.persona__memory {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+  margin: 4px 0 0 calc(var(--memory-depth, 0) * 18px);
+  padding: 6px 10px; border-left: 2px solid var(--sage-2);
+}
+.persona__memory-body { font-size: 13px; color: var(--ink); }
+.persona__memory-action { display: inline; margin: 0; }
+.persona__memory-form {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0;
+}
+.persona__memory-input {
+  flex: 1 1 260px; font-family: var(--mono); font-size: 12px;
+  border: 1px solid var(--line); border-radius: var(--r-sm); padding: 5px 8px;
+  background: var(--card); color: var(--ink);
+}
+.persona__memory-parent {
+  max-width: 320px; font-family: var(--mono); font-size: 11.5px;
+  border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 6px;
+  background: var(--card); color: var(--muted);
+}
+/* /admin/memory rows ride .admin-list__* wholesale; the one memory-specific rule is the row variant. */
+.admin-list__item--memory { display: flex; flex-direction: column; gap: 6px; padding: 12px 4px; }
+.admin-list__item--memory p { margin: 0; }
 
 /* ------------------------------------------------------- native file input */
 /* The bare OS control sat unstyled inside the polished composer; dress its button like a ghost .btn. */

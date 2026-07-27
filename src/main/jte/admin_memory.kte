@@ -1,0 +1,96 @@
+@import com.aiforum.web.MemoryChangeView
+@param changes: List<MemoryChangeView>
+<%-- The audited memory-scribe log (plan_docs/persona-memory.md §2.12). Built on admin_interests.kte,
+     including the two conventions that file keeps — both fail loudly and confusingly:
+     · every @param type stays a single-argument generic — a generic carrying a comma breaks JTE's
+       @param parser with an error pointing at an unrelated line;
+     · NO backticks below, not even inside a comment — the whole body is a backtick-delimited JTE
+       content block, and a stray one would close it mid-template.
+     One more, this page's own: every row is ONE <li> and the cited lines are SPANS inside it, FLAT —
+     the acceptance probe (Html.latestMemoryChangeRow) slices from the opening tag to the FIRST </li>,
+     so a nested list anywhere below would truncate the row and take the evidence with it.
+     And deliberately NO aggregate anywhere: no per-member tally, no count, no room map analogue — a
+     cross-member number over this table is a memory-health score wearing an auditor's badge. --%>
+@template.layout(title = "Admin · Persona memory · AI Forum", activeNav = "admin", content = @`
+    <div class="admin-list" data-admin-list="memory">
+        <p class="admin-list__back"><a href="/admin">← Admin</a></p>
+        <h1 class="admin-list__title">Persona memory</h1>
+        <p class="admin-list__note">Each member privately remembers what it lived through — one prose record a week at most, written by the scribe pass from that member's own exchanges, resurfacing only into that member's own replies. Applied straight away, never queued for approval. This log is the control: read what was kept against the words it was kept from, and revert what does not belong. Records you author on a member's profile never appear here and are never touched by the pass.</p>
+        <%-- The manual trigger. POSTs to /admin/memory/run, which runs one pass synchronously and
+             answers with this page freshly rendered. Ungated on purpose: the memory "enabled"
+             property is the SCHEDULER kill switch, and this button is also the only way anything
+             under the test profile can reach the pass at all. --%>
+        <form class="admin-list__trigger" method="post" action="/admin/memory/run" data-memory-run>
+            <button class="btn" type="submit">Run a consolidation pass now — one judgment per member with something new lived through ▸</button>
+        </form>
+        @if(changes.isEmpty())
+            <p class="admin-list__empty" data-admin-list-empty="true">Nothing has been remembered yet — run a pass above.</p>
+        @else
+            <ul class="admin-list__items">
+                @for(change in changes)
+                    <%-- data-memory-reverted goes through .toString() because JTE treats a raw
+                         Boolean in an attribute as an HTML boolean attribute — it would render the
+                         bare attribute name (or nothing), and every reader here wants the literal
+                         "true"/"false". .admin-list__stance-label is reused verbatim: it is the
+                         small-caps field label both earlier audit logs stack their rows with. --%>
+                    <li class="admin-list__item admin-list__item--memory"
+                        data-memory-change="${change.id}"
+                        data-memory-persona="${change.personaId}"
+                        data-memory-reverted="${change.reverted.toString()}">
+                        <span class="admin-list__meta">
+                            <span class="admin-list__badge">${change.personaLabel}</span>
+                            @if(change.reverted)
+                                <span class="admin-list__sep">·</span>
+                                <span class="admin-list__badge">undone by you</span>
+                            @endif
+                            <span class="admin-list__sep">·</span>
+                            <span class="admin-list__ago">${change.ago}</span>
+                        </span>
+                        <p class="admin-list__snippet">
+                            <span class="admin-list__stance-label">remembered</span>
+                            <span>${change.body}</span>
+                        </p>
+                        @if(!change.parentBody.isEmpty())
+                            <p class="admin-list__snippet">
+                                <span class="admin-list__stance-label">extends</span>
+                                <span>${change.parentBody}</span>
+                            </p>
+                        @endif
+                        <div class="admin-list__cited" data-memory-cited="${change.id}">
+                            <span class="admin-list__stance-label">kept from</span>
+                            @if(change.cited.isEmpty())
+                                <span class="admin-list__meta">No engagement was snapshotted with this record.</span>
+                            @else
+                                @for(cite in change.cited)
+                                    <%-- The evidence is the snapshotted prose; the permalink is a
+                                         convenience on top of it. The cited column carries no
+                                         foreign key (V28), so a citation whose ids never made it
+                                         into the snapshot still renders — unlinked rather than
+                                         absent, since this column is the system's only copy of
+                                         what was judged. --%>
+                                    @if(cite.permalink != null)
+                                        <span class="admin-list__snippet"><a href="${cite.permalink}" data-memory-cited-comment="${cite.commentId}">“${cite.snippet}”</a></span>
+                                    @else
+                                        <span class="admin-list__snippet">“${cite.snippet}”</span>
+                                    @endif
+                                @endfor
+                            @endif
+                        </div>
+                        <%-- Revert deletes the record (reparenting any children to their
+                             grandparent) and does NOT reopen the member's window — rollback would
+                             guarantee the next run re-reads the same evidence and re-manufactures
+                             the row just killed (§2.10, the argued departure). The button is
+                             dropped once the change is undone: a second revert is already a no-op
+                             at the storage layer, and offering a dead control invites doubt about
+                             what the member currently remembers. --%>
+                        @if(!change.reverted)
+                            <form method="post" action="/admin/memory/${change.id}/revert" data-memory-revert>
+                                <button class="btn btn--ghost" type="submit">Revert</button>
+                            </form>
+                        @endif
+                    </li>
+                @endfor
+            </ul>
+        @endif
+    </div>
+`)

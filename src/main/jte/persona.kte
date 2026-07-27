@@ -1,9 +1,15 @@
 @import com.aiforum.web.PersonaView
 @import com.aiforum.web.StanceView
+@import com.aiforum.web.MemoryRecordView
+@import com.aiforum.web.MemoryParentOptionView
 @import com.aiforum.dto.Avatar
 @import com.aiforum.persona.Dials
 @param persona: PersonaView
 @param stances: List<StanceView>
+@param memories: List<MemoryRecordView>
+@param memoryRootId: String
+@param memoryRootBody: String
+@param memoryParents: List<MemoryParentOptionView>
 
 @template.layout(title = persona.name + " · AI Forum", activeNav = "members", content = @`
     <div class="thread__op" data-persona-id="${persona.id}" data-persona-name="${persona.name}" data-persona-descriptor="${persona.descriptor}" data-persona-abilities="${persona.abilities.joinToString(", ")}" data-persona-interests="${persona.interestPhrases}" data-system-prompt="${persona.systemPrompt}">
@@ -57,6 +63,63 @@
                     <li class="stance" data-stance-to="${s.toId}">${s.toName}: ${s.text}</li>
                 @endfor
             </ul>
+        @endif
+        <%-- The private memory tree (plan_docs/persona-memory.md §2.12). Root first, records nested
+             by parent — the controller's DFS flattens the tree, so each record is ONE element with
+             every hook on its single opening tag (the probe reads attributes off the opening tag;
+             a wrapper split across tags would blind it). data-memory-parent carries the ANTECEDENT's
+             prose ("" at top level); indentation runs off the depth custom property, styled by
+             class, never off a data-* hook. A member holding no records renders no list and no
+             header — absence is the ordinary state, not breakage — while the authoring forms stay,
+             because this page is the only surface that can create the first record. --%>
+        @if(memoryRootBody.isNotEmpty())
+            <div class="persona__memory-root" data-memory-root="${memoryRootBody}">
+                <span class="persona__label">Root — motivation, background, identity (never injected into a prompt)</span>
+                <span class="persona__memory-body">${memoryRootBody}</span>
+                <%-- Delete + re-author is the only edit (no in-place editing, uniform with records);
+                     nothing can be parented on the root, so this never cascades a subtree. --%>
+                <form class="persona__memory-action" method="post" action="/personas/${persona.slug}/memories/${memoryRootId}/delete">
+                    <button class="btn btn--ghost" type="submit">Delete root</button>
+                </form>
+            </div>
+        @endif
+        @if(!memories.isEmpty())
+            <ul class="persona__memory-list">
+                @for(m in memories)
+                    <li class="persona__memory" style="--memory-depth: ${m.depth}"
+                        data-memory="${m.body}"
+                        data-memory-source="${m.source}"
+                        data-memory-parent="${m.parentBody}">
+                        <span class="persona__label">${m.sourceLabel}</span>
+                        <span class="persona__memory-body">${m.body}</span>
+                        <form class="persona__memory-action" method="post" action="/personas/${persona.slug}/memories/${m.id}/delete">
+                            <button class="btn btn--ghost" type="submit">Delete</button>
+                        </form>
+                    </li>
+                @endfor
+            </ul>
+        @endif
+        <%-- The owner's authoring form (source stamps 'owner' by method shape on the controller).
+             The parent picker offers RECORDS only — the root is never a parent candidate (§2.2). --%>
+        <form class="persona__memory-form" method="post" action="/personas/${persona.slug}/memories">
+            <input class="persona__memory-input" type="text" name="body" placeholder="Give ${persona.name} a memory — one sentence of first-person experience">
+            @if(!memoryParents.isEmpty())
+                <select class="persona__memory-parent" name="parent">
+                    <option value="">stands on its own</option>
+                    @for(p in memoryParents)
+                        <option value="${p.id}">extends: ${p.body}</option>
+                    @endfor
+                </select>
+            @endif
+            <button class="btn" type="submit">Add memory</button>
+        </form>
+        @if(memoryRootBody.isEmpty())
+            <%-- Create-once (the V28 partial unique index is the enforcement); storage and owner
+                 surface only this slice — prompt identity stays the composed system prompt (§2.3). --%>
+            <form class="persona__memory-form" method="post" action="/personas/${persona.slug}/memories/root">
+                <input class="persona__memory-input" type="text" name="body" placeholder="Give ${persona.name} a root — motivation, background, identity">
+                <button class="btn btn--ghost" type="submit">Set root</button>
+            </form>
         @endif
         <p class="persona__prompt" data-prompt-preview>${persona.systemPrompt}</p>
         <a class="btn" href="/personas/${persona.slug}/edit">Edit ▸</a>

@@ -10,9 +10,12 @@ import com.aiforum.llm.PromptContext
 import com.aiforum.llm.StubLlmClient
 import com.aiforum.persona.InterestDrift
 import com.aiforum.persona.InterestDriftPrompts
+import com.aiforum.persona.MemoryScribePrompts
+import com.aiforum.persona.ScribeAnswer
 import com.aiforum.persona.StanceJudge
 import com.aiforum.persona.StanceJudgePrompts
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -171,6 +174,39 @@ class StubLlmClientTest {
     private val PINNED = listOf("release engineering")
 
     private fun interestJudgeRef() = PersonaRef(InterestDriftPrompts.JUDGE_ID, InterestDriftPrompts.JUDGE_NAME)
+
+    /**
+     * Persona memory (plan_docs/persona-memory.md §2.13): a scribe judgment must come back as
+     * something [ScribeAnswer] ACCEPTS — the verdict is what is asserted, the same failure class as
+     * the two branches above (falling through to a canned essay, which the parse refuses, so every
+     * scribe pass in a stub demo silently does nothing). Repeated draws because the branch rotates
+     * its canned bodies, and every one of them must hold three properties at once: usable shape, no
+     * rating shape (digit-free is the stub's blunt version of that), and no `vote` substring — a
+     * scribe body lands in `persona_memory` and is injected into that member's next generation
+     * prompt, where the firewall scans exactly that substring.
+     */
+    @Test
+    fun `memory scribe judgments come back as answers the parse accepts, rating-free and vote-free`() {
+        repeat(12) { i ->
+            val text = client.generate(
+                request("what Sol lived through, draw $i", scribeRef()),
+                CancellationToken(),
+            ).text
+
+            val verdict = ScribeAnswer.parse(text)
+            assertTrue(
+                verdict is ScribeAnswer.Verdict.Remember || verdict is ScribeAnswer.Verdict.NothingToRemember,
+                "the stub must answer a scribe judgment with something the parse takes, got: $verdict for $text",
+            )
+            assertTrue(text.none { it.isDigit() }, "canned memory carried a digit: $text")
+            assertFalse(
+                text.contains("vote", ignoreCase = true),
+                "canned memory would trip the owner-controls firewall from inside a generation prompt: $text",
+            )
+        }
+    }
+
+    private fun scribeRef() = PersonaRef(MemoryScribePrompts.SCRIBE_ID, MemoryScribePrompts.SCRIBE_NAME)
 
     @Test
     fun `failure triggers map onto the taxonomy`() {
