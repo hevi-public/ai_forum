@@ -1,6 +1,7 @@
 # Ambient Slice 6 — the feed front page: thread cards, the activity stream, and the persisted view
 
-> **Status:** 📐 designed 2026-07-27 — **not yet built**, awaiting owner review ·
+> **Status:** ✅ built 2026-07-27 (V29) — `./gradlew verifyAll` green, suite 263 → 282 scenarios,
+> tier 0/1/2: 428/265/156 · designed 2026-07-27 · owner calls answered 2026-07-27 (§10) ·
 > **Owner:** Hevi · **Created:** 2026-07-27 ·
 > Parent: `ai-driven-forum-direction.md` §9 (S6 row — the last slice on the map) / §10 (the pre-authored
 > `home_rail` / `empty_and_unread` pair) / §11.7 Stays-Cut · Spec: `ai-forum-ux-brief.md` §57,
@@ -356,7 +357,7 @@ two unverified ledger entries and both were wrong; that is why this sentence exi
 | Drop the UNION's thread leg | #12 |
 | Add `WHERE t.author_id IS NOT NULL` | #13 |
 | Drop `, is_post DESC, id DESC` | the Tier-1 total-order test *(verified observable)* |
-| `FeedView.DEFAULT = ACTIVITY` | #1 **only** — which is what proves it guards the other nine |
+| `FeedView.DEFAULT = ACTIVITY` | #1 — **and twenty more. MEASURED, and the "only" was false.** 21 scenarios redden, including the nine untouched front-page ones the row claimed #1 was *protecting*. The named scenario does redden, so the pin is real; the exclusivity claim never was. The nine self-guard — flipping the default makes the front page render the wrong view *for them too* — which is a stronger result than the doc argued for, just not the one it wrote down |
 | `setFeedView` a no-op | #3 **and** #5. *(The row originally claimed "#5 but not #3, which is why both exist". It cannot: the switch step POSTs the control's own action and then **re-GETs `/`**, so a preference that never stored reddens the switch too. Keeping the distinction would mean asserting on the POST's own response and not re-reading — which would stop pinning that the preference was **stored**, the one thing #5 exists for. Measured during the RED phase; the shape was kept and the row corrected.)* #5 still earns its place: it is the only one that re-reads in a **separate** visit, so it is what a cookie or `localStorage` implementation would fail |
 | Remove the 400 refusal | #6 |
 | Delete `feedToggle.kte` | #2 and #3 |
@@ -444,6 +445,36 @@ rule, and the same breach `data-unread-count` is being cleaned up for in this ve
 neighbourhood). No scenario asserts *navigation behaviour* — the acceptance suite drives no browser, so
 this is pinned only as far as "the attribute is present on both card types", and the behaviour itself is
 a **new §10.4 entry**: no tier drives `nav.js`, exactly as no tier drives the htmx delete swap.
+
+## 10b. As built — where the implementation departed from this design
+
+Six departures, none of them silent. Each was found by running something, not by reading.
+
+1. **D13 — `FeedView` got its own file** rather than living in `HomeController.kt` as §2.1 sketched.
+   `OwnerPrefRepository` must name the type, and a repository importing a *controller file's* type is
+   worse layering than both importing a two-constant vocabulary.
+2. **The `FeedView.DEFAULT` ledger row was false** — see §7. Corrected against a measurement.
+3. **The `setFeedView` no-op row was false** — it reddens #3 *and* #5, because the switch step re-GETs.
+   Keeping the claimed distinction would have meant not re-reading, which would stop pinning that the
+   preference was *stored*. Shape kept, row corrected (§7).
+4. **The rail-suppression mutation in §7 proved nothing as written** and was replaced with one that
+   discriminates — empty the *thread page's* starred box, where `rail shows` is the only Then. Green
+   before the box-scoping fix, red after; both measured.
+5. **Scenarios 18–19 are characterisation pins, not RED-first ones** (§6) — they ride hooks D2 keeps
+   deliberately unchanged, and forcing them red would have meant inventing behaviour.
+6. **`FeedThread.excerptIsReply` ships with no production consumer.** `FeedCards` derives the byline
+   from a null `excerptAuthor` alone, which coincides with the flag for owner threads and differs for a
+   persona's reply-less one. Its KDoc claimed to be "the discriminator the caller needs" — a sentence
+   about a caller that does not exist. Rewritten to say what is true. **Open:** §7's fuller rule ("don't
+   name the same voice twice") would use this flag to suppress the excerpt byline when a persona's own
+   reply-less thread is previewing its own OP; today that card shows the persona's name twice. Visually
+   checked and judged mild; recorded here rather than fixed, because it is a product call.
+
+Also corrected before it became permanent: **V29's first draft explained its CHECKs with "SQLite cannot
+add a CHECK by ALTER TABLE"** — the exact folk claim the V28 review close-out disproved and the sqlite
+skill now brands false, regressing into new code one slice later. A migration is immutable once applied,
+so the honest argument (free at birth, *conditional* afterwards, because the retrofit validates the whole
+table and aborts on the first violator) went in before it shipped.
 
 ## 11. Known gaps this design pre-books for §10.4
 
