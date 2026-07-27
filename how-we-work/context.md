@@ -334,7 +334,7 @@ recorded owner call). Records resurface deterministically when the scoped contex
 words (binary whole-word overlap + one associative hop, ≤3 matched + parents, ≤5 total, injected
 as the fourth `withPersonaContext` block live at settle) and every scribe write is audited at
 `/admin/memory` with revert — which deletes but deliberately does NOT roll the watermark back.
-Suite 237 → 263 scenarios; tier 0/1/2: 397/243/154. The slice then went through a
+Suite 237 → 263 scenarios; tier 0/1/2: 397/243/156. The slice then went through a
 **seven-dimension adversarially-verified review** (0 blockers, 0 majors, 9 minors, 10 nits — all
 addressed in the follow-up commit, plan doc §10.7), which is where two of the learnings below come
 from.

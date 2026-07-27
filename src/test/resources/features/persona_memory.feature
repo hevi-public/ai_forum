@@ -404,11 +404,17 @@ Feature: Each member privately remembers what it lived through, and the memory r
   # stands, so a second attempt can only arrive from a stale page or a crafted POST — which is
   # exactly what create-once has to survive. The original root standing afterwards is the assertion;
   # "no 500" alone would pass on a write that overwrote it.
+  # The redirect status is asserted on the second submission for scenario 26's reason, which binds
+  # here just as hard: HttpClient uses RestClient.exchange(), which does NOT throw on 5xx, so
+  # without this line dropping the `rootOf` pre-check would surface the partial unique index as a
+  # 500 and BOTH remaining Thens would still pass — the original root stands and the second one is
+  # absent whether the write was refused or crashed. The status is what tells those two apart.
   Scenario: The owner sets a member's root through the form and a second attempt changes nothing
     When the owner sets the root "Learned patience rebuilding a tractor engine one winter" for "sol"
     Then the profile for "sol" shows the root "Learned patience rebuilding a tractor engine one winter"
     When the owner sets a second root "Actually grew up behind the counter of a print shop" for "sol"
-    Then the profile for "sol" shows the root "Learned patience rebuilding a tractor engine one winter"
+    Then the response status is 302
+    And the profile for "sol" shows the root "Learned patience rebuilding a tractor engine one winter"
     And the profile for "sol" shows no root "Actually grew up behind the counter of a print shop"
 
   # 26. The silent-rejection posture of that same write surface, pinned rather than described

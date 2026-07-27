@@ -1,7 +1,7 @@
 # Persona Memory — the stable-personality floor, and the first honest increment of recall
 
 > **Status:** ✅ built 2026-07-26 (V28) — `./gradlew verifyAll` green, suite 237 → 263 scenarios,
-> tier 0/1/2: 397/243/154 · designed 2026-07-26 · reviewed and hardened 2026-07-26 (§10.7)
+> tier 0/1/2: 397/243/156 · designed 2026-07-26 · reviewed and hardened 2026-07-26 (§10.7)
 > · **Owner:** Hevi
 > Parent: `ai-driven-forum-direction.md` §9 ("off-map but near-term: persona memory, pulled forward
 > 2026-07-21", `:200-201`), §11.7 Stays-Cut · Spec: `ai-forum-requirements.md` §6.3 (`:277-285`),
@@ -190,7 +190,7 @@ CREATE INDEX idx_memory_change_changed_at ON memory_change(changed_at);
 ALTER TABLE persona ADD COLUMN memory_judged_at TEXT;
 ```
 
-**Two comments in that SQL are wrong, and are reproduced anyway because the migration is applied
+**Three comments in that SQL are wrong, and are reproduced anyway because the migration is applied
 and therefore immutable** (the S4a V25 lesson: editing an applied migration strands every existing
 DB on a checksum mismatch). This block is a faithful copy of the file, so the corrections live
 here rather than in it — same posture §10.3 item 1 already takes for the `agree by construction`
@@ -201,6 +201,16 @@ note:
   row and aborts on the first violator, and the table-level `ALTER … ADD CHECK` syntax is missing
   on older engines. The decision the comment defends is unaffected (§2.3): free at birth,
   conditional afterwards, is the real argument.
+- *"declared here because SQLite cannot add a foreign key by ALTER TABLE later"* — **false as
+  stated**, and the correction was owed the moment the review rewrote the skill's version of the
+  same folk claim (§10.7 finding 8; `.claude/skills/sqlite-spring-jdbc/SKILL.md` now brands it
+  "wrong in the direction that costs the most"). A NEW column added by `ALTER TABLE … ADD COLUMN`
+  MAY carry a `REFERENCES` clause and the FK is enforced — verified on both the system engine and
+  the shipped xerial driver. What is genuinely unaddable is an FK on an *existing* column, a
+  table-level/composite FK (which is what V28's same-persona edge needs, so the DDL's *decision*
+  survives), and — the reason the comment is nearly right for the wrong reason — a `NOT NULL` FK
+  column, since a `REFERENCES` add must default to NULL. This block claimed a complete count of
+  the wrong comments while leaving this one standing; that is now three, and this is it.
 - *"the two sides agree by construction (I5)"* on the length CHECK — true only over the input
   domain that excludes `U+0000` (§10.3 item 1). `MemoryText`'s KDoc carries the qualified version.
 
@@ -215,9 +225,15 @@ from records only (§2.4 — §2.3 already keeps the root out of the pass's sigh
 the construction, `MemoryRecall`'s hop resolves `parent_id` only among the `kind='record'` rows
 it already loaded (§2.7), so even a root-parented row smuggled in by hand SQL could never drag
 the root into a prompt. Without this rule two things break quietly: the associative hop would
-inject the root body — violating §2.3's recorded owner call, which scenario 20's no-leak half
-exists to catch — and the root's delete-and-re-author flow would cascade-delete every child
-under it.
+inject the root body — violating §2.3's recorded owner call, caught by the **Tier-0 hop-filter
+case** (`MemoryRecallTest`, which forges a root-parented row the repository cannot produce and
+asserts the root rides neither the match nor the hop) — and the root's delete-and-re-author flow
+would cascade-delete every child under it.
+
+*Not* scenario 20, which an earlier draft of this paragraph credited here: its owner record is
+top-level and no acceptance step can create a root-parented one, so it pins the root out of
+RECALL, never out of the HOP. §10.4 says so; this sentence contradicted it until the review
+follow-up's own follow-up, and the contradiction is exactly the class §7's ledger exists to stop.
 
 *Rejected:* B's original `parent_id TEXT REFERENCES persona_memory(id) ON DELETE SET NULL` with a
 repository-level same-persona check — the guardrails verdict ruled the repository-only guard a
@@ -1237,15 +1253,22 @@ table.
 `config_guardrails.feature` = 24 new; printed acceptance count 237 → 261. The doc's 234 → 258
 absolutes were stale at spec time — three scenarios merged from the ambient-slice PRs between
 design and spec; the +24 delta was always the robust check, and it held. Tier 0: **392** (43 with
-step 3, 2 more at close-out — §10.3's pins); Tier 1: **243**; Tier 2: **154**. RED-first held: 23
+step 3, 2 more at close-out — §10.3's pins); Tier 1: **243**; Tier 2: **154** (at close-out; the
+review follow-up took it to **156**, below). RED-first held: 23
 of 24 landed red, and the preamble's named absence-guard exemption (scenario 1) was the
-exactly-one green. **The review follow-up then moved two of the four numbers** (§10.7):
+exactly-one green. **The review follow-up then moved three of the four numbers** (§10.7):
 `persona_memory.feature` 22 → 24 scenarios, printed acceptance 261 → **263** (delta at merge
-**+26**), and Tier 0 392 → **397** — the `NEWEST_FIRST` polarity pin, the `WholeWords`
+**+26**); Tier 0 392 → **397** — the `NEWEST_FIRST` polarity pin, the `WholeWords`
 combining-mark pin, and the prompt-text pins for `MemoryProse`'s fourth line and `SYSTEM`'s
-read-it-as-evidence clause. Tier 1 (**243**) and Tier 2 (**154**) are unmoved: nothing the review
-changed was a service or a repository behaviour, which is itself the honest summary of a review
-that found 0 blockers and 0 majors.
+read-it-as-evidence clause; and Tier 2 154 → **156**, the two `MemoryScribeServiceTest` ordering
+pins (§7's inventory names both). Only Tier 1 (**243**) is unmoved — no repository behaviour
+changed. **Tier 2 moved because a SERVICE behaviour did:** `scribeMember` now re-sorts BOTH cuts
+on parsed instants before truncating, which changes which records and which engagements the model
+is shown, and is the most substantive change in the whole follow-up. An earlier draft of this
+paragraph said Tier 2 was unmoved and that nothing the review changed was a service behaviour —
+written in the same commit series that moved it. Corrected here rather than quietly: this section's
+whole subject is counts confirmed against printed output, never the prediction, and it is the one
+place a stale number reads as a verified one.
 
 **Scenario 13 asserted only half its contract until the pre-commit spec verification caught it** —
 "leaves the window open AND the pass completes" pinned the window but never the completion, so a
@@ -1353,12 +1376,24 @@ omits an item is worse than no ledger; the entries below are written to be falsi
   fix; it is a slice of its own, not a patch.
 - **`MAX_OWNER_MEMORIES = 24`** — the owner's authoring ceiling is enforced and unpinned; no test
   authors a twenty-fifth owner record.
-- **Four of the five owner-form rejection branches are still undriven** *(down from five — §10.7)*.
+- **Five of the six owner-form rejection branches are still undriven** *(down from six — §10.7)*.
   Scenario 26 now drives the over-long refusal end to end, which is the first test of any
   author-rejection branch at any tier; blank body, a body that is not a fixed point of `clean`, a
   NUL body, an unknown `parent`, and the owner ceiling remain enforced-and-unpinned. So does the
   authoring form's `parent` param end to end — scenarios 15 and 16 exercise the SCRIBE's `EXTENDS`
-  path, never the owner picker.
+  path, never the owner picker. *(The count was "four of five" until the follow-up recount: the
+  enumeration had always listed five survivors, so the total is six. Two more branches this
+  section owes and had omitted while billing itself exhaustive: `authorRoot`'s own
+  `MemoryText.validate` refusal — scenario 25 drives only the root happy path — and the
+  `personas.findBySlug(slug) ?: return "redirect:/personas"` miss on all three endpoints.)*
+- **The revert control's DROP-after-revert branch is unpinned.** `admin_memory.kte`'s
+  `@if(!change.reverted)` guard has no test that reads a reverted row's markup: scenario 18 runs
+  the revert step once on an un-reverted row, and scenario 19's revert is SKIPPED as superseded
+  (its closing assertion is that the row is *not* marked reverted). So deleting the guard — leaving
+  a dead control on an undone change — keeps the suite green; only inverting it reddens. The step's
+  KDoc claimed this branch was pinned "in scenario 19" until the follow-up recount; corrected there
+  too. Closing it needs a scenario that reverts successfully, re-reads the newest row, and asserts
+  no `data-memory-revert` form is offered.
 - ~~**The evidence cut (`BY_STAMP`) has no test.**~~ **Closed at the owner's request** (see §7's
   ledger for the mutation): `MemoryScribeServiceTest`'s *"the evidence cut keeps the twelve
   chronologically newest engagements, not the twelve lexically last"* pins it at Tier 2 without

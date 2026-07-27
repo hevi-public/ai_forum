@@ -116,9 +116,15 @@ class PersonaMemorySteps(
      * deleting the `data-memory-revert` form from admin_memory.kte, or breaking its
      * `@if(!change.reverted)` condition, kept the whole suite green while the entire control surface
      * §2.12 offers for an auto-applied write stopped rendering. Now the same deletion fails here,
-     * loudly, in scenarios 18 and 19 — and scenario 19's drop-after-revert branch is pinned too,
-     * since a row that still offered the control after being reverted would be a form this step
-     * finds where the template promises none.
+     * loudly, in scenarios 18 and 19.
+     *
+     * What this does NOT pin, said plainly because the first version of this comment claimed it:
+     * the template's `@if(!change.reverted)` DROP. No scenario ever reads a reverted row's markup —
+     * 18 runs this step once on an un-reverted row, and 19's revert is SKIPPED as superseded (its
+     * closing assertion is that the row is *not* marked reverted) — so deleting the guard, and
+     * offering a dead control on an undone change, keeps the suite green. Only inverting it reddens.
+     * Recorded in §10.4 rather than covered here: the branch needs a scenario that reverts, re-reads
+     * the newest row, and asserts no `data-memory-revert` form is offered.
      */
     @When("the owner reverts the latest memory change")
     fun revertLatestMemoryChange() {
