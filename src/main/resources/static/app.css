@@ -595,11 +595,14 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
 }
 .thread-row:first-child { border-top: 0; }
 .thread-row:hover { background: var(--row-hover); }
-.thread-row[data-unread-count="0"] { padding-left: 17px; }       /* read: no spine, align with unread text */
-.thread-row:not([data-unread-count="0"]) { border-left: 3px solid var(--sage); padding-left: 14px; }
+/* The unread spine keys off a CLASS, not off data-unread-count: a data-* attribute is a semantic hook
+   for the acceptance suite, never a stylesheet selector (the jte skill's rule). The hook still renders
+   on every card, "0" included — only the styling moved. */
+.thread-row:not(.is-unread) { padding-left: 17px; }              /* read: no spine, align with unread text */
+.thread-row.is-unread { border-left: 3px solid var(--sage); padding-left: 14px; }
 .thread-row__title { font-weight: 700; font-size: 14px; flex: 1 1 auto; }
 .thread-row__title a { color: var(--link); }
-.thread-row[data-unread-count="0"] .thread-row__title a { color: var(--muted); font-weight: 400; }
+.thread-row:not(.is-unread) .thread-row__title a { color: var(--muted); font-weight: 400; }
 
 /* row delete — shared by the thread list and the members list (rendered by fragments/rowDelete.kte).
    Same gated "are you sure" pattern as the reply delete (clay = warning hue), but a compact icon-only
@@ -654,6 +657,74 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
 .member-row .thread-row__title { font-weight: 700; font-size: 14px; }
 .member-row .reply__handle { margin-left: auto; color: var(--muted); }
 .member-row .row-delete { margin-left: 8px; }
+
+/* ------------------------------------------------- front-page feed (S6) */
+/* Two readings of one forum (plan_docs/ambient-slice-6.md): the thread cards above, restyled from a bare
+   title row into a card with a byline, a "last active" stamp and a one-line preview; and the activity
+   stream behind the toggle. Everything below uses the existing :root tokens, so the dark theme's
+   re-tinting of that family applies here for free. Nothing in verifyAll reads CSS — the card's
+   appearance in either theme is a standing §10.4 gap, held by review only. */
+
+/* The view control. Two plain forms side by side, so the pressed one reads as the current tab rather
+   than as a button you are about to click. The active modifier is --on and never --open: the home-rail
+   probe word-boundary-matches `open` inside the ask-card's opening tag. */
+.feed-toggle { display: flex; gap: 6px; margin: 0 0 12px; }
+.feed-toggle__option { margin: 0; }
+.feed-toggle__btn {
+  font-family: var(--mono); font-size: 11.5px; cursor: pointer;
+  background: var(--card); color: var(--muted);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 4px 12px;
+}
+.feed-toggle__btn:hover { background: var(--strip); color: var(--ink); }
+.feed-toggle__btn--on {
+  background: var(--sage); color: var(--sage-ink);
+  border-color: var(--sage); font-weight: 700;
+}
+.feed-toggle__btn:focus-visible { outline: none; border-color: var(--focus-border); box-shadow: 0 0 0 1px var(--focus-border); }
+
+/* Thread-card additions. The preview takes a whole line of its own (flex-basis) below the title row,
+   which is what keeps the title, byline, badge, stamp and delete trigger on one line as before. */
+.thread-row__author { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.thread-row__ago { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.thread-row__excerpt {
+  flex-basis: 100%; order: 1;
+  font-size: 12.5px; line-height: 1.5; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.thread-row__excerpt:empty { display: none; }
+.thread-row__excerpt-by { color: var(--sage-text); font-weight: 700; }
+
+/* The activity stream. Same card frame as the thread index so the two readings feel like one surface;
+   each row is flat by contract (I7), so the layout is one flex line that wraps the excerpt under it. */
+.activity-stream {
+  list-style: none; margin: 0; padding: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.activity-card {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 10px 14px 10px 17px;
+  border-top: 1px dotted var(--line-dotted);
+}
+.activity-card:first-child { border-top: 0; }
+.activity-card:hover { background: var(--row-hover); }
+/* Same spine as an unread thread card, and off a CLASS for the same reason: data-feed-unread is a hook
+   the suite reads, not a selector. */
+.activity-card.is-unread { border-left: 3px solid var(--sage); padding-left: 14px; }
+.activity-card__byline { font-weight: 700; font-size: 13px; color: var(--ink); }
+.activity-card__verb { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.activity-card__thread { font-size: 13px; color: var(--link); flex: 1 1 auto; }
+.activity-card__ago { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-left: auto; }
+.activity-card__excerpt {
+  flex-basis: 100%;
+  font-size: 12.5px; line-height: 1.5; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.activity-card__excerpt:empty { display: none; }
 
 /* ---------------------------------------------------------------- thread */
 /* Three-region scaffold mirroring the home page's left:nav / main / right:feeds frame. The LEFT rail

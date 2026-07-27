@@ -66,8 +66,14 @@ class ThreadRepository(private val jdbc: JdbcTemplate, private val clock: Clock)
     fun find(id: String): Thread? =
         jdbc.query("SELECT id, title, body, updated_at, author_id FROM thread WHERE id = ?", ::mapThread, id).firstOrNull()
 
-    fun findAll(): List<Thread> =
-        jdbc.query("SELECT id, title, body, updated_at, author_id FROM thread ORDER BY created_at DESC", ::mapThread)
+    /**
+     * How many threads the forum holds — the left rail's "~/forum" count, which both front-page views
+     * need. Its own query rather than `feedThreads().size`: the activity view renders no thread cards at
+     * all, so counting them would mean issuing the thread-card read the stream exists without (S6 §2.1).
+     *
+     * This replaces `findAll()`, whose only caller was the front page's 2N+1.
+     */
+    fun count(): Int = jdbc.queryForObject("SELECT COUNT(*) FROM thread", Int::class.java) ?: 0
 
     /**
      * Threads most recently active first, capped at [limit]. Activity = newest POSTED comment, or the

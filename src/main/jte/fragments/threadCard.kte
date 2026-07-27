@@ -1,0 +1,40 @@
+@import com.aiforum.web.AuthorLabel
+@import com.aiforum.web.ThreadRow
+@param card: ThreadRow
+
+<%-- One thread as a front-page card (ambient-slice-6 §2.5). The element, the class and the four original
+     hooks are UNCHANGED and in their original order (D2) — that is what buys the slice "zero rewritten
+     .feature lines", and it is also why .thread-row is not renamed: app.css hides the delete trash at
+     rest and reveals it on .thread-row:hover, and drops .row-delete__confirm onto its own line via
+     flex-basis inside this flex-wrap container. thread_deletion asserts only the hx-post string, so a
+     rename would break hover-reveal, the confirm line-drop, the swap target and Cancel all silently,
+     which is why rowDelete also stays a DIRECT child of this element.
+
+     data-thread-author keeps its RAW stored value and stays a JTE smart attribute (omitted entirely for
+     an owner-authored thread, never rendered empty) — the ambient attribution probes read it. Only the
+     VISIBLE byline is mapped through AuthorLabel.
+
+     data-unread-count renders ALWAYS, "0" included: it is a hook, and the unread SPINE is styled off the
+     .is-unread class instead, so no data-* attribute is doing a stylesheet's job.
+
+     data-nav-item is D12's half of the keyboard-nav pin — presence only; no tier drives nav.js. Its
+     value is "thread" and not "post" because nav.js treats data-nav-item="post" as the root of a tree. --%>
+!{val author = card.author}
+!{val excerptBy = card.excerptBy}
+<div class="${if (card.unreadCount > 0) "thread-row is-unread" else "thread-row"}" data-thread-id="${card.id}" data-thread-title="${card.title}" data-unread-count="${card.unreadCount}" data-thread-author="${author}" data-thread-ago="${card.ago}" data-nav-item="thread" data-nav-id="${card.id}">
+    <span class="thread-row__title"><a href="/threads/${card.id}">${card.title}</a></span>
+    @if(author != null)
+        <span class="thread-row__author" data-thread-byline>${AuthorLabel.display(author)}</span>
+    @endif
+    @if(card.unreadCount > 0)
+        <span class="pill">${card.unreadCount} new</span>
+    @endif
+    <span class="thread-row__ago">${card.ago}</span>
+    @template.fragments.rowDelete(postUrl = "/threads/${card.id}/delete", rowSelector = ".thread-row", label = "Delete thread", warning = "Delete this thread and all of its comments? This can't be undone.")
+    <%-- The preview is CHILD TEXT and the hook carries the thread ID, never the prose (I2/D6): gg.jte
+         does not escape ">" in attribute context, so a body excerpt in a hook would truncate the tag and
+         make every hook after it unreadable. The excerpt is read with the span-text idiom, which slices
+         to the first </span> — hence the byline is a <b> and not a nested span (I7). Rendered even when
+         empty, so a title-only thread's card still carries the hook and reads as "no preview". --%>
+    <span class="thread-row__excerpt" data-thread-excerpt="${card.id}">@if(excerptBy != null)<b class="thread-row__excerpt-by">${AuthorLabel.display(excerptBy)}</b> · @endif${card.excerpt}</span>
+</div>

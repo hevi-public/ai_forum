@@ -1,0 +1,35 @@
+@import com.aiforum.web.ActivityRow
+@import com.aiforum.web.FeedCards
+@param events: List<ActivityRow>
+
+<%-- The activity stream: every thread opening and every settled comment as its own card, newest first
+     across both, each linking INTO its thread at that event (a post card's event id IS its thread id, so
+     it lands on the opening post's existing #reply-<threadId> anchor).
+
+     The hook vocabulary here is DISJOINT from the thread card's (I1): no data-thread-*, no delete
+     control. That is what lets "the activity view shows no thread cards" be a property — a scan for the
+     whole data-thread- prefix — rather than a spot check on one attribute.
+
+     ONE <li> PER CARD WITH FLAT CHILDREN (I7): the acceptance probe slices a card from its opening <li>
+     to the FIRST </li>, so anything list-shaped nested inside would truncate every later assertion
+     against that card.
+
+     data-feed-unread is an explicit STRING, because JTE drops a Boolean-valued attribute when false and
+     "is not unread" would then pass on a card that had lost the hook altogether (§2.5). A post card is
+     never unread: "N new" is about replies the owner has not read, and an opening is not one of them.
+
+     data-feed-more discloses that the list is CUT rather than complete (§5, D7). There is no pagination
+     and no cursor — adding one needs the whole-second stamp anomaly answered first — so saying so is the
+     honest alternative. No scenario asserts this hook today (§11). --%>
+<ul class="activity-stream" data-activity-stream data-feed-more="${(events.size >= FeedCards.STREAM_LIMIT).toString()}">
+    @for(event in events)
+        <li class="${if (event.unread) "activity-card is-unread" else "activity-card"}" data-feed-event="${event.id}" data-feed-kind="${event.kind}" data-feed-thread="${event.threadId}" data-feed-author="${event.author}" data-feed-unread="${event.unread.toString()}" data-nav-item="event" data-nav-id="${event.id}">
+            <span class="monogram monogram--sm" aria-hidden="true" style="--mono-h: ${event.hue}">${event.monogram}</span>
+            <span class="activity-card__byline">${event.byline}</span>
+            <span class="activity-card__verb">${if (event.kind == "post") "opened" else "replied in"}</span>
+            <a class="activity-card__thread" href="${event.href}">${event.threadTitle}</a>
+            <span class="activity-card__ago">${event.ago}</span>
+            <span class="activity-card__excerpt">${event.excerpt}</span>
+        </li>
+    @endfor
+</ul>
