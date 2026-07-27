@@ -622,6 +622,56 @@ class MemoryScribeServiceTest {
         assertEquals(listOf("Learned that horizons bound reads, not members"), memories.bodiesOf("sol"))
     }
 
+    // --- the evidence cut (§2.4) ---------------------------------------------------------------------
+
+    @Test
+    fun `the evidence cut keeps the twelve chronologically newest engagements, not the twelve lexically last`() {
+        // The cut is a `takeLast`, so whatever order the evidence arrives in IS the selection rule —
+        // and the order `exchangesSince` supplies is SQL's `ORDER BY c.created_at`, string order over
+        // `Instant.toString()`. That printer emits NO fraction on a whole second, so "04:30:00Z"
+        // sorts AFTER "04:30:00.500Z" ('Z' is 0x5A, '.' is 0x2E) while being half a second OLDER.
+        // Name the failure: thirteen engagements against a twelve-cut whose boundary falls inside one
+        // such pair, and the string order keeps the older sibling and throws the newer one away —
+        // MAX_EVIDENCE_ENGAGEMENTS' "the twelve most recent" becomes a documented lie, and the member
+        // is judged on the words it had already moved past while the words it moved TO never reach
+        // the scribe. It is the boundary pair that matters because it is the only place the two
+        // orderings disagree: eleven engagements a minute later sort identically under both, so they
+        // fill the cut without deciding it.
+        //
+        // Both directions are asserted, because either alone is passable by a mutation that keeps
+        // everything: "the newer sibling is shown" survives deleting the cut, "the older sibling is
+        // absent" survives deleting the pair. And the pair is fed NEWEST-first, so a `takeLast` with
+        // the sort removed outright — not merely pointed the wrong way — also drops the newer one.
+        val personas = RosterPersonas(listOf(persona("sol")))
+        val memories = FakeMemories()
+        val changes = FakeMemoryChanges()
+        val llm = ScriptedLlm(says(remember("Learned that the newest words are the ones worth keeping")))
+        val comments = FakeComments(
+            listOf(
+                exchange("sol", "owner", SUB_SECOND_BODY, createdAt = BOUNDARY_SUB),
+                exchange("sol", "owner", WHOLE_SECOND_BODY, createdAt = BOUNDARY_WHOLE),
+            ) + (1..11).map {
+                exchange("sol", "owner", "$it - and the argument kept moving", createdAt = AFTER_THE_PAIR)
+            },
+        )
+
+        service(comments, personas, memories, changes, llm).consolidate(ScribeSource.MANUAL)
+
+        val instruction = llm.received.single().context.comments.single().body
+        assertEquals(
+            12, instruction.lines().count { it.startsWith("  - in ") },
+            "thirteen engagements, twelve shown — the cut has to bite for the boundary to mean anything",
+        )
+        assertTrue(
+            instruction.contains(SUB_SECOND_BODY),
+            "the fractionally NEWER sibling is what the twelve most recent means: $instruction",
+        )
+        assertFalse(
+            instruction.contains(WHOLE_SECOND_BODY),
+            "and its half-second-older twin is the one the cut drops — string order keeps it instead",
+        )
+    }
+
     // --- the letter protocol at the service: resolution, degrade, and the judgment-site re-read --------
 
     @Test
@@ -916,5 +966,21 @@ class MemoryScribeServiceTest {
         /** RUN_STAMP − 90 days − the one-second floor margin, truncated to a whole second — the
          *  coarse SQL floor a never-stamped roster must produce under the default lookback. */
         const val HORIZON_FLOOR = "2025-10-03T12:59:59Z"
+
+        /** The boundary pair, one shared second: `Instant.toString()` prints no fraction on a whole
+         *  second, so [BOUNDARY_WHOLE] string-sorts AFTER [BOUNDARY_SUB] while being half a second
+         *  older. The evidence cut has to fall between exactly these two to be worth pinning. */
+        const val BOUNDARY_WHOLE = "2026-01-01T04:30:00Z"
+        const val BOUNDARY_SUB = "2026-01-01T04:30:00.500Z"
+
+        /** The eleven engagements that fill the cut — a minute after the pair, so they are newer
+         *  under BOTH orderings and cannot be what decides it. */
+        const val AFTER_THE_PAIR = "2026-01-01T04:31:00Z"
+
+        /** The pair's prose, distinct in the first twelve characters (which is what [exchange] folds
+         *  into the comment id) so nothing about this test rides on the comparator's id tiebreak —
+         *  the pair's stamps differ, so the tiebreak never even runs on it. */
+        const val WHOLE_SECOND_BODY = "The whole-second half of the boundary pair"
+        const val SUB_SECOND_BODY = "The sub-second half of the boundary pair"
     }
 }

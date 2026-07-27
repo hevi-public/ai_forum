@@ -1023,7 +1023,10 @@ the 90-day clamp → the Tier-2 all-time test · stop writing `read_at` → the 
 skip the judgment-site re-read → the Tier-2 vanished-parent test · write an `ambient_run` row →
 scenario 21 · let the pass reach `insertRoot` → the failing fake · let the hop resolve a root
 parent → the Tier-0 hop-filter case · offer the root in a parent picker → the Tier-1 root-parent
-refusal.
+refusal · **delete `.sortedWith(BY_STAMP)` from the evidence cut, OR reverse it → the Tier-2
+evidence-cut test** (both, and note they redden through *different* assertions of it — the deletion
+through "the newer sibling is present", the reversal through "the older one is absent"; a
+one-directional version of that test would have survived one mutation each way).
 
 **Two ledger entries the review found were beliefs, now facts** (§10.7 — both re-run, both
 restored):
@@ -1348,17 +1351,20 @@ omits an item is worse than no ledger; the entries below are written to be falsi
   NUL body, an unknown `parent`, and the owner ceiling remain enforced-and-unpinned. So does the
   authoring form's `parent` param end to end — scenarios 15 and 16 exercise the SCRIBE's `EXTENDS`
   path, never the owner picker.
-- **The evidence cut (`BY_STAMP`) and the offered-parents CALL SITE have no test.** Tier 0 pins
-  `MemoryRecall.NEWEST_FIRST` itself, which is the shared contract, but not that
-  `MemoryScribeService` applies it before `take(26)`; and `BY_STAMP` is private inside
-  `scribeMember`, so it is unreachable at Tier 0 at all. Both are pinnable at **Tier 2** without
-  exposing anything, and the scenarios are written down here rather than left as an intention:
-  (a) seed two engagements inside one second where the fractionally NEWER one carries a sub-second
-  stamp and its sibling a fraction-less one, put `MAX_EVIDENCE_ENGAGEMENTS`' worth of older
-  evidence in front of them, and assert on the captured prompt (or the `memory_change` `cited`
-  snapshot, rendered from the same list) that the newer engagement is the one kept — under the old
-  `takeLast` over the raw SQL order the fraction-less stamp sorts last and the newer sibling is
-  dropped; (b) give a member more than 26 records whose stamps collide inside one second and assert
+- ~~**The evidence cut (`BY_STAMP`) has no test.**~~ **Closed at the owner's request** (see §7's
+  ledger for the mutation): `MemoryScribeServiceTest`'s *"the evidence cut keeps the twelve
+  chronologically newest engagements, not the twelve lexically last"* pins it at Tier 2 without
+  exposing anything — thirteen engagements against the twelve-cap, the cut falling on a same-second
+  boundary pair whose sub-second half is chronologically newer and lexicographically *earlier*.
+  Two things that scenario taught, worth keeping: **both directions had to be asserted** (the newer
+  sibling present AND the older absent), because deleting the sort and reversing the comparator
+  redden through *different* assertions and either one alone survives one of the two mutations; and
+  the pair is fed to the fake **newest-first**, so an unsorted `takeLast` cannot pass by luck of
+  the input order.
+- **The offered-parents CALL SITE still has no test.** Tier 0 pins `MemoryRecall.NEWEST_FIRST`
+  itself, which is the shared contract, but nothing pins that `MemoryScribeService` applies it
+  before `take(26)`. Pinnable at Tier 2 by the same method, written down rather than left as an
+  intention: give a member more than 26 records whose stamps collide inside one second and assert
   the letter list, or the resolved parent, reflects instant order rather than string order.
 - **Scenario 20 pins the root out of RECALL, not out of the HOP.** Its owner record is top-level,
   so a `recordById` that stopped filtering to `kind='record'` stays green; §2.2 forbids authoring a
