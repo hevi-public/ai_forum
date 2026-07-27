@@ -244,6 +244,29 @@ object Html {
      */
     fun latestMemoryChangeRow(html: String): String? = liBlock(html, "data-memory-change")
 
+    /**
+     * One rail box as a self-contained block — its opening `<section … data-rail-box="[name]" …>`
+     * through the FIRST `</section>` — or null when the page renders no such box.
+     *
+     * A block rather than a page-wide probe because a rail's CONTENT is not unique to its rail: the
+     * thread page renders the same comment prose in the tree that the starred box quotes in the
+     * margin, so an un-scoped `contains` there reads the tree. Measured, not assumed — with the
+     * thread page's starred box rendered empty, the page-wide probe still passed and only the scoped
+     * one reddened. Scoping is what makes "this box shows it" mean the box.
+     *
+     * Slicing to the first close is sound because every rail fragment is a single `<section>` with
+     * nothing sectioned inside it — verified across all eight (`activeThreads`, `branchIndex`,
+     * `contextLegend`, `forumNav`, `members`, `recentComments`, `shortcut`, `starredComments`), and
+     * over the one sub-template a box includes (`storyCard`). A rail box that ever nests a
+     * `<section>` would truncate here, which is why the fragments are the place to keep flat.
+     */
+    fun railBox(html: String, name: String): String? {
+        val open = Regex("<section\\b[^>]*data-rail-box=\"${Regex.escape(name)}\"[^>]*>").find(html) ?: return null
+        val close = html.indexOf("</section>", open.range.last + 1)
+        if (close < 0) return null
+        return html.substring(open.range.first, close + "</section>".length)
+    }
+
     /** The visible text of a fragment: tags stripped, entities left alone, whitespace collapsed. */
     fun textOf(html: String): String =
         html.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()

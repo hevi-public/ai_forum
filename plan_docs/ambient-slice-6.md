@@ -352,7 +352,7 @@ two unverified ledger entries and both were wrong; that is why this sentence exi
 | Emit `data-thread-title` on an activity card | #3's second clause |
 | Flag post cards unread | #16 |
 | Remove `owner_pref` from the reset hook | run the suite **twice in different orders** and confirm the leak surfaces |
-| Delete the `recentCommentsBox` call from `index.kte` | `home_rail` must redden — **green before the box-scoping fix, red after; verify both** |
+| ~~Delete the `recentCommentsBox` call from `index.kte`~~ **→ replaced: render the thread page's starred box EMPTY** (`starredComments.take(0)` in `thread.kte`) | `starred_sidebar`'s thread-page scenario — **GREEN before the box-scoping fix, RED after. Both verified 2026-07-27.** *The original row was wrong and proved nothing: `home_rail`'s recent-comments scenario asserts `data-rail-box` and counts `data-recent-comment` BEFORE its `rail shows` step, so deleting the box reddens it with or without the fix. The discriminating mutation must keep the box and empty its rows, on the page where `rail shows` is the ONLY Then.* |
 | Reorder the card's `data-*` attributes | `new_thread` ×2 and `shortcut` must stay **GREEN** |
 
 **Invariants:** I1 a stream card can never satisfy a thread-card assertion (disjoint hook vocabularies +
@@ -397,6 +397,7 @@ and would have to land as its own PR ahead of this one.
 | D10 | No pagination | Refused with its reason (§5), because the cursor version is a real bug waiting on the whole-second anomaly |
 | D11 | The **recent-comments rail box is suppressed in the Activity view only** | It is a strict subset of the stream — the same five comments twice on one screen. Owner call, 2026-07-27 |
 | D12 | Cards **do** carry `data-nav-item` — j/k navigation extends to the front page | Owner call, 2026-07-27, made deliberately rather than inherited. The argument against is recorded below, not discarded |
+| D13 | `FeedView` gets its **own file** (`web/FeedView.kt`), not a declaration inside `HomeController.kt` | §2.1 sketched it in the controller, but `OwnerPrefRepository` must name the type — and a repository importing a *controller file's* type is worse layering than both importing a two-constant vocabulary. Changed during the build |
 
 ## 10. Owner calls — all three answered 2026-07-27
 
@@ -443,7 +444,9 @@ about *this* data volume, not an invariant · **the whole-second lexicographic a
 LIMIT boundary — a one-row display swap, inherited unchanged from `CommentRepository.recentPosted`, and
 the reason `findActive`'s "sorts chronologically" comment is **false as written** (verified:
 `MAX()` over `12:00:00Z` and `12:00:00.500Z` returns the *older* whole-second stamp, because `'Z' > '.'`)
-· `agoOrNull`'s null branch is never exercised by a fixture with a corrupt stamp · the pre-existing
+· `agoOrNull`'s null branch is pinned directly at Tier 0, but **no fixture and no Tier-1 or acceptance
+path drives a corrupt stamp end-to-end through the feed** — the narrow claim, because the blunt version
+("the null branch is never exercised") would be a lie about the suite · the pre-existing
 `>`-in-a-title exposure of `Html.threadRowAttr` · the persona-memory `homeFingerprint` helper becomes
 view-dependent (its KDoc needs a sentence; no code change) · **j/k navigation actually working on the
 new cards** (D12): the acceptance suite drives no browser and no tier drives `nav.js`, so the pin reaches

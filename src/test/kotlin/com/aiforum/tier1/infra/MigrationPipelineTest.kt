@@ -54,7 +54,7 @@ class MigrationPipelineTest {
             }
         }
 
-        // 3. Upgrade the EXISTING db to the latest schema (Flyway applies the pending V4–V28).
+        // 3. Upgrade the EXISTING db to the latest schema (Flyway applies the pending V4–V29).
         flyway(url, null).migrate()
 
         // 4. The old rows survived, and the new columns carry their migration default / backfill.
@@ -140,7 +140,18 @@ class MigrationPipelineTest {
                     )
                 }
 
-                // flyway_schema_history records the full V1..V28 chain as applied (V20 thread.author_id +
+                // V29 adds a NEW TABLE rather than a column, and the house question for that shape is what
+                // it reads as on a database that already existed: empty. `owner_pref` ships NO seed row on
+                // purpose (plan_docs/ambient-slice-6.md D4) — absence IS FeedView.DEFAULT — so an upgraded
+                // forum opens on the thread-card view exactly like a fresh one, and every pre-S6 front-page
+                // scenario keeps its Gherkin. A seed row here would be this migration quietly choosing a
+                // view for a forum whose owner never touched the toggle.
+                st.executeQuery("SELECT COUNT(*) AS n FROM owner_pref").use { rs ->
+                    rs.next()
+                    assertEquals(0, rs.getInt("n"), "V29 seeds no preference row — absence is the default view")
+                }
+
+                // flyway_schema_history records the full V1..V29 chain as applied (V20 thread.author_id +
                 // V21 ambient_run landed with the ambient loop; V22 added ambient_run.action for S2's
                 // comment action; V23 added the article_seen dedupe registry for S5's feed source,
                 // plan_docs/ambient-slice-5.md; V24 added persona_stance, S3's qualitative relation graph,
@@ -156,12 +167,15 @@ class MigrationPipelineTest {
                 // plan_docs/ambient-slice-4b.md; V28 added persona_memory (the private per-member memory
                 // tree with its composite same-persona parent FK and owner-only root), memory_change (the
                 // append-only audit trail carrying the pre-query read_at) and persona.memory_judged_at —
-                // the per-member consolidation watermark, plan_docs/persona-memory.md). Bump this with
-                // every migration — it is the check that a new migration actually RUNS against an old
-                // database rather than only a fresh one.
+                // the per-member consolidation watermark, plan_docs/persona-memory.md; V29 added owner_pref
+                // — S6's one-global-row persisted front-page view, seedless so that absence is the default
+                // — plus the two partial `state='POSTED'` comment indexes the feed's reads want, neither of
+                // which V17's (thread_id, depth, created_at) can serve, plan_docs/ambient-slice-6.md).
+                // Bump this with every migration — it is the check that a new migration actually RUNS
+                // against an old database rather than only a fresh one.
                 st.executeQuery("SELECT MAX(CAST(version AS INTEGER)) AS v FROM flyway_schema_history").use { rs ->
                     rs.next()
-                    assertEquals(28, rs.getInt("v"), "the latest migration (V28) should be recorded as applied")
+                    assertEquals(29, rs.getInt("v"), "the latest migration (V29) should be recorded as applied")
                 }
             }
         }

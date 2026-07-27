@@ -50,13 +50,37 @@ class TestData(private val jdbc: JdbcTemplate, private val clock: Clock) {
         )
     }
 
-    fun insertThread(title: String): String {
+    /**
+     * The instant a seeded row is stamped with: the fixed test [clock], minus [agoSeconds].
+     *
+     * The test clock is FIXED, so without an age every seeded row shares one `created_at` and any
+     * "newest" or ordering assertion is really reading an arbitrary UUID tie-break — green today, red
+     * tomorrow on an unrelated id change, and reported as a regression in whatever slice happens to be
+     * open (plan_docs/ambient-slice-6.md §8). Ages are per call rather than a global monotonic stagger
+     * on purpose (D9): a stagger would move the unread boundary under every scenario that seeds a
+     * comment and then reads it, which is a change to fixtures this slice does not own.
+     */
+    private fun stampedAt(agoSeconds: Long): String = clock.instant().minusSeconds(agoSeconds).toString()
+
+    /**
+     * Seed a thread; returns its id. [authorId] is the OP's attribution (V20) — null is an owner-authored
+     * thread, a persona id is one the ambient loop opened — and [body] is the opening post.
+     *
+     * All three extra parameters are DEFAULTED to what the original one-argument helper wrote (owner, no
+     * body, stamped now), so every existing call site keeps its exact meaning.
+     */
+    fun insertThread(title: String, authorId: String? = null, body: String = "", agoSeconds: Long = 0): String {
         val id = newId()
-        jdbc.update("INSERT INTO thread(id, title, created_at) VALUES (?,?,?)", id, title, clock.instant().toString())
+        jdbc.update(
+            "INSERT INTO thread(id, title, body, author_id, created_at) VALUES (?,?,?,?,?)",
+            id, title, body, authorId, stampedAt(agoSeconds),
+        )
         return id
     }
 
-    /** Insert a comment node; returns its id. parentId null → top-level under the thread. */
+    /** Insert a comment node; returns its id. parentId null → top-level under the thread.
+     *  [agoSeconds] backdates `created_at` off the fixed clock — see [stampedAt] for why an ordering
+     *  fixture must set it rather than let three rows share one instant. */
     fun insertComment(
         threadId: String,
         authorId: String,
@@ -65,14 +89,36 @@ class TestData(private val jdbc: JdbcTemplate, private val clock: Clock) {
         state: String = "POSTED",
         depth: Int = if (parentId == null) 0 else 1,
         depthBudget: Int = 0,
+        agoSeconds: Long = 0,
     ): String {
         val id = newId()
         jdbc.update(
             """INSERT INTO comment(id, thread_id, parent_id, author_id, body, state, depth, depth_budget, created_at)
                VALUES (?,?,?,?,?,?,?,?,?)""",
-            id, threadId, parentId, authorId, body, state, depth, depthBudget, clock.instant().toString(),
+            id, threadId, parentId, authorId, body, state, depth, depthBudget, stampedAt(agoSeconds),
         )
         return id
+    }
+
+    /**
+     * Seed the owner's persisted front-page view (V29 `owner_pref`, plan_docs/ambient-slice-6.md §2.3) —
+     * a straight INSERT, the way [insertStance] seeds a relation, so a `Given` that needs the activity
+     * view can establish it without driving the toggle it may be the scenario's job to test.
+     *
+     * Takes the raw slug rather than `FeedView`, because a fixture should speak the Gherkin's own word.
+     * That is not a hole in the enum guard: the guard exists on the path the app writes through
+     * (`OwnerPrefRepository.setFeedView`), and this helper is test-only code that already bypasses every
+     * production door by design. V29's CHECK still refuses a slug that names no view, here as anywhere.
+     *
+     * A plain INSERT with no upsert: the reset hook wipes `owner_pref` before every scenario, so there is
+     * never a row to collide with — and a scenario seeding the view twice is one that has stopped saying
+     * what it means.
+     */
+    fun setFeedView(slug: String) {
+        jdbc.update(
+            "INSERT INTO owner_pref(id, feed_view, updated_at) VALUES (1,?,?)",
+            slug, clock.instant().toString(),
+        )
     }
 
     /**
