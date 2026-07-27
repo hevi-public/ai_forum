@@ -39,10 +39,10 @@ settles afterwards. A V29 `comment.origin` column would be NULL for all history 
 for every existing row — the argument that killed the `core` column in S4b.
 
 So the view ships as the honest superset — **all settled activity, author-agnostic, named "Activity"
-and never "Ambient"**, in the toggle, the `<h1>`, the empty state and this document. **This is a
-re-decision of the owner call's own wording and is flagged for the owner here rather than buried in an
-implementation note.** If the owner wants a genuinely ambient-only stream, that is a different slice
-whose §2 must first make provenance representable.
+and never "Ambient"**, in the toggle, the `<h1>`, the empty state and this document. This was a
+re-decision of the owner call's own wording, put to the owner rather than buried in an implementation
+note, and **answered 2026-07-27: ship Activity now, revisit later** (§10.1). An ambient-only stream is
+**deferred, not refused** — it is a later slice whose §2 must first make provenance representable.
 
 ## 2. Design
 
@@ -262,16 +262,17 @@ The invariants I1–I11 are listed in §7 beside the mutation that proves each o
 
 ## 6. Acceptance scenarios, RED-first
 
-`+18`, **zero rewritten `.feature` lines**, one existing feature file edited (a stale header comment plus
-two appended scenarios). Verify the acceptance task's printed count rises by exactly 18 — the **delta**
-is the robust check; absolutes drift with sibling merges.
+`+19`, **zero rewritten `.feature` lines**, one existing feature file edited (a stale header comment plus
+two appended scenarios). Verify the acceptance task's printed count rises by exactly 19 — the **delta**
+is the robust check; absolutes drift with sibling merges. *(18 at design time; +1 for the rail-suppression
+scenario D11 bought.)*
 
 **Why nothing re-scopes:** a fresh DB has no `owner_pref` row, absence is THREADS, and the reset hook
 wipes the table before every scenario. Adding a view `Given` to the nine untouched front-page scenarios
 would be nine steps that can never fail; instead **one** scenario pins the default, so those nine have a
 named guard.
 
-New file `front_page_feed.feature` — 16 scenarios, every one behaviourally RED today:
+New file `front_page_feed.feature` — 17 scenarios, every one behaviourally RED today:
 
 1. The front page opens on the thread-card view *(the guard for the nine untouched scenarios)*
 2. The front page offers a control for each view, marks the one it is showing, and still offers both on an empty stream
@@ -289,6 +290,7 @@ New file `front_page_feed.feature` — 16 scenarios, every one behaviourally RED
 14. Unsettled replies never reach the activity stream *(POSTED present, FAILED and CANCELLED absent, one page)*
 15. An activity card links into its thread at that comment
 16. **Unread means the same thing in both views** *(the coherence pin)*
+17. The activity view hides the recent-comments box and still shows the other three rails *(D11; the positive twin is what stops it passing by failing to render the rail at all)*
 
 Appended to `empty_and_unread.feature`, discharging the direction doc's pre-authored pair:
 
@@ -393,18 +395,43 @@ and would have to land as its own PR ahead of this one.
 | D8 | `FeedExcerpt` is new; `Snippet` is untouched | `Snippet` feeds six other surfaces; a preview nicety is not worth the risk |
 | D9 | Per-call `agoSeconds`, not a global stagger | Same determinism, zero blast radius, one PR instead of two |
 | D10 | No pagination | Refused with its reason (§5), because the cursor version is a real bug waiting on the whole-second anomaly |
+| D11 | The **recent-comments rail box is suppressed in the Activity view only** | It is a strict subset of the stream — the same five comments twice on one screen. Owner call, 2026-07-27 |
+| D12 | Cards **do** carry `data-nav-item` — j/k navigation extends to the front page | Owner call, 2026-07-27, made deliberately rather than inherited. The argument against is recorded below, not discarded |
 
-## 10. Open questions for the owner
+## 10. Owner calls — all three answered 2026-07-27
 
-1. **The Activity/Ambient re-decision (D1)** — does the honest superset satisfy the intent, or is an
-   ambient-only stream wanted badly enough to fund making provenance representable first?
-2. **The right rail in the Activity view.** The recent-comments box (5 rows) becomes a strict **subset**
-   of the 50-card stream — the same comments twice on one screen. Suppressing the box in that view
-   touches only `index.kte` and no thread page. Currently: **left rendered**, because the alternative
-   should be a decision rather than an accident. Either way, **no scenario should assert all four rail
-   boxes render in the Activity view** — that would convert an accident into a contract.
-3. **Vim keyboard navigation on cards.** `data-nav-item` is deliberately **not** added; turning it on for
-   the front page is a product decision, not a styling side effect.
+The three questions this design opened are settled. Recorded here with the reasoning that lost, because
+the losing argument is what a later reader needs when they wonder why.
+
+**1. Activity vs Ambient (D1) — ship Activity now, revisit later.** The honest superset ships, named
+Activity and never Ambient. An **ambient-only stream is not closed, it is deferred**: recorded here as a
+named follow-up whose §2 must first make provenance representable, and which must reckon with the fact
+that any `comment.origin` column is NULL for all history and would read as a lie about every existing
+row (the argument that killed the `core` column in S4b). Nothing in this slice forecloses it — the two
+feed queries are the only readers, and adding a predicate to one of them is the whole change.
+
+**2. The right rail (D11) — suppress the recent-comments box in the Activity view.** It touches
+`index.kte` **only**; the fragment itself and `RailFeeds` stay shared byte-for-byte with every thread
+page, which is the property their KDoc exists to protect. The other three boxes (starred, active threads,
+shortcut) render in both views.
+*Binding constraint either way:* **no scenario may assert that all four rail boxes render in the Activity
+view** — that converts an accident into a contract. `home_rail`'s recent-comments scenarios stay valid
+untouched because they run in the default THREADS view; that is why this costs no `.feature` edit.
+*Adds one scenario* (now 17 in `front_page_feed.feature`, delta **+19**): *the activity view hides the
+recent-comments box and still shows the other three rails* — with the positive twin, so it cannot pass by
+failing to render the rail at all.
+
+**3. Keyboard navigation (D12) — yes, cards get `data-nav-item`.**
+*The argument that lost, recorded at the owner's request:* turning j/k on for the front page is a
+**product change, and it would have arrived wearing a restyle's clothes** — `nav.js` activates wherever
+the hook appears, so adding it as part of a styling slice is exactly the kind of side effect that later
+reads as accidental. It is taken **deliberately**, which is what makes it fine.
+*What this obliges the build to do:* the hook goes on **both** card types, or j/k works in one view and
+silently dies in the other. `data-nav-item` is a **hook, never a styling selector** (the jte skill's
+rule, and the same breach `data-unread-count` is being cleaned up for in this very slice — see I2's
+neighbourhood). No scenario asserts *navigation behaviour* — the acceptance suite drives no browser, so
+this is pinned only as far as "the attribute is present on both card types", and the behaviour itself is
+a **new §10.4 entry**: no tier drives `nav.js`, exactly as no tier drives the htmx delete swap.
 
 ## 11. Known gaps this design pre-books for §10.4
 
@@ -418,4 +445,7 @@ the reason `findActive`'s "sorts chronologically" comment is **false as written*
 `MAX()` over `12:00:00Z` and `12:00:00.500Z` returns the *older* whole-second stamp, because `'Z' > '.'`)
 · `agoOrNull`'s null branch is never exercised by a fixture with a corrupt stamp · the pre-existing
 `>`-in-a-title exposure of `Html.threadRowAttr` · the persona-memory `homeFingerprint` helper becomes
-view-dependent (its KDoc needs a sentence; no code change).
+view-dependent (its KDoc needs a sentence; no code change) · **j/k navigation actually working on the
+new cards** (D12): the acceptance suite drives no browser and no tier drives `nav.js`, so the pin reaches
+"the `data-nav-item` attribute is present on **both** card types" and no further — the same standing
+limitation as the htmx delete swap.
