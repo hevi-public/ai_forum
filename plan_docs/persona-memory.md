@@ -1024,9 +1024,17 @@ skip the judgment-site re-read → the Tier-2 vanished-parent test · write an `
 scenario 21 · let the pass reach `insertRoot` → the failing fake · let the hop resolve a root
 parent → the Tier-0 hop-filter case · offer the root in a parent picker → the Tier-1 root-parent
 refusal · **delete `.sortedWith(BY_STAMP)` from the evidence cut, OR reverse it → the Tier-2
-evidence-cut test** (both, and note they redden through *different* assertions of it — the deletion
-through "the newer sibling is present", the reversal through "the older one is absent"; a
-one-directional version of that test would have survived one mutation each way).
+evidence-cut test** · **delete `.sortedWith(MemoryRecall.NEWEST_FIRST)` from the offered-parents
+cut, OR reverse it → the Tier-2 letter-cut test** (the deletion produces exactly ONE failure in
+the whole suite, which is the measure of what that test is worth).
+
+**The rule those last two taught, stated once so the next ordering pin starts here:** an ordering
+test must assert what got **dropped** as well as what survived. Both cuts were mutated two ways —
+sort deleted, sort reversed — and each pair reddens through a *different* assertion: the deletion
+trips "the newer row is present" (string order keeps the older twin), the reversal trips "the
+older row is absent" (an oldest-first cut keeps *both* twins and drops a filler instead). A
+one-directional version of either test passes one mutation each way. Asserting only the survivor
+pins half a comparator.
 
 **Two ledger entries the review found were beliefs, now facts** (§10.7 — both re-run, both
 restored):
@@ -1361,11 +1369,22 @@ omits an item is worse than no ledger; the entries below are written to be falsi
   redden through *different* assertions and either one alone survives one of the two mutations; and
   the pair is fed to the fake **newest-first**, so an unsorted `takeLast` cannot pass by luck of
   the input order.
-- **The offered-parents CALL SITE still has no test.** Tier 0 pins `MemoryRecall.NEWEST_FIRST`
-  itself, which is the shared contract, but nothing pins that `MemoryScribeService` applies it
-  before `take(26)`. Pinnable at Tier 2 by the same method, written down rather than left as an
-  intention: give a member more than 26 records whose stamps collide inside one second and assert
-  the letter list, or the resolved parent, reflects instant order rather than string order.
+- ~~**The offered-parents CALL SITE has no test.**~~ **Closed at the owner's request**, by the
+  sibling of the evidence-cut pin: *"the letter cut offers the twenty-six chronologically newest
+  records, not the lexically first"*. Twenty-seven records against the twenty-six-letter alphabet,
+  the cut landing on the same boundary pair the evidence test uses. Two pieces of arithmetic hold
+  it up, and both are the kind a later editor breaks without noticing: **exactly 23 of the records
+  are scribe-sourced**, one under `MAX_SCRIBE_MEMORIES`, because `atCapacity` free-skips at 24
+  *before any seam call* — a 27-scribe-row fixture buys no judgment and the assertions would read
+  a prompt that was never built; the other four are owner rows, which the ceiling does not count
+  (§2.11) and which are what push the total past the alphabet.
+  What makes it a test of the service rather than of the fake: `FakeMemories.recordsOf` mirrors
+  the real `ORDER BY created_at DESC, id` as a **string** compare, so deleting the service's
+  re-sort exposes exactly the order production would see. Verified as no-drift at the time of
+  writing; if the fake and the SQL ever diverge, this test stops meaning what it says.
+  Its value is measured, not asserted: **deleting `.sortedWith(NEWEST_FIRST)` from the call site
+  produces exactly one failure in the entire suite — this test.** Nothing else caught it, which is
+  precisely the gap this entry used to disclose.
 - **Scenario 20 pins the root out of RECALL, not out of the HOP.** Its owner record is top-level,
   so a `recordById` that stopped filtering to `kind='record'` stays green; §2.2 forbids authoring a
   root-parented record through the form, so the pin would need a hand-SQL seeded root-parented row.

@@ -675,6 +675,72 @@ class MemoryScribeServiceTest {
     // --- the letter protocol at the service: resolution, degrade, and the judgment-site re-read --------
 
     @Test
+    fun `the letter cut offers the twenty-six chronologically newest records, not the lexically first`() {
+        // The sibling of the evidence cut, one list over: `recordsOf` is `ORDER BY created_at DESC,
+        // id` — string order over `Instant.toString()`, which prints NO fraction on a whole second,
+        // so "04:30:00Z" ('Z' = 0x5A) sorts BEFORE "04:30:00.500Z" ('.' = 0x2E) under DESC while
+        // being half a second OLDER. Past the alphabet that inversion costs a record its letter: the
+        // whole-second row takes the twenty-sixth slot and the genuinely newer sub-second row falls
+        // off the end, so the model is offered an antecedent the member has already moved past and
+        // never sees the one it moved to. `.sortedWith(MemoryRecall.NEWEST_FIRST)` at the call site
+        // is what corrects it, and this test is what stops it being deleted as redundant re-sorting
+        // of an already-ordered query.
+        //
+        // [FakeMemories.recordsOf] mirrors that `ORDER BY` faithfully — a String compare on
+        // `createdAt` with the same id tiebreak — so what reddens here is the SERVICE's re-sort, not
+        // the fake's ordering: strip the re-sort and this fixture yields exactly the list production
+        // would have built.
+        //
+        // The fixture's arithmetic is the non-obvious part. The cut only bites past twenty-six
+        // records, but a member holding twenty-four SCRIBE rows is skipped free before any seam call
+        // (§2.11) — so a naive twenty-seven-scribe-row fixture buys no judgment and asserts on
+        // nothing. Owner rows are UNCOUNTED by that ceiling and are parent candidates all the same,
+        // which is what makes twenty-seven records reachable at all: 23 scribe + 4 owner, one under
+        // the ceiling and one over the alphabet.
+        //
+        // Both directions are asserted, because a mutation each way trips only one of them: deleting
+        // the sort drops the sub-second row (the "is offered" assertion), reversing it keeps BOTH
+        // halves of the pair inside an oldest-first twenty-six (the "is not offered" assertion). The
+        // pair is seeded LAST and whole-second first, so an implementation that does not sort at all
+        // — fake included — also drops the newer row rather than being rescued by insertion order.
+        val personas = RosterPersonas(listOf(persona("sol")))
+        val memories = FakeMemories().apply {
+            // Twenty-five rows a minute newer than the pair: identical under both orderings, so they
+            // fill the cut without deciding it. Twenty-three carry the scribe's provenance — the
+            // most a judgeable member can hold — and the rest are the owner's.
+            repeat(25) { i ->
+                seed(
+                    "sol", "Filler record ${i + 1}, from the fortnight after the twins",
+                    source = if (i < 23) PersonaMemoryRepository.SOURCE_SCRIBE else PersonaMemoryRepository.SOURCE_OWNER,
+                    createdAt = AFTER_THE_PAIR,
+                )
+            }
+            seed("sol", LETTER_WHOLE_BODY, createdAt = BOUNDARY_WHOLE)
+            seed("sol", LETTER_SUB_BODY, createdAt = BOUNDARY_SUB)
+        }
+        val changes = FakeMemoryChanges()
+        val llm = ScriptedLlm(says(remember("Learned that the newest record must keep its letter")))
+        val comments = FakeComments(spokeThrice("sol"))
+
+        service(comments, personas, memories, changes, llm).consolidate(ScribeSource.MANUAL)
+
+        val instruction = llm.received.single().context.comments.single().body
+        assertEquals(
+            MemoryScribePrompts.MAX_PARENT_LETTERS,
+            instruction.lines().count { it.matches(LETTERED_LINE) },
+            "twenty-seven records, twenty-six letters — the cap has to bite for the boundary to mean anything",
+        )
+        assertTrue(
+            instruction.contains(LETTER_SUB_BODY),
+            "the fractionally NEWER twin is what 'newest first' owes the last letter: $instruction",
+        )
+        assertFalse(
+            instruction.contains(LETTER_WHOLE_BODY),
+            "and its half-second-older twin is the row the cut drops — string order offers it instead",
+        )
+    }
+
+    @Test
     fun `EXTENDS resolves against the newest-first letter map and attaches beneath that record`() {
         val personas = RosterPersonas(listOf(persona("sol")))
         val memories = FakeMemories()
@@ -969,12 +1035,13 @@ class MemoryScribeServiceTest {
 
         /** The boundary pair, one shared second: `Instant.toString()` prints no fraction on a whole
          *  second, so [BOUNDARY_WHOLE] string-sorts AFTER [BOUNDARY_SUB] while being half a second
-         *  older. The evidence cut has to fall between exactly these two to be worth pinning. */
+         *  older. BOTH string-ordered cuts — the evidence `takeLast` and the letter `take` — have to
+         *  fall between exactly these two to be worth pinning, so both fixtures share the pair. */
         const val BOUNDARY_WHOLE = "2026-01-01T04:30:00Z"
         const val BOUNDARY_SUB = "2026-01-01T04:30:00.500Z"
 
-        /** The eleven engagements that fill the cut — a minute after the pair, so they are newer
-         *  under BOTH orderings and cannot be what decides it. */
+        /** The rows that FILL each cut — a minute after the pair, so they are newer under BOTH
+         *  orderings and cannot be what decides it. */
         const val AFTER_THE_PAIR = "2026-01-01T04:31:00Z"
 
         /** The pair's prose, distinct in the first twelve characters (which is what [exchange] folds
@@ -982,5 +1049,15 @@ class MemoryScribeServiceTest {
          *  the pair's stamps differ, so the tiebreak never even runs on it. */
         const val WHOLE_SECOND_BODY = "The whole-second half of the boundary pair"
         const val SUB_SECOND_BODY = "The sub-second half of the boundary pair"
+
+        /** The same pair on the RECORD side — distinct prose from the engagement pair, because the
+         *  two fixtures pin different cuts and a shared string would let one test's failure read as
+         *  the other's. Neither is a substring of the other: `contains` is the assertion. */
+        const val LETTER_WHOLE_BODY = "The whole-second record, the elder twin"
+        const val LETTER_SUB_BODY = "The sub-second record, the younger twin"
+
+        /** A lettered candidate line, as [MemoryScribePrompts.instruction] renders it ("  A. body")
+         *  — how the offered list is counted without re-deriving the prompt's layout inline. */
+        val LETTERED_LINE = Regex("^ {2}[A-Z]\\. .+")
     }
 }
