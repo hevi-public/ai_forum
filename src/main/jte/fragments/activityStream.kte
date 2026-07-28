@@ -11,10 +11,10 @@
      across the card BEHIND its content, so the box is the big target while the title — and the excerpt's
      own text — stay on top of it.
 
-     draggable="false" is not decoration. Dragging from inside an <a> makes the browser drag the LINK,
-     not select the text under the cursor, so without this the three-line preview cannot be
-     highlighted with the mouse at all. Turning it off restores ordinary text selection while leaving
-     the link clickable.
+     draggable="false" is not decoration, and it — not any z-index in app.css — is what makes the
+     preview text selectable. Dragging from inside an <a> makes the browser drag the LINK rather than
+     select the text under the cursor, and the excerpt text is this anchor's own content, so without
+     this attribute the three-line preview cannot be highlighted with the mouse at all.
 
      NOTE the card body is an <a>, not a <span>: it was a span, and clicking it did nothing but rewrite
      the URL, because nav.js saw [data-nav-item] and moved its reading cursor instead. A real link is

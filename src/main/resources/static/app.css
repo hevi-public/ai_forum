@@ -756,16 +756,31 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
    ::after rather than a wrapping <a>, because the card's children are FLAT by contract (I7) and a real
    wrapper would also have swallowed the title link.
 
-   z-index:-1 IS THE WHOLE TRICK, and it is what makes the text selectable again. Painted below the
-   card's in-flow content instead of over it, the overlay still wins the hit test everywhere nothing
-   else is drawn — the padding, the gaps, the ragged end of the last line — so the BOX is clickable,
-   while the excerpt's own text is on top and drag-selects normally. The text stays clickable too,
-   because it is the anchor's own content rather than something sitting under a sheet of glass.
-   Hit-testing follows paint order in reverse, so "behind everything, in front of the background" is
+   THREE RULES DO THREE DIFFERENT JOBS HERE, and it is worth being exact about which does what, because
+   an earlier version of this comment credited the wrong one:
+
+     - `draggable="false"` on the anchor (in the template) is what restores TEXT SELECTION. Dragging
+       from inside an <a> makes the browser drag the link instead of selecting; that is true whatever
+       this overlay does, since the excerpt text is the anchor's own content either way.
+     - `z-index: -1` keeps the overlay BEHIND the card's in-flow content, so the pointer reaches the
+       excerpt's text rather than a sheet of glass over it. It still wins the hit test everywhere
+       nothing else is drawn — padding, gaps, the ragged end of the last line.
+     - `pointer-events: none` on the inert labels (below) hands their clicks down to this overlay.
+       Without it, z-index:-1 turns the byline, the verb and the stamp into DEAD ZONES: they are spans,
+       not links, so they would swallow a click and do nothing. Measured, not reasoned about.
+
+   Hit-testing follows paint order in reverse, so "behind the content, in front of the background" is
    exactly the layer a click-target-of-last-resort wants. */
 .activity-card__excerpt::after {
   content: ""; position: absolute; inset: 0; z-index: -1;
 }
+/* Inert metadata: not links, never selected on purpose, and directly over the stretch. Passing their
+   clicks through is what keeps "anywhere in the box opens this event" literally true. The excerpt and
+   the thread title deliberately do NOT get this — both are real links that must keep their own clicks. */
+.activity-card__byline,
+.activity-card__verb,
+.activity-card__ago,
+.activity-card > .monogram { pointer-events: none; }
 .activity-card__excerpt:hover { color: var(--ink); }
 /* Still wins over the -webkit-box above it: :empty adds a pseudo-class, so this is the more specific
    rule as well as the later one. It has to collapse entirely, or the row-gap reserves a line for a
