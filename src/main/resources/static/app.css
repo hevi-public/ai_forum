@@ -588,18 +588,24 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
   box-shadow: var(--shadow);
   overflow: hidden;
 }
+/* Vertical rhythm: a card is two lines (title row, then the preview wrapping under it), so it needs
+   BOTH more block padding and a row-gap — padding alone just pushes the pair around as one lump. The
+   gap is split rather than shorthand: `gap` sets rows and columns together, and widening the column gap
+   would drift the badge, stamp and delete trigger apart from the title on the same line. */
 .thread-row {
-  display: flex; align-items: baseline; gap: 10px;
-  padding: 10px 14px;
+  display: flex; align-items: baseline; column-gap: 10px; row-gap: 7px;
+  padding: 15px 16px;
   border-top: 1px dotted var(--line-dotted);
 }
 .thread-row:first-child { border-top: 0; }
 .thread-row:hover { background: var(--row-hover); }
 /* The unread spine keys off a CLASS, not off data-unread-count: a data-* attribute is a semantic hook
    for the acceptance suite, never a stylesheet selector (the jte skill's rule). The hook still renders
-   on every card, "0" included — only the styling moved. */
-.thread-row:not(.is-unread) { padding-left: 17px; }              /* read: no spine, align with unread text */
-.thread-row.is-unread { border-left: 3px solid var(--sage); padding-left: 14px; }
+   on every card, "0" included — only the styling moved.
+   The two padding-lefts differ by exactly the 3px the spine occupies, so text starts on the same x
+   whether or not a card is unread — keep them in step if the block padding above changes again. */
+.thread-row:not(.is-unread) { padding-left: 19px; }              /* read: no spine, align with unread text */
+.thread-row.is-unread { border-left: 3px solid var(--sage); padding-left: 16px; }
 .thread-row__title { font-weight: 700; font-size: 14px; flex: 1 1 auto; }
 .thread-row__title a { color: var(--link); }
 .thread-row:not(.is-unread) .thread-row__title a { color: var(--muted); font-weight: 400; }
@@ -705,16 +711,19 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
   box-shadow: var(--shadow);
   overflow: hidden;
 }
+/* Same split gap and block padding as the thread card above — the two views are one surface, so a
+   stream card and a thread card must sit on the same vertical rhythm or switching views feels like
+   switching pages. */
 .activity-card {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-  padding: 10px 14px 10px 17px;
+  display: flex; align-items: center; flex-wrap: wrap; column-gap: 8px; row-gap: 7px;
+  padding: 15px 16px 15px 19px;
   border-top: 1px dotted var(--line-dotted);
 }
 .activity-card:first-child { border-top: 0; }
 .activity-card:hover { background: var(--row-hover); }
 /* Same spine as an unread thread card, and off a CLASS for the same reason: data-feed-unread is a hook
-   the suite reads, not a selector. */
-.activity-card.is-unread { border-left: 3px solid var(--sage); padding-left: 14px; }
+   the suite reads, not a selector. Same 3px offset rule as the thread card: 19 - 3 = 16. */
+.activity-card.is-unread { border-left: 3px solid var(--sage); padding-left: 16px; }
 .activity-card__byline { font-weight: 700; font-size: 13px; color: var(--ink); }
 .activity-card__verb { font-family: var(--mono); font-size: 11px; color: var(--faint); }
 .activity-card__thread { font-size: 13px; color: var(--link); flex: 1 1 auto; }
