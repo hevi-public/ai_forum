@@ -6,19 +6,25 @@
      across both, each linking INTO its thread at that event (a post card's event id IS its thread id, so
      it lands on the opening post's existing #reply-<threadId> anchor).
 
-     TWO DESTINATIONS, and which is which is the whole point: the card BODY opens this event at its
-     anchor, and the thread TITLE opens the conversation at its top. app.css stretches the body link
-     across the card BEHIND its content, so the box is the big target while the title — and the excerpt's
-     own text — stay on top of it.
+     TWO DESTINATIONS, and which is which is the whole point: the box opens this event at its anchor
+     (activity-card__open, stretched across the card by app.css BEHIND the content), and the thread
+     TITLE opens the conversation at its top.
 
-     draggable="false" is not decoration, and it — not any z-index in app.css — is what makes the
-     preview text selectable. Dragging from inside an <a> makes the browser drag the LINK rather than
-     select the text under the cursor, and the excerpt text is this anchor's own content, so without
-     this attribute the three-line preview cannot be highlighted with the mouse at all.
+     THE EXCERPT IS A PLAIN <span>, DELIBERATELY. It was an <a> for exactly one commit, so that clicking
+     the words navigated too — and the owner reported that its text could then not be selected with the
+     mouse. Dragging from inside a link drags the LINK; draggable="false" is the documented cure and it
+     did not deliver here. Rather than ship a third guess at someone else's browser, the text stopped
+     being a link: plain text in a span selects the way all other text on the page does, with nothing to
+     verify. The cost is stated where it will be found — clicking the WORDS does nothing; clicking
+     anywhere else in the card opens the event.
 
-     NOTE the card body is an <a>, not a <span>: it was a span, and clicking it did nothing but rewrite
-     the URL, because nav.js saw [data-nav-item] and moved its reading cursor instead. A real link is
-     what makes the box navigate; the nav.js half of that bug is fixed in nav.js.
+     The empty <a> is the click target, and it is a real focusable link rather than a decorative
+     overlay, so the comment stays reachable by keyboard (the title link only reaches the thread). Its
+     aria-label is a fixed string on purpose: the thread title is prose, and prose in an ATTRIBUTE is
+     the one thing this page never does (JTE does not escape ">" there — §2.5, I2).
+
+     NOTE the box link exists at all because nav.js used to eat this click: it saw [data-nav-item] and
+     moved its reading cursor instead of navigating. That half is fixed in nav.js.
 
      The hook vocabulary here is DISJOINT from the thread card's (I1): no data-thread-*, no delete
      control. That is what lets "the activity view shows no thread cards" be a property — a scan for the
@@ -43,7 +49,8 @@
             <span class="activity-card__verb">${if (event.kind == "post") "opened" else "replied in"}</span>
             <a class="activity-card__thread" href="${event.threadHref}">${event.threadTitle}</a>
             <span class="activity-card__ago">${event.ago}</span>
-            <a class="activity-card__excerpt" href="${event.href}" draggable="false">${event.excerpt}</a>
+            <a class="activity-card__open" href="${event.href}" aria-label="${if (event.kind == "post") "Open this post" else "Open this comment"}"></a>
+            <span class="activity-card__excerpt">${event.excerpt}</span>
         </li>
     @endfor
 </ul>
