@@ -388,7 +388,8 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
 
 - **S6 — the feed front page** ✅ built 2026-07-27 (V29, `plan_docs/ambient-slice-6.md`). Two views over
   one front page — activity-sorted thread **cards** and a reverse-chronological **activity stream** —
-  chosen by a toggle persisted in a one-row `owner_pref` table. Suite 263 → 282; tier 0/1/2 428/265/156.
+  chosen by a toggle persisted in a one-row `owner_pref` table. Suite 263 → 283; tier 0/1/2 439/265/156,
+  jsTest 100.
   **The slice map is now complete.** Five durable learnings, each bought by running something:
 
   - **JTE does NOT escape `>` in ATTRIBUTE context** (measured on `OwaspHtmlTemplateOutput`; it does in
