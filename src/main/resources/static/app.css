@@ -773,13 +773,19 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
 }
 /* Keyboard users get a visible target even though the link itself is empty and behind the content. */
 .activity-card:focus-within { outline: 2px solid var(--focus-border); outline-offset: -2px; }
-/* Inert metadata: not links, never selected on purpose, and directly over the stretch. Passing their
-   clicks through is what keeps "anywhere in the box opens this event" literally true. The excerpt and
-   the thread title deliberately do NOT get this — both are real links that must keep their own clicks. */
+/* Inert metadata sits directly over the stretched link, so without this it would swallow clicks and
+   do nothing. KEPT even though feed.js now also handles these clicks, because the no-JS path is the
+   reason the stretched link exists at all: with scripts off, this rule is the only thing making the
+   byline, verb, stamp and monogram part of the target. The excerpt deliberately does NOT get it —
+   pointer-events:none would make the preview unselectable, which is the whole problem being solved —
+   and neither does the thread title, a real link that must keep its own click. */
 .activity-card__byline,
 .activity-card__verb,
 .activity-card__ago,
 .activity-card > .monogram { pointer-events: none; }
+/* The preview is plain, selectable text that feed.js turns into a click target. The cursor has to say
+   so, or the one region whose behaviour is script-dependent is also the one that looks inert. */
+.activity-card__excerpt { cursor: pointer; }
 /* No :hover on the excerpt any more. It was a link-ish affordance back when the text WAS the link;
    now that clicking the words does nothing, brightening them on hover would promise a click that is
    not there. The card's own :hover background is the affordance, and it covers the whole target. */

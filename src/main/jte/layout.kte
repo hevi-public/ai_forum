@@ -44,6 +44,12 @@
     <%-- Vim-style keyboard navigation (plan_docs/keyboard-navigation.md). ES module → deferred by
          default; activates only where [data-nav-item] exists (thread page for now), no-ops elsewhere. --%>
     <script type="module" src="/nav.js"></script>
+    <%-- Activity-card click-to-open (plan_docs/ambient-slice-6.md §2.5). ES module → deferred;
+         activates only where [data-activity-stream] exists (the front page's activity view), no-ops
+         elsewhere. PROGRESSIVE: the card's stretched <a> already opens it without this file — what
+         this adds is the preview TEXT as a click target, which CSS could only have bought by making
+         the text a link and thereby unselectable. --%>
+    <script type="module" src="/feed.js"></script>
     <%-- Persona create/edit prompt-staleness guard (plan_docs/persona-prompt-edit-ux.md). ES module →
          deferred; activates only where [data-persona-form] exists (members/edit pages), no-ops elsewhere. --%>
     <script type="module" src="/persona-form.js"></script>

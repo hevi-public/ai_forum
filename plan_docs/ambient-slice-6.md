@@ -1,7 +1,8 @@
 # Ambient Slice 6 — the feed front page: thread cards, the activity stream, and the persisted view
 
 > **Status:** ✅ built 2026-07-27 (V29) — `./gradlew verifyAll` green, suite 263 → 283 scenarios,
-> tier 0/1/2: 430/265/156 · designed 2026-07-27 · owner calls answered 2026-07-27 (§10, §10b.6) ·
+> tier 0/1/2: 439/265/156, jsTest 97 · designed 2026-07-27 · owner calls answered 2026-07-27
+> (§10, §10b.6, §10b.7) ·
 > **Owner:** Hevi · **Created:** 2026-07-27 ·
 > Parent: `ai-driven-forum-direction.md` §9 (S6 row — the last slice on the map) / §10 (the pre-authored
 > `home_rail` / `empty_and_unread` pair) / §11.7 Stays-Cut · Spec: `ai-forum-ux-brief.md` §57,
@@ -193,7 +194,8 @@ three verified to refuse `id = 2` and `feed_view = 'chronological'` with the sto
 | A config knob | `FeedView.DEFAULT` is a Kotlin constant pinned by one scenario; a property would drag in `@ConfigurationProperties`, both yml files, a `/__diag` rail and a `config_guardrails` scenario for a value the owner flips in one click. |
 
 Two plain PRG forms with **fixed** actions and fixed hidden values. Accepted consequence, stated:
-switching views is a full page load. Zero new JavaScript ships.
+switching views is a full page load. **The view toggle still ships zero JavaScript** — but the slice as
+a whole no longer does; see §10b.7.
 
 ### 2.5 Markup rules that are not style preferences
 
@@ -323,7 +325,7 @@ mutation-verified *negatively* (reorder the card's attributes; those three stay 
 ## 7. Tier inventory and the mutation ledger
 
 **Tier 2: none, deliberately.** S6 introduces no IO port, so there is nothing new to fake, and faking a
-repository to test a controller is what doctrine forbids. **jsTest: none** — zero JavaScript ships.
+repository to test a controller is what doctrine forbids. **jsTest: `feed-core.test.mjs`** — 13 cases over the one pure decision `feed.js` makes (§10b.7). The DOM glue is manually verified, the `nav.js` precedent.
 
 **Tier 0** — `FeedViewTest` (slug round-trip; unknown/empty/null → null; `DEFAULT == THREADS`; every slug
 appears in V29's CHECK list) · `FeedCardsTest` (href per kind; a post card's id **is** its threadId, so it
@@ -477,6 +479,25 @@ Six departures, none of them silent. Each was found by running something, not by
    comparison rule reddens `FeedCardsTest`'s discriminator test *and* the acceptance scenario's third Then
    (`FeedSteps.kt:245`, the "preview to name" half); reverting the fix entirely reddens the scenario's
    second Then. Scenario 9b asserts the badge too, so the rule pins **named once, not zero times**.
+
+7. **"Zero new JavaScript" did not survive, and the owner is the one who ended it — correctly.** §2.4's
+   line was about the view toggle, where it still holds; but it hardened into a slice-wide rule that
+   then cost a working interaction. The activity card wants two things CSS cannot both give: a big
+   click target, and a preview that drag-selects. Three CSS-only attempts each bought one at the price
+   of the other — text-as-link (unselectable), overlay-in-front (byline/verb/stamp went dead),
+   text-as-span (clicking the words does nothing). The owner pointed out I had already named the
+   solution and declined it.
+
+   `feed-core.mjs` + `feed.js` follow the house split — pure decision unit-tested (13 cases), thin DOM
+   glue manually verified, the `nav-core`/`nav.js` precedent. **It is progressive, not load-bearing:**
+   the stretched `<a>` still opens the card with scripts off, and `pointer-events: none` on the inert
+   labels is kept for exactly that path. What the script adds is the preview text as a click target,
+   which is the one region CSS could only have bought by making it a link.
+
+   The rule worth carrying forward is not "no JavaScript" but **"no JavaScript the page depends on"**.
+   The lesson about the process is sharper: I held a self-imposed constraint through three attempts
+   that each failed the user's actual request, and did not re-examine it until told to. A constraint
+   that starts costing the thing it was meant to protect has stopped being a constraint.
 
 Also corrected before it became permanent: **V29's first draft explained its CHECKs with "SQLite cannot
 add a CHECK by ALTER TABLE"** — the exact folk claim the V28 review close-out disproved and the sqlite
