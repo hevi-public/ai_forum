@@ -7,9 +7,14 @@
      it lands on the opening post's existing #reply-<threadId> anchor).
 
      TWO DESTINATIONS, and which is which is the whole point: the card BODY opens this event at its
-     anchor, and the thread TITLE opens the conversation at its top. The body link is stretched over the
-     whole card by app.css, so the box is the big target and the title is the small precise one — which
-     is why the title carries z-index there, to stay clickable above its own card's stretch.
+     anchor, and the thread TITLE opens the conversation at its top. app.css stretches the body link
+     across the card BEHIND its content, so the box is the big target while the title — and the excerpt's
+     own text — stay on top of it.
+
+     draggable="false" is not decoration. Dragging from inside an <a> makes the browser drag the LINK,
+     not select the text under the cursor, so without this the three-line preview cannot be
+     highlighted with the mouse at all. Turning it off restores ordinary text selection while leaving
+     the link clickable.
 
      NOTE the card body is an <a>, not a <span>: it was a span, and clicking it did nothing but rewrite
      the URL, because nav.js saw [data-nav-item] and moved its reading cursor instead. A real link is
@@ -38,7 +43,7 @@
             <span class="activity-card__verb">${if (event.kind == "post") "opened" else "replied in"}</span>
             <a class="activity-card__thread" href="${event.threadHref}">${event.threadTitle}</a>
             <span class="activity-card__ago">${event.ago}</span>
-            <a class="activity-card__excerpt" href="${event.href}">${event.excerpt}</a>
+            <a class="activity-card__excerpt" href="${event.href}" draggable="false">${event.excerpt}</a>
         </li>
     @endfor
 </ul>

@@ -715,9 +715,12 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
    stream card and a thread card must sit on the same vertical rhythm or switching views feels like
    switching pages. */
 /* position:relative is what the body link's stretch resolves against — without it the ::after below
-   would size itself to the nearest positioned ancestor and cover the whole page. */
+   would size itself to the nearest positioned ancestor and cover the whole page.
+   isolation:isolate makes the card its own stacking context, which is what CONTAINS the stretch's
+   z-index:-1: without it a negative index escapes upward and the overlay can slide behind the card's
+   own background (and then behind the page), taking the click target with it. */
 .activity-card {
-  position: relative;
+  position: relative; isolation: isolate;
   display: flex; align-items: center; flex-wrap: wrap; column-gap: 8px; row-gap: 7px;
   padding: 15px 16px 15px 19px;
   border-top: 1px dotted var(--line-dotted);
@@ -729,10 +732,11 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
 .activity-card.is-unread { border-left: 3px solid var(--sage); padding-left: 16px; }
 .activity-card__byline { font-weight: 700; font-size: 13px; color: var(--ink); }
 .activity-card__verb { font-family: var(--mono); font-size: 11px; color: var(--faint); }
-/* Sits ABOVE its own card's stretched body link (below), so the two destinations stay separable: the
-   title opens the conversation, the box around it opens this one event. Without the z-index the stretch
-   would swallow this link and both would go to the comment. */
-.activity-card__thread { position: relative; z-index: 1; font-size: 13px; color: var(--link); flex: 1 1 auto; }
+/* No z-index needed: the body link's stretch is painted BEHIND the card's in-flow content (z-index:-1
+   below), so this link is above it by default and the two destinations stay separable — the title
+   opens the conversation, the box around it opens this one event. If that stretch ever loses its
+   negative index, this rule needs `position: relative; z-index: 1` back or the title stops working. */
+.activity-card__thread { font-size: 13px; color: var(--link); flex: 1 1 auto; }
 .activity-card__ago { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-left: auto; }
 /* The stream excerpt WRAPS, unlike the index's one-liner: a stream card is the thing itself, read in
    place, not a row you scan past. Clamped to three lines via -webkit-line-clamp — still the only
@@ -750,11 +754,17 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
 }
 /* The stretch: the body link covers the whole card, so clicking anywhere in the box opens this event.
    ::after rather than a wrapping <a>, because the card's children are FLAT by contract (I7) and a real
-   wrapper would also have swallowed the title link. Known trade-off of this pattern: the excerpt text
-   is no longer selectable by dragging — acceptable for a 3-line preview whose full text is one click
-   away, and the alternative is the JS click-handler this page deliberately does not have. */
+   wrapper would also have swallowed the title link.
+
+   z-index:-1 IS THE WHOLE TRICK, and it is what makes the text selectable again. Painted below the
+   card's in-flow content instead of over it, the overlay still wins the hit test everywhere nothing
+   else is drawn — the padding, the gaps, the ragged end of the last line — so the BOX is clickable,
+   while the excerpt's own text is on top and drag-selects normally. The text stays clickable too,
+   because it is the anchor's own content rather than something sitting under a sheet of glass.
+   Hit-testing follows paint order in reverse, so "behind everything, in front of the background" is
+   exactly the layer a click-target-of-last-resort wants. */
 .activity-card__excerpt::after {
-  content: ""; position: absolute; inset: 0;
+  content: ""; position: absolute; inset: 0; z-index: -1;
 }
 .activity-card__excerpt:hover { color: var(--ink); }
 /* Still wins over the -webkit-box above it: :empty adds a pseudo-class, so this is the more specific
