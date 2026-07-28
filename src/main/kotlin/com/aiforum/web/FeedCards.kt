@@ -41,11 +41,17 @@ object FeedCards {
      * a card whose stamp will not parse loses its timestamp, and nothing else. That degrade is pinned at
      * Tier 0 only — no fixture in the suite drives a corrupt stamp end to end (§11).
      *
-     * [ThreadRow.excerptBy] is the voice behind the preview, and it is null in exactly two cases: the
-     * excerpt is the card's own owner-authored opening post (a byline there would be the page telling the
-     * owner who the owner is), and there is nothing to preview at all (a title-only thread has no voice
-     * to credit). A comment always carries an author, so a NULL excerpt author can only have come from the
-     * thread's own OP.
+     * [ThreadRow.excerptBy] is the voice behind the preview, and the rule is **don't name the same voice
+     * twice** (§7): a card already wears its author as an attribution badge, so when the preview is the
+     * thread's *own opening post* the byline would say what the badge just said. It is null in exactly two
+     * cases — the excerpt is the card's own OP, whoever wrote it, and there is nothing to preview at all
+     * (a title-only thread has no voice to credit).
+     *
+     * **[FeedThread.excerptIsReply] is what makes that decidable, and comparing the two author ids would
+     * not be.** A persona replying to its own article thread yields `excerptAuthor == authorId` while the
+     * preview is genuinely new speech, so an id comparison would silently swallow the byline in the one
+     * case that most needs it. The flag separates *who* from *where it came from*; only the OP case is
+     * redundant, and a reply is credited even when it is the same voice as the badge.
      */
     fun threadCard(row: FeedThread, now: Instant): ThreadRow {
         val excerpt = FeedExcerpt.of(row.excerptBody, EXCERPT_LEN)
@@ -56,7 +62,7 @@ object FeedCards {
             author = row.authorId,
             ago = RelativeTime.agoOrNull(row.lastActivity, now) ?: "",
             excerpt = excerpt,
-            excerptBy = row.excerptAuthor?.takeIf { excerpt.isNotEmpty() },
+            excerptBy = row.excerptAuthor?.takeIf { excerpt.isNotEmpty() && row.excerptIsReply },
         )
     }
 

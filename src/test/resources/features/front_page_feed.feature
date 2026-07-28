@@ -143,6 +143,24 @@ Feature: The front page is two readings of one forum, and it remembers which one
     Then the thread card for "Scaling SQLite" previews "Indexes help here" credited to "Sol"
     And the thread card for "Indexing strategies" previews exactly "Which index wins?"
 
+  # 9b. Named once, never twice. A card already wears its author as an attribution badge, so previewing
+  # the thread's OWN opening post must not credit that same voice a second time — while a REPLY from that
+  # very same persona still is credited. That pair is the whole point: it pins that the rule reads "where
+  # the preview came from", not "whose name is on it". A rule written as `excerptAuthor != authorId`
+  # passes the first half and fails the second, which is why FeedThread.excerptIsReply has to exist.
+  # The first Then also pins that suppressing the byline did not suppress the BADGE: named once, not zero.
+  Scenario: A persona's own opening post is not credited under its own badge
+    Given a persona "Sol" exists
+    And a thread "Scaling SQLite" was opened 600 seconds ago with the opening post "The summary"
+    And the thread was authored by "Sol"
+    And a thread "Indexing strategies" was opened 300 seconds ago with the opening post "Which index wins?"
+    And the thread was authored by "Sol"
+    And the thread "Indexing strategies" received a reply from "Sol" saying "Indexes help here" 60 seconds ago
+    When the owner opens the front page
+    Then the home rail shows thread "Scaling SQLite" authored by "Sol"
+    And the thread card for "Scaling SQLite" previews exactly "The summary"
+    And the thread card for "Indexing strategies" previews "Indexes help here" credited to "Sol"
+
   # 10. Last activity as the owner reads it. The arithmetic is checkable from the Gherkin: the thread
   # opened an hour ago, its newest settled comment landed 300 seconds ago, and the card says "5m" —
   # so a card that timed itself off the thread's creation would say "1h" and fail here.

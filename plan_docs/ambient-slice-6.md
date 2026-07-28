@@ -1,7 +1,7 @@
 # Ambient Slice 6 — the feed front page: thread cards, the activity stream, and the persisted view
 
-> **Status:** ✅ built 2026-07-27 (V29) — `./gradlew verifyAll` green, suite 263 → 282 scenarios,
-> tier 0/1/2: 428/265/156 · designed 2026-07-27 · owner calls answered 2026-07-27 (§10) ·
+> **Status:** ✅ built 2026-07-27 (V29) — `./gradlew verifyAll` green, suite 263 → 283 scenarios,
+> tier 0/1/2: 430/265/156 · designed 2026-07-27 · owner calls answered 2026-07-27 (§10, §10b.6) ·
 > **Owner:** Hevi · **Created:** 2026-07-27 ·
 > Parent: `ai-driven-forum-direction.md` §9 (S6 row — the last slice on the map) / §10 (the pre-authored
 > `home_rail` / `empty_and_unread` pair) / §11.7 Stays-Cut · Spec: `ai-forum-ux-brief.md` §57,
@@ -22,7 +22,7 @@ that remembers:
 - **The view persists**, so the owner's choice survives leaving and coming back.
 
 The organising constraint, which buys almost everything else: **the thread card keeps its element, its
-class and its four existing `data-*` hooks in their existing order**, so the delta is `+18` scenarios
+class and its four existing `data-*` hooks in their existing order**, so the delta is `+20` scenarios
 and **zero rewritten `.feature` lines**.
 
 ### The owner call this slice implements, and the one word it cannot honour
@@ -263,10 +263,10 @@ The invariants I1–I11 are listed in §7 beside the mutation that proves each o
 
 ## 6. Acceptance scenarios, RED-first
 
-`+19`, **zero rewritten `.feature` lines**, one existing feature file edited (a stale header comment plus
-two appended scenarios). Verify the acceptance task's printed count rises by exactly 19 — the **delta**
+`+20`, **zero rewritten `.feature` lines**, one existing feature file edited (a stale header comment plus
+two appended scenarios). Verify the acceptance task's printed count rises by exactly 20 — the **delta**
 is the robust check; absolutes drift with sibling merges. *(18 at design time; +1 for the rail-suppression
-scenario D11 bought.)*
+scenario D11 bought; +1 for scenario 9b, the double-naming fix in §10b.6. Built figure: 263 → 283.)*
 
 **Why nothing re-scopes:** a fresh DB has no `owner_pref` row, absence is THREADS, and the reset hook
 wipes the table before every scenario. Adding a view `Given` to the nine untouched front-page scenarios
@@ -462,13 +462,21 @@ Six departures, none of them silent. Each was found by running something, not by
    before the box-scoping fix, red after; both measured.
 5. **Scenarios 18–19 are characterisation pins, not RED-first ones** (§6) — they ride hooks D2 keeps
    deliberately unchanged, and forcing them red would have meant inventing behaviour.
-6. **`FeedThread.excerptIsReply` ships with no production consumer.** `FeedCards` derives the byline
-   from a null `excerptAuthor` alone, which coincides with the flag for owner threads and differs for a
-   persona's reply-less one. Its KDoc claimed to be "the discriminator the caller needs" — a sentence
-   about a caller that does not exist. Rewritten to say what is true. **Open:** §7's fuller rule ("don't
-   name the same voice twice") would use this flag to suppress the excerpt byline when a persona's own
-   reply-less thread is previewing its own OP; today that card shows the persona's name twice. Visually
-   checked and judged mild; recorded here rather than fixed, because it is a product call.
+6. **`FeedThread.excerptIsReply` shipped with no production consumer — owner-resolved 2026-07-27, and it
+   now has one.** The first cut derived the byline from a null `excerptAuthor` alone, which coincides with
+   the flag for owner threads but not for a persona's reply-less one: an ambient article card named its
+   persona in the badge *and* again in the excerpt byline. §7's fuller rule — **don't name the same voice
+   twice** — is now implemented against the flag, so it is being the thread's **own opening post** that
+   suppresses the byline, whoever wrote it. Owner and persona OPs behave alike; a *reply* is still
+   credited even when it is the same voice as the badge.
+
+   **Why the flag and not `excerptAuthor != authorId`**, which is the obvious cheaper rule: a persona
+   replying to its own article thread has `excerptAuthor == authorId` while the preview is genuinely new
+   speech, so the comparison suppresses the byline in the one case that most needs it — the card then
+   looks untouched since it was opened. Both readings are pinned, and **both mutations were run**: the
+   comparison rule reddens `FeedCardsTest`'s discriminator test *and* the acceptance scenario's third Then
+   (`FeedSteps.kt:245`, the "preview to name" half); reverting the fix entirely reddens the scenario's
+   second Then. Scenario 9b asserts the badge too, so the rule pins **named once, not zero times**.
 
 Also corrected before it became permanent: **V29's first draft explained its CHECKs with "SQLite cannot
 add a CHECK by ALTER TABLE"** — the exact folk claim the V28 review close-out disproved and the sqlite

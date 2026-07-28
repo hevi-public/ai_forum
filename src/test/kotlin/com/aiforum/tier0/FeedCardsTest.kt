@@ -83,18 +83,40 @@ class FeedCardsTest {
     }
 
     @Test
-    fun `a preview from a voice names it, whether it came from a reply or from a persona's own opening`() {
-        val fromReply = FeedCards.threadCard(
+    fun `a preview from a reply names the voice it came from`() {
+        val card = FeedCards.threadCard(
             thread(excerptBody = "indexes help here", excerptAuthor = "sol", excerptIsReply = true), now,
         )
-        assertEquals("sol", fromReply.excerptBy)
+        assertEquals("sol", card.excerptBy)
+    }
 
-        // The ambient article thread: no replies yet, so the card previews the persona's OWN opening post
-        // and still names it — the same behaviour the Tier-1 read pins as "crediting the thread's author".
-        val fromOwnOpening = FeedCards.threadCard(
+    @Test
+    fun `a persona's reply-less thread previews its own opening and credits nobody`() {
+        // The ambient article thread the moment it lands: the card already wears "sol" as its attribution
+        // badge, so crediting the preview to Sol as well would name the same voice twice (§7). Owner and
+        // persona OPs now behave alike — it is being the thread's OWN opening that suppresses the byline,
+        // not who wrote it.
+        val card = FeedCards.threadCard(
             thread(authorId = "sol", excerptBody = "The summary", excerptAuthor = "sol"), now,
         )
-        assertEquals("sol", fromOwnOpening.excerptBy)
+        assertEquals("The summary", card.excerpt)
+        assertNull(card.excerptBy)
+    }
+
+    @Test
+    fun `a persona replying to its own thread is still credited, which an author comparison would miss`() {
+        // THE DISCRIMINATOR, and the reason FeedThread.excerptIsReply has to exist. Here excerptAuthor ==
+        // authorId exactly as in the reply-less case above, so a rule written as `excerptAuthor != authorId`
+        // would suppress this byline too — hiding genuinely new speech and making the card look unchanged
+        // since it was opened. Only the flag tells the two apart.
+        val card = FeedCards.threadCard(
+            thread(
+                authorId = "sol", excerptBody = "One more thing I missed",
+                excerptAuthor = "sol", excerptIsReply = true,
+            ),
+            now,
+        )
+        assertEquals("sol", card.excerptBy)
     }
 
     @Test
