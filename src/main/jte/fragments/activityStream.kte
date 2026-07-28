@@ -13,10 +13,10 @@
      THE EXCERPT IS A PLAIN <span>, DELIBERATELY. It was an <a> for exactly one commit, so that clicking
      the words navigated too — and the owner reported that its text could then not be selected with the
      mouse. Dragging from inside a link drags the LINK; draggable="false" is the documented cure and it
-     did not deliver here. Rather than ship a third guess at someone else's browser, the text stopped
-     being a link: plain text in a span selects the way all other text on the page does, with nothing to
-     verify. The cost is stated where it will be found — clicking the WORDS does nothing; clicking
-     anywhere else in the card opens the event.
+     did not deliver here. So the text stopped being a link: plain text in a span selects the way all
+     other text on the page does. Clicking the words still opens the event — feed.js does that, and it
+     can afford to, because it declines any click that turns out to be a selection. With scripts off
+     the words are inert and the rest of the card still opens it.
 
      The empty <a> is the click target, and it is a real focusable link rather than a decorative
      overlay, so the comment stays reachable by keyboard (the title link only reaches the thread). Its

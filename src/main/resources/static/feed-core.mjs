@@ -22,6 +22,34 @@ const INTERACTIVE = new Set(["a", "button", "input", "select", "textarea", "labe
 export const DRAG_SLOP = 4;
 
 /**
+ * How long to hold a click on selectable text before acting on it, in ms.
+ *
+ * A double-click cannot be recognised from its first click: the browser fires mousedown, mouseup,
+ * click, and only THEN the second mousedown that turns it into a word-select. At that first click
+ * there is no selection yet and the pointer has not moved, so every other guard here says "open" —
+ * and the page leaves before the word is ever highlighted. Measured, not theorised: double-clicking a
+ * preview navigated away with an empty selection.
+ *
+ * So a click on text waits long enough for a second press to cancel it. 350ms is above the interval
+ * a deliberate double-click takes and below the point the delay reads as lag.
+ */
+export const DOUBLE_CLICK_GRACE_MS = 350;
+
+/**
+ * How long the glue should wait before opening, given where the click landed.
+ *
+ * Only clicks on selectable text pay the wait. Card chrome — padding, the byline, the stamp — has
+ * nothing to select, so a double-click there means nothing and instant navigation is correct. This
+ * keeps the cost exactly where the benefit is.
+ *
+ * @param {boolean} onSelectableText whether the click landed on the card's preview text.
+ * @returns {number} milliseconds to wait before navigating.
+ */
+export function openDelayMs(onSelectableText) {
+  return onSelectableText ? DOUBLE_CLICK_GRACE_MS : 0;
+}
+
+/**
  * Decide whether a click inside an activity card should open that card's event.
  *
  * @param {object} click
@@ -39,8 +67,10 @@ export function shouldOpenCard(click) {
   if (click.pathTags.some((tag) => INTERACTIVE.has(String(tag).toLowerCase()))) return false;
 
   // THE POINT OF THE WHOLE MODULE: a drag that selected text is not a click. Checked two ways,
-  // because either alone lets a real selection through — `hasSelection` misses the moment before the
-  // browser has committed one, and `movedPx` misses a double-click word-select that never moved.
+  // because either alone leaks — `hasSelection` misses the instant before the browser has committed
+  // one, and `movedPx` catches a drag whose selection came out empty (started on padding, crossed no
+  // text). Neither catches a DOUBLE-click word-select, whose first click has no selection and no
+  // travel; that one is handled by delaying the open instead — see [openDelayMs].
   if (click.hasSelection) return false;
   if (Number(click.movedPx) > DRAG_SLOP) return false;
 

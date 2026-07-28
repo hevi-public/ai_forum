@@ -783,12 +783,14 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
 .activity-card__verb,
 .activity-card__ago,
 .activity-card > .monogram { pointer-events: none; }
-/* The preview is plain, selectable text that feed.js turns into a click target. The cursor has to say
-   so, or the one region whose behaviour is script-dependent is also the one that looks inert. */
+/* The preview is plain, selectable text that feed.js turns into a click target. The cursor says so.
+   Honest caveat: with scripts off the words are inert and this cursor over-promises for that one
+   region — the rest of the card still opens without JS, so the promise is only wrong about WHERE you
+   have to click, never about whether the card is clickable at all. */
 .activity-card__excerpt { cursor: pointer; }
-/* No :hover on the excerpt any more. It was a link-ish affordance back when the text WAS the link;
-   now that clicking the words does nothing, brightening them on hover would promise a click that is
-   not there. The card's own :hover background is the affordance, and it covers the whole target. */
+/* No :hover on the excerpt. The card's own :hover background is the affordance and it covers the
+   whole target, including this text — brightening the words as well would single them out as if they
+   led somewhere different, which they do not. */
 /* Still wins over the -webkit-box above it: :empty adds a pseudo-class, so this is the more specific
    rule as well as the later one. It has to collapse entirely, or the row-gap reserves a line for a
    card with nothing to preview. */

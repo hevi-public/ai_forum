@@ -410,7 +410,7 @@ and would have to land as its own PR ahead of this one.
 | D9 | Per-call `agoSeconds`, not a global stagger | Same determinism, zero blast radius, one PR instead of two |
 | D10 | No pagination | Refused with its reason (§5), because the cursor version is a real bug waiting on the whole-second anomaly |
 | D11 | The **recent-comments rail box is suppressed in the Activity view only** | It is a strict subset of the stream — the same five comments twice on one screen. Owner call, 2026-07-27 |
-| D12 | Cards **do** carry `data-nav-item` — j/k navigation extends to the front page | Owner call, 2026-07-27, made deliberately rather than inherited. The argument against is recorded below, not discarded |
+| D12 | Cards **do** carry `data-nav-item` — j/k navigation extends to the front page | Owner call, 2026-07-27, made deliberately rather than inherited. The argument against is recorded below, not discarded. **SUPERSEDED — the hook ships, the navigation does not: see §10b.8** |
 | D13 | `FeedView` gets its **own file** (`web/FeedView.kt`), not a declaration inside `HomeController.kt` | §2.1 sketched it in the controller, but `OwnerPrefRepository` must name the type — and a repository importing a *controller file's* type is worse layering than both importing a two-constant vocabulary. Changed during the build |
 
 ## 10. Owner calls — all three answered 2026-07-27
@@ -436,7 +436,7 @@ untouched because they run in the default THREADS view; that is why this costs n
 recent-comments box and still shows the other three rails* — with the positive twin, so it cannot pass by
 failing to render the rail at all.
 
-**3. Keyboard navigation (D12) — yes, cards get `data-nav-item`.**
+**3. Keyboard navigation (D12) — yes, cards get `data-nav-item`.** *(The hook shipped; the navigation it was for does not work on the front page today — §10b.8. What follows is the call as made.)*
 *The argument that lost, recorded at the owner's request:* turning j/k on for the front page is a
 **product change, and it would have arrived wearing a restyle's clothes** — `nav.js` activates wherever
 the hook appears, so adding it as part of a styling slice is exactly the kind of side effect that later
@@ -499,6 +499,25 @@ Six departures, none of them silent. Each was found by running something, not by
    that each failed the user's actual request, and did not re-examine it until told to. A constraint
    that starts costing the thing it was meant to protect has stopped being a constraint.
 
+8. **D12 is superseded: the hook ships, the navigation does not — found by review, not by a test.**
+   `nav.js` now registers only items whose `#reply-<id>` permalink exists **on the current page**, which
+   was the fix for it hijacking front-page clicks (§10b, the two-destination fix). The front page emits
+   no `reply-*` anchors in either view — measured, zero — so **both card types are filtered out of the
+   nav model and every keyboard handler no-ops on `/`.** D12's promise ("j/k navigation extends to the
+   front page") is not merely unpinned, as §11 said; it is **foreclosed by construction**.
+
+   `data-nav-item` still ships on both card types, and the two scenarios still pin it — but as a
+   **reserved hook**, not as working navigation, and their wording now says so. This is the honest
+   state: the attribute is the cards' standing request to be navigable, and answering it needs a
+   `nav.js` that can treat an item as a link to another page rather than a node on this one. That is a
+   slice, not a patch — it changes what the reading cursor *means* — and it is the natural home for
+   D12's original intent.
+
+   Worth stating plainly, because it is the lesson: the pin was written to §10.3's own instruction that
+   the hook go on both card types "or j/k works in one view and silently dies in the other". It now
+   dies in both, and the pin stayed green throughout — a hook asserted present while the behaviour it
+   stood for was removed two commits later, by me, without noticing.
+
 Also corrected before it became permanent: **V29's first draft explained its CHECKs with "SQLite cannot
 add a CHECK by ALTER TABLE"** — the exact folk claim the V28 review close-out disproved and the sqlite
 skill now brands false, regressing into new code one slice later. A migration is immutable once applied,
@@ -522,7 +541,10 @@ the reason `findActive`'s "sorts chronologically" comment is **false as written*
 path drives a corrupt stamp end-to-end through the feed** — the narrow claim, because the blunt version
 ("the null branch is never exercised") would be a lie about the suite · the pre-existing
 `>`-in-a-title exposure of `Html.threadRowAttr` · the persona-memory `homeFingerprint` helper becomes
-view-dependent (its KDoc needs a sentence; no code change) · **j/k navigation actually working on the
-new cards** (D12): the acceptance suite drives no browser and no tier drives `nav.js`, so the pin reaches
-"the `data-nav-item` attribute is present on **both** card types" and no further — the same standing
-limitation as the htmx delete swap.
+view-dependent (its KDoc needs a sentence; no code change) · **j/k navigation on the new cards (D12) —
+this line UNDERSTATED it and has been corrected**: it is not that the behaviour is unpinned, it is that
+it does not happen at all (§10b.8). The pin reaches "the `data-nav-item` attribute is present on **both**
+card types" and no further, which is now the whole of what is claimed · **`feed.js` and the front-page
+half of `nav.js` are driven by no tier**: the acceptance suite runs no browser, so the click
+arbitration, the double-click grace and the nav-model filter are all manually verified — and the
+double-click hole survived exactly that verification until a review caught it.

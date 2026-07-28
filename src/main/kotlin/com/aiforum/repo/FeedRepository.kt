@@ -14,12 +14,12 @@ import org.springframework.stereotype.Repository
  *
  * [excerptIsReply] answers a question no other column can: "the excerpt came from a reply" is NOT the
  * same as "the excerpt's author differs from the thread's", because a persona replying to its own article
- * thread gives the same author for both. **It has no production consumer today** — `FeedCards` derives
- * the byline from a null [excerptAuthor] alone, which coincides with this flag for owner threads and
- * differs for a persona's reply-less one. Kept, and pinned at Tier 1, because it is the only expression
- * of §7's "don't name the same voice twice" rule; said plainly here rather than claimed as load-bearing,
- * because an unused field defended by a sentence about a caller that does not exist is the exact defect
- * class this repo polices (persona-memory §10.6).
+ * thread gives the same author for both. **`FeedCards.threadCard` is the consumer**, and it is what
+ * implements §7's "don't name the same voice twice": the excerpt byline is suppressed when the preview
+ * is the thread's OWN opening post, whoever wrote it. The cheaper-looking rule — compare the two author
+ * ids — is wrong for exactly the case this flag exists to separate, and both readings are pinned
+ * (`FeedCardsTest`, and the acceptance scenario "A persona's own opening post is not credited under its
+ * own badge"). See plan_docs/ambient-slice-6.md §10b.6.
  *
  * [authorId] and [excerptAuthor] are both nullable and both mean *owner* when null — `thread.author_id` is
  * NULL for every hand-created thread (V20), and a reply-less owner thread coalesces its excerpt author to

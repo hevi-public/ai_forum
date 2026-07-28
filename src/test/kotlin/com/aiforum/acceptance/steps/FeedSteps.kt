@@ -238,11 +238,20 @@ class FeedSteps(
     fun cardPreviewsExactly(title: String, text: String) =
         assertEquals(text, excerptOf(title), "expected \"$title\"'s preview to be exactly \"$text\"")
 
+    /**
+     * The voice is asserted as the excerpt's LEADING credit (`Sol · …`), not as a substring anywhere in
+     * it. Containment would pass on a body that merely mentions the name — "Sol is right about this" —
+     * with the byline element deleted, which is fixture-luck rather than a test: today's fixtures happen
+     * not to name their author in the text, and nothing stops tomorrow's from doing so.
+     */
     @Then("the thread card for {string} previews {string} credited to {string}")
     fun cardPreviewsCredited(title: String, text: String, voice: String) {
         val excerpt = excerptOf(title)
         assertTrue(excerpt.contains(text, ignoreCase = true), "expected \"$title\"'s preview to show \"$text\", was: \"$excerpt\"")
-        assertTrue(excerpt.contains(voice, ignoreCase = true), "expected \"$title\"'s preview to name \"$voice\", was: \"$excerpt\"")
+        assertTrue(
+            excerpt.trimStart().startsWith("$voice ·", ignoreCase = true),
+            "expected \"$title\"'s preview to be CREDITED to \"$voice\" (a leading \"$voice ·\"), was: \"$excerpt\"",
+        )
     }
 
     @Then("the thread card for {string} does not preview {string}")
@@ -298,7 +307,9 @@ class FeedSteps(
         )
     }
 
-    /** D12: j/k reaches the front page. The pin goes exactly this far — the attribute is present on
+    /** D12's hook, RESERVED not working (§10b.8): nav.js registers only items whose #reply-<id> anchor
+     *  is on the current page, and the front page has none, so j/k does NOT reach these cards today.
+     *  What this pins is that the attribute is present on
      *  both card types — because the acceptance suite drives no browser and no tier drives `nav.js`
      *  (§11); whether navigation WORKS on these cards is a standing §10.4 gap, not something this
      *  step claims. */
@@ -306,7 +317,7 @@ class FeedSteps(
     fun threadCardIsNavItem(title: String) {
         assertTrue(
             Html.threadRowAttr(body(), title, "data-nav-item") != null,
-            "expected \"$title\"'s card to carry data-nav-item so j/k reaches it, in:\n${body()}",
+            "expected \"$title\"'s card to carry data-nav-item (the reserved nav hook, §10b.8), in:\n${body()}",
         )
     }
 
@@ -351,36 +362,49 @@ class FeedSteps(
         assertEquals(expected.split(", "), actual, "the stream is reverse-chronological across both legs, in:\n${body()}")
     }
 
-    /** The link is composed from the card's OWN event id and the thread the fixture seeded — not read
-     *  back from the same href it is checking — so a card that linked at the wrong comment fails. */
+    /**
+     * The card's own destination: this event, at its anchor.
+     *
+     * Read off the SPECIFIC element that carries it (`.activity-card__open`) rather than from anywhere
+     * in the row, and the expected value is composed from the card's own event id and the thread the
+     * fixture seeded — never read back from the href being checked. Scoping to the element is what
+     * makes the pair of link assertions catch a SWAP: with both asserted as "somewhere in this row",
+     * exchanging the two `href` expressions in the template left every tier green while the title
+     * opened at the comment and the box opened at the top — the exact defect §10b.6 records fixing.
+     */
     @Then("the activity card saying {string} links into {string} at that comment")
     fun cardLinksIntoThread(text: String, title: String) {
         val row = cardSaying(text)
         val threadId = threadIdOf(title)
         val eventId = attrIn(rowTag(row), "data-feed-event") ?: error("the card carries no event id:\n$row")
         assertEquals(threadId, attrIn(rowTag(row), "data-feed-thread"), "expected the card to name \"$title\", got:\n$row")
-        assertTrue(
-            row.contains("href=\"/threads/$threadId#reply-$eventId\""),
-            "expected a link into \"$title\" at that comment (/threads/$threadId#reply-$eventId) in:\n$row",
+        assertEquals(
+            "/threads/$threadId#reply-$eventId", hrefOfClass(row, "activity-card__open"),
+            "the card's own click target must open THIS event at its anchor, in:\n$row",
         )
     }
 
     /**
      * The thread title's own destination: the conversation, UNANCHORED.
      *
-     * Asserted as the exact quoted string `href="/threads/<id>"` — the closing quote is what makes it an
-     * assertion at all, because `/threads/<id>` is a prefix of `/threads/<id>#reply-<e>` and a
-     * containment check would pass against the comment link sitting in the same card.
+     * Equality against the title anchor's href, not containment anywhere in the row — `/threads/<id>`
+     * is a prefix of `/threads/<id>#reply-<e>`, so a containment check passes against the card's other
+     * link and would assert nothing.
      */
     @Then("the activity card saying {string} links to the thread {string} itself")
     fun cardLinksToThreadItself(text: String, title: String) {
         val row = cardSaying(text)
-        val threadId = threadIdOf(title)
-        assertTrue(
-            row.contains("href=\"/threads/$threadId\""),
-            "expected an unanchored link to \"$title\" (/threads/$threadId) in:\n$row",
+        assertEquals(
+            "/threads/${threadIdOf(title)}", hrefOfClass(row, "activity-card__thread"),
+            "the thread title must open the conversation at its top, in:\n$row",
         )
     }
+
+    /** The `href` of the one anchor in [row] carrying [cssClass]. Null when that anchor is absent, so a
+     *  missing link fails as "was null" rather than passing an absence off as a match. */
+    private fun hrefOfClass(row: String, cssClass: String): String? =
+        Regex("<a\\b[^>]*\\bclass=\"[^\"]*\\b$cssClass\\b[^\"]*\"[^>]*>").find(row)
+            ?.value?.let { attrIn(it, "href") }
 
     /** Read as the explicit string on both sides (§2.5): a Boolean-valued attribute is DROPPED by JTE
      *  when false, so "not unread" asserted as absence would pass on a card that lost the hook. */
@@ -410,14 +434,15 @@ class FeedSteps(
         )
     }
 
-    /** D12's other half — the hook goes on BOTH card types, or j/k works in one view and dies in the
+    /** D12's other half — the hook goes on BOTH card types, so that whichever nav.js eventually
+     *  consumes it cannot work in one view and die in the
      *  other. Presence only, for the reason spelled out on the thread-card sibling. */
     @Then("the activity card saying {string} is a keyboard nav item")
     fun activityCardIsNavItem(text: String) {
         val row = cardSaying(text)
         assertTrue(
             rowTag(row).contains("data-nav-item"),
-            "expected the card to carry data-nav-item so j/k reaches it, got:\n$row",
+            "expected the card to carry data-nav-item (the reserved nav hook, §10b.8), got:\n$row",
         )
     }
 

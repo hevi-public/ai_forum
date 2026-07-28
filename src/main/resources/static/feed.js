@@ -14,18 +14,31 @@
  * unit-tested. This file only measures what the core cannot see: the pointer travel between press and
  * release. Activates wherever [data-activity-stream] exists, no-ops elsewhere.
  */
-import { shouldOpenCard } from "./feed-core.mjs";
+import { shouldOpenCard, openDelayMs } from "./feed-core.mjs";
 
 const STREAM = "[data-activity-stream]";
 const CARD = ".activity-card";
 const OPEN = ".activity-card__open";
+const TEXT = ".activity-card__excerpt";
 
 // Where the pointer went down, so the core can tell a click from the tail end of a drag. Tracked on
 // the document rather than per-card: a selection often STARTS inside one card and ends outside it.
 let downX = 0;
 let downY = 0;
 
+// A click on text is held briefly so a second press can cancel it (see openDelayMs). This is that
+// pending open — and cancelling it on the NEXT mousedown is the entire double-click fix: the second
+// press of a word-select arrives while the first click's timer is still waiting.
+let pendingOpen = null;
+
+function cancelPendingOpen() {
+  if (pendingOpen === null) return;
+  clearTimeout(pendingOpen);
+  pendingOpen = null;
+}
+
 document.addEventListener("mousedown", function (e) {
+  cancelPendingOpen();
   downX = e.clientX;
   downY = e.clientY;
 });
@@ -60,5 +73,12 @@ document.addEventListener("click", function (e) {
   })) return;
 
   // assign(), not href=, so the visit is a normal history entry and Back returns to the feed.
-  window.location.assign(open.href);
+  const go = () => window.location.assign(open.href);
+
+  // Clicks on chrome open immediately; clicks on the preview text wait out the double-click window,
+  // because that gesture's FIRST click is indistinguishable from a plain one until the second press
+  // arrives and cancels this timer.
+  const delay = openDelayMs(!!e.target.closest(TEXT));
+  if (delay === 0) { go(); return; }
+  pendingOpen = setTimeout(function () { pendingOpen = null; go(); }, delay);
 });

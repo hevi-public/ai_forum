@@ -54,8 +54,11 @@ Feature: The front page is two readings of one forum, and it remembers which one
   # teeth — the two hook vocabularies are disjoint, so a stream card can never satisfy a thread-card
   # assertion — and it is twinned with the comment card it must show instead, so it cannot pass on a
   # page that rendered nothing. Emitting data-thread-title on an activity card reddens the second
-  # clause. The nav-item clause is D12's other half: the hook goes on BOTH card types, or j/k works
-  # in one view and silently dies in the other.
+  # clause. The nav-item clause is D12's other half: the hook goes on BOTH card types. It is RESERVED,
+  # not working — nav.js ignores items with no same-page #reply anchor and the front page has none, so
+  # j/k reaches neither view (section 10b.8). Pinned so the two card types cannot drift apart before
+  # something can consume it. The sentence here previously claimed j/k works in one view and dies in
+  # the other; it dies in both, and this pin stayed green while that happened.
   Scenario: Switching to the activity view redraws the front page and shows no thread cards
     Given a persona "Sol" exists
     And a thread "Scaling SQLite" was opened 600 seconds ago with the opening post "How do we scale this?"
