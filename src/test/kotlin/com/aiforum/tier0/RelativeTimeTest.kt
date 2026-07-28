@@ -41,9 +41,34 @@ class RelativeTimeTest {
     }
 
     @Test
-    fun `days past a day`() {
+    fun `days from one day up to a week`() {
         assertEquals("1d", agoOf(java.time.Duration.ofDays(1)))
-        assertEquals("9d", agoOf(java.time.Duration.ofDays(9)))
+        assertEquals("6d", agoOf(java.time.Duration.ofDays(6)))
+        // The last second still inside the relative window — the boundary is closed on this side.
+        assertEquals("6d", agoOf(java.time.Duration.ofDays(7).minusSeconds(1)))
+    }
+
+    @Test
+    fun `a week or older reads as a date, because a day count stops saying anything`() {
+        // The bug this replaced: `d` was unbounded, so a forum whose content all landed in one evening
+        // rendered "7d" on every card and every rail row — a conversation flattened into one label, and
+        // one that only gets worse ("38d", "412d"). Seven days is where the switch happens, exactly.
+        assertEquals("14 Jun", agoOf(java.time.Duration.ofDays(7)))
+        assertEquals("12 Jun", agoOf(java.time.Duration.ofDays(9)))
+    }
+
+    @Test
+    fun `an older year carries its year, so it cannot be mistaken for this one`() {
+        // 21 Jun 2026 minus 200 days lands in 2025; without the year "3 Dec" would read as this coming
+        // December to anyone scanning quickly.
+        assertEquals("3 Dec 2025", agoOf(java.time.Duration.ofDays(200)))
+    }
+
+    @Test
+    fun `the date is rendered in UTC, the zone ClockConfig actually provides`() {
+        // 00:30Z on the 14th is still the 13th in any negative offset. Pinned so that introducing a
+        // local-time Clock cannot silently make dates disagree with the `d` counts above them.
+        assertEquals("14 Jun", RelativeTime.ago(Instant.parse("2026-06-14T00:30:00Z"), now))
     }
 
     @Test

@@ -31,6 +31,15 @@ object FeedCards {
     private const val EXCERPT_LEN = 120
 
     /**
+     * The stream's excerpt runs longer than the index's **because the two views are read differently**:
+     * a thread card is one line of an index you scan for the thread you want, while a stream card is the
+     * thing itself and is read in place. Three wrapped lines is the budget the CSS clamps to, and 300
+     * characters is what fills them at the card's width without the clamp usually having to bite — a cap
+     * that routinely truncated mid-second-line would make the clamp, not the text, the thing you notice.
+     */
+    private const val STREAM_EXCERPT_LEN = 300
+
+    /**
      * One thread's card.
      *
      * [ThreadRow.author] stays the **raw** stored author id, because `data-thread-author` is what
@@ -88,7 +97,7 @@ object FeedCards {
             byline = AuthorLabel.display(event.authorId),
             monogram = AuthorLabel.monogram(event.authorId),
             hue = AuthorColor.hue(event.authorId, personas),
-            excerpt = FeedExcerpt.of(event.body, EXCERPT_LEN),
+            excerpt = FeedExcerpt.of(event.body, STREAM_EXCERPT_LEN),
             ago = RelativeTime.agoOrNull(event.createdAt, now) ?: "",
             unread = event.unread,
             href = "/threads/${event.threadId}#reply-${event.id}",

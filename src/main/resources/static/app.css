@@ -728,11 +728,22 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
 .activity-card__verb { font-family: var(--mono); font-size: 11px; color: var(--faint); }
 .activity-card__thread { font-size: 13px; color: var(--link); flex: 1 1 auto; }
 .activity-card__ago { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-left: auto; }
+/* The stream excerpt WRAPS, unlike the index's one-liner: a stream card is the thing itself, read in
+   place, not a row you scan past. Clamped to three lines via -webkit-line-clamp — still the only
+   cross-browser way to ellipsize at a line count (it is in every current engine despite the prefix;
+   the unprefixed `line-clamp` is not yet broadly safe). `min-width: 0` matters: this is a flex item,
+   and a flex item's automatic minimum size is its CONTENT, so without it a long unbroken token would
+   push the card wider instead of wrapping. `overflow-wrap` catches the pasted-URL case the clamp
+   cannot. */
 .activity-card__excerpt {
-  flex-basis: 100%;
-  font-size: 12.5px; line-height: 1.5; color: var(--muted);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex-basis: 100%; min-width: 0;
+  font-size: 12.5px; line-height: 1.55; color: var(--muted);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  overflow: hidden; overflow-wrap: anywhere;
 }
+/* Still wins over the -webkit-box above it: :empty adds a pseudo-class, so this is the more specific
+   rule as well as the later one. It has to collapse entirely, or the row-gap reserves a line for a
+   card with nothing to preview. */
 .activity-card__excerpt:empty { display: none; }
 
 /* ---------------------------------------------------------------- thread */

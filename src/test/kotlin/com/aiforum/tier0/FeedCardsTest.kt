@@ -8,6 +8,7 @@ import com.aiforum.web.PersonaView
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -124,6 +125,28 @@ class FeedCardsTest {
         val card = FeedCards.threadCard(thread(authorId = "sol", excerptBody = "", excerptAuthor = "sol"), now)
         assertEquals("", card.excerpt)
         assertNull(card.excerptBy, "with nothing to preview there is no voice to credit")
+    }
+
+    @Test
+    fun `a stream card previews more than an index row, because the two are read differently`() {
+        // A thread card is one scannable line of an index; a stream card is the thing itself, wrapped
+        // over up to three lines. Same body through both projections, and the budgets must differ —
+        // one shared constant would silently re-flatten the stream to a one-liner's worth of text.
+        val body = "x".repeat(400)
+        val indexRow = FeedCards.threadCard(thread(excerptBody = body, excerptAuthor = "sol", excerptIsReply = true), now)
+        val streamRow = FeedCards.activityCard(event(body = body), emptyList(), now)
+
+        assertEquals(121, indexRow.excerpt.length, "120 characters plus the ellipsis")
+        assertEquals(301, streamRow.excerpt.length, "300 characters plus the ellipsis")
+        assertTrue(streamRow.excerpt.length > indexRow.excerpt.length)
+    }
+
+    @Test
+    fun `a stream excerpt short enough to fit is not truncated at all`() {
+        // The clamp is the CSS's job; this pins that the projection does not add an ellipsis to text
+        // that never needed one — a card ending in "…" when nothing was cut reads as broken.
+        val card = FeedCards.activityCard(event(body = "Indexes help here"), emptyList(), now)
+        assertEquals("Indexes help here", card.excerpt)
     }
 
     @Test
