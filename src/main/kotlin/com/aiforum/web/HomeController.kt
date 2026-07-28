@@ -57,6 +57,7 @@ data class ActivityRow(
     val ago: String,
     val unread: Boolean,
     val href: String,
+    val threadHref: String,
 )
 
 /**

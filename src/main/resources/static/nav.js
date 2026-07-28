@@ -47,7 +47,17 @@ function idFromHash() {
 function rebuild() {
   elById.clear();
   let postId = null; // the thread OP, if present — the logical root of the tree
-  const nodes = Array.from(document.querySelectorAll(NAV));
+  // ONLY items whose permalink target is on THIS page. The whole engine assumes a nav item is a comment
+  // node here and now: setCursor rewrites the URL to hashFor(id) = "#reply-<id>", scrollCommentIntoView
+  // scrolls to the element, j/k walk a tree. The front page's feed cards carry [data-nav-item] too (they
+  // are links to comments on OTHER pages), and without this filter clicking one rewrote the URL to
+  // "/#reply-<id>" — a fragment pointing at nothing, on a page that then did not navigate. The hook is a
+  // request to be navigable; having a same-page #reply-<id> anchor is what makes the request answerable,
+  // and a feed card cannot answer it. Empty model => every handler below no-ops, which is the "no-ops
+  // elsewhere" this file's header promises.
+  const nodes = Array.from(document.querySelectorAll(NAV)).filter((el) =>
+    document.getElementById(hashFor(idOf(el)).slice(1)),
+  );
   const records = nodes.map((el) => {
     const id = idOf(el);
     elById.set(id, el);

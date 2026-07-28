@@ -365,6 +365,23 @@ class FeedSteps(
         )
     }
 
+    /**
+     * The thread title's own destination: the conversation, UNANCHORED.
+     *
+     * Asserted as the exact quoted string `href="/threads/<id>"` — the closing quote is what makes it an
+     * assertion at all, because `/threads/<id>` is a prefix of `/threads/<id>#reply-<e>` and a
+     * containment check would pass against the comment link sitting in the same card.
+     */
+    @Then("the activity card saying {string} links to the thread {string} itself")
+    fun cardLinksToThreadItself(text: String, title: String) {
+        val row = cardSaying(text)
+        val threadId = threadIdOf(title)
+        assertTrue(
+            row.contains("href=\"/threads/$threadId\""),
+            "expected an unanchored link to \"$title\" (/threads/$threadId) in:\n$row",
+        )
+    }
+
     /** Read as the explicit string on both sides (§2.5): a Boolean-valued attribute is DROPPED by JTE
      *  when false, so "not unread" asserted as absence would pass on a card that lost the hook. */
     @Then("the activity card saying {string} is unread")

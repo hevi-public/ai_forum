@@ -6,6 +6,15 @@
      across both, each linking INTO its thread at that event (a post card's event id IS its thread id, so
      it lands on the opening post's existing #reply-<threadId> anchor).
 
+     TWO DESTINATIONS, and which is which is the whole point: the card BODY opens this event at its
+     anchor, and the thread TITLE opens the conversation at its top. The body link is stretched over the
+     whole card by app.css, so the box is the big target and the title is the small precise one — which
+     is why the title carries z-index there, to stay clickable above its own card's stretch.
+
+     NOTE the card body is an <a>, not a <span>: it was a span, and clicking it did nothing but rewrite
+     the URL, because nav.js saw [data-nav-item] and moved its reading cursor instead. A real link is
+     what makes the box navigate; the nav.js half of that bug is fixed in nav.js.
+
      The hook vocabulary here is DISJOINT from the thread card's (I1): no data-thread-*, no delete
      control. That is what lets "the activity view shows no thread cards" be a property — a scan for the
      whole data-thread- prefix — rather than a spot check on one attribute.
@@ -27,9 +36,9 @@
             <span class="monogram monogram--sm" aria-hidden="true" style="--mono-h: ${event.hue}">${event.monogram}</span>
             <span class="activity-card__byline">${event.byline}</span>
             <span class="activity-card__verb">${if (event.kind == "post") "opened" else "replied in"}</span>
-            <a class="activity-card__thread" href="${event.href}">${event.threadTitle}</a>
+            <a class="activity-card__thread" href="${event.threadHref}">${event.threadTitle}</a>
             <span class="activity-card__ago">${event.ago}</span>
-            <span class="activity-card__excerpt">${event.excerpt}</span>
+            <a class="activity-card__excerpt" href="${event.href}">${event.excerpt}</a>
         </li>
     @endfor
 </ul>

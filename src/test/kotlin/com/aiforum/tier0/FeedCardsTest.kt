@@ -63,6 +63,26 @@ class FeedCardsTest {
     }
 
     @Test
+    fun `a card carries two destinations - this event, and the conversation it is in`() {
+        // The card body opens the event at its anchor; the thread title opens the thread at its top.
+        // Asserted as a PAIR because the failure mode is them collapsing into one — which is what
+        // shipped first, with the title carrying the anchored href and the body carrying no link at all.
+        val card = FeedCards.activityCard(event(id = "c1", threadId = "t1"), emptyList(), now)
+        assertEquals("/threads/t1#reply-c1", card.href, "the body opens this comment")
+        assertEquals("/threads/t1", card.threadHref, "the title opens the conversation")
+        assertNotEquals(card.href, card.threadHref)
+    }
+
+    @Test
+    fun `a post card's two destinations differ only by the anchor`() {
+        // A post card's event id IS its thread id, so these are the same page — the anchor is the only
+        // difference, and it still has to be there: the body lands on the opening post's own anchor.
+        val card = FeedCards.activityCard(event(isPost = true, id = "t1", threadId = "t1"), emptyList(), now)
+        assertEquals("/threads/t1#reply-t1", card.href)
+        assertEquals("/threads/t1", card.threadHref)
+    }
+
+    @Test
     fun `a post card's event id is its thread id, so it lands on the opening post's own anchor`() {
         // threadOp.kte already emits id="reply-<threadId>", so the thread leg giving an opening the same
         // value for both fields is what lets ONE href shape serve both kinds — there is no second link

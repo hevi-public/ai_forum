@@ -714,7 +714,10 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
 /* Same split gap and block padding as the thread card above — the two views are one surface, so a
    stream card and a thread card must sit on the same vertical rhythm or switching views feels like
    switching pages. */
+/* position:relative is what the body link's stretch resolves against — without it the ::after below
+   would size itself to the nearest positioned ancestor and cover the whole page. */
 .activity-card {
+  position: relative;
   display: flex; align-items: center; flex-wrap: wrap; column-gap: 8px; row-gap: 7px;
   padding: 15px 16px 15px 19px;
   border-top: 1px dotted var(--line-dotted);
@@ -726,7 +729,10 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
 .activity-card.is-unread { border-left: 3px solid var(--sage); padding-left: 16px; }
 .activity-card__byline { font-weight: 700; font-size: 13px; color: var(--ink); }
 .activity-card__verb { font-family: var(--mono); font-size: 11px; color: var(--faint); }
-.activity-card__thread { font-size: 13px; color: var(--link); flex: 1 1 auto; }
+/* Sits ABOVE its own card's stretched body link (below), so the two destinations stay separable: the
+   title opens the conversation, the box around it opens this one event. Without the z-index the stretch
+   would swallow this link and both would go to the comment. */
+.activity-card__thread { position: relative; z-index: 1; font-size: 13px; color: var(--link); flex: 1 1 auto; }
 .activity-card__ago { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-left: auto; }
 /* The stream excerpt WRAPS, unlike the index's one-liner: a stream card is the thing itself, read in
    place, not a row you scan past. Clamped to three lines via -webkit-line-clamp — still the only
@@ -740,7 +746,17 @@ html[data-rail-left="collapsed"][data-rail-right="collapsed"] .container { max-w
   font-size: 12.5px; line-height: 1.55; color: var(--muted);
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
   overflow: hidden; overflow-wrap: anywhere;
+  text-decoration: none;                 /* it is a link, but it reads as body copy */
 }
+/* The stretch: the body link covers the whole card, so clicking anywhere in the box opens this event.
+   ::after rather than a wrapping <a>, because the card's children are FLAT by contract (I7) and a real
+   wrapper would also have swallowed the title link. Known trade-off of this pattern: the excerpt text
+   is no longer selectable by dragging — acceptable for a 3-line preview whose full text is one click
+   away, and the alternative is the JS click-handler this page deliberately does not have. */
+.activity-card__excerpt::after {
+  content: ""; position: absolute; inset: 0;
+}
+.activity-card__excerpt:hover { color: var(--ink); }
 /* Still wins over the -webkit-box above it: :empty adds a pseudo-class, so this is the more specific
    rule as well as the later one. It has to collapse entirely, or the row-gap reserves a line for a
    card with nothing to preview. */

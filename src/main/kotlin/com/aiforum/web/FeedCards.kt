@@ -83,6 +83,11 @@ object FeedCards {
      * so a post card lands on the opening post and a comment card lands on the comment, with no second
      * link shape to keep in step.
      *
+     * **[ActivityRow.threadHref] is a SECOND destination, not a duplicate.** A card answers two different
+     * questions and the owner asks them separately: the card body opens *this event* ([href], anchored),
+     * while the thread title opens *the conversation* ([threadHref], its top). Both are computed here
+     * rather than assembled in the template, so the pair is pinned at Tier 0 and cannot drift apart.
+     *
      * The byline, monogram and hue all resolve from the raw author id, so a card whose author has no
      * persona row (a deleted member — attribution is a plain string, never an FK) still names a voice and
      * still gets a stable colour, the same way a reply node does.
@@ -101,5 +106,6 @@ object FeedCards {
             ago = RelativeTime.agoOrNull(event.createdAt, now) ?: "",
             unread = event.unread,
             href = "/threads/${event.threadId}#reply-${event.id}",
+            threadHref = "/threads/${event.threadId}",
         )
 }

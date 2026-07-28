@@ -241,6 +241,10 @@ Feature: The front page is two readings of one forum, and it remembers which one
     And the front page view is set to "activity"
     When the owner opens the front page
     Then the activity card saying "Partition by tenant" links into "Scaling SQLite" at that comment
+    # ...and the thread title is a SEPARATE destination: the conversation's top, not this comment. The
+    # two halves are asserted together because the failure is them collapsing into one — which is how it
+    # first shipped, with the title anchored at the comment and the card body not a link at all.
+    And the activity card saying "Partition by tenant" links to the thread "Scaling SQLite" itself
 
   # 16. The coherence pin (I5): one fixture, both views, and "N new" has to mean the same thing in
   # each — two comments after the owner's read marker, the one before it read, and the thread's own
