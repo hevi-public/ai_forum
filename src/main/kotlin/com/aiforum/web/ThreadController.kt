@@ -1,7 +1,5 @@
 package com.aiforum.web
 
-import com.aiforum.dto.GenerationState
-import com.aiforum.dto.ReplyView
 import com.aiforum.dto.AttachmentView
 import com.aiforum.dto.ScopeMode
 import com.aiforum.markdown.MarkdownRenderer
@@ -45,7 +43,9 @@ class ThreadController(
     private val threadReads: ThreadReadRepository,
     private val generation: GenerationService,
     private val railFeeds: RailFeeds,
-    private val replyTree: ReplyTreeAssembler,
+    // The persisted tree + the in-flight drafts, read in the one order that can't lose a settling node
+    // (see ThreadReplies) — shared with the room poll so the two surfaces can't drift.
+    private val threadReplies: ThreadReplies,
     private val attachments: AttachmentService,
     private val attachmentRepo: AttachmentRepository,
     private val branchIndex: BranchIndexBuilder,
@@ -173,23 +173,10 @@ class ThreadController(
         attachmentRepo.forThread(threadId).map(AttachmentView::of)
 
     private fun renderThread(id: String, title: String, body: String, edited: Boolean, author: String?, model: Model): String {
-        // IN-FLIGHT FIRST, THEN THE DB — and the order is the whole point, not tidiness.
-        //
-        // These are two reads at two instants, and a settling node crosses between them: the worker
-        // persists the row and then evicts the registry entry. Read the DB first and a node that
-        // persists AND is evicted in the gap between the two reads appears in NEITHER — it is missing
-        // from the page altogether, neither drafting nor posted, as though the persona never spoke.
-        // Read the registry first and the same node appears in BOTH, which the dedupe below already
-        // handles: the settled row wins and the stale draft view is dropped.
-        //
-        // This is the ambient fan-out flake (how-we-work/context.md): a fast persona's node vanished
-        // from a room the poller then judged quiescent, so the count assertion read a room with a
-        // member missing. It failed roughly one run in four, only under a full suite, and survived a
-        // 4x settle-deadline raise — because no deadline can wait for a node that is not going to
-        // appear. A UI reader would have seen the same thing: a reply that generated fine, silently
-        // absent until the next page load.
-        val inFlight = generation.inFlightViews(id)
-        val all = comments.threadComments(id)
+        // The persisted tree unioned with the in-flight drafts — in-flight read FIRST, which is the
+        // invariant that keeps a settling node from falling between the two reads (ThreadReplies.read
+        // carries the full account). The room poll reads through the same seam.
+        val replies = threadReplies.read(id)
         model.addAttribute("threadId", id)
         model.addAttribute("title", title)
         model.addAttribute("body", body)
@@ -199,19 +186,13 @@ class ThreadController(
         // threadOp renders the byline + data-thread-author hook only when non-null.
         model.addAttribute("author", author)
         model.addAttribute("opAttachments", opAttachments(id))
-        // Nest replies under their parents so the page reflects the comment tree (a persona reply sits
-        // under the message it answered). replyNode.kte renders reply.children recursively; the flat
-        // list it gets here was rendering every node at level 0. Children keep their repository order
-        // (depth, created_at), so siblings stay chronological.
-        val tree = replyTree.assemble(all)
-        // The room is summoned on creation (async); its DRAFTING replies live only in the in-flight
-        // registry until they settle — no DRAFTING DB row exists. Surface them at the top level so a plain
-        // page load (e.g. the PRG redirect after create) shows the room responding: each drafting node
-        // self-polls /replies/{id} and settles in place. Dedupe by id against the DB tree to avoid a double
-        // render in the brief window after a draft's settle-write but before it's evicted from in-flight.
-        val rendered = collectIds(tree)
-        val drafting = inFlight.filter { it.id !in rendered }
-        model.addAttribute("replies", tree + drafting)
+        // Replies nest under their parents so the page reflects the comment tree (a persona reply sits
+        // under the message it answered); replyNode.kte renders reply.children recursively. The room is
+        // summoned on creation (async) and its DRAFTING replies live ONLY in the in-flight registry until
+        // they settle — no DRAFTING DB row exists — so they ride along at the top level: a plain page load
+        // (e.g. the PRG redirect after create) shows the room responding, and each drafting node self-polls
+        // /replies/{id} and settles in place.
+        model.addAttribute("replies", replies.all)
         // A create-time summon routes (the dispatcher's "who replies" LLM call) on a worker, so right
         // after the create redirect there may be no drafts yet. While that routing is in flight, the page
         // shows a poller (see thread.kte) that swaps the drafts in once they land, instead of the static
@@ -224,12 +205,12 @@ class ThreadController(
         // Branch index for the side rail: the posted nodes flattened in the same depth-first order the
         // page renders them, so the rail reads top-to-bottom alongside the thread. Drafting nodes are not
         // posted, so they stay out of the rail until they settle.
-        model.addAttribute("branchIndex", branchIndex.fromTree(tree, personaViews))
+        model.addAttribute("branchIndex", branchIndex.fromTree(replies.tree, personaViews))
         // "Waiting on the room" only when nothing has posted, nothing is drafting, AND no summon is
         // routing — i.e. the room was never summoned (no personas to route to). With the create-time
         // summon a fresh thread normally shows the summoning poller (then the drafts), so this empty state
         // is reserved for threads with no room to route to.
-        model.addAttribute("waitingOnRoom", all.none { it.state == GenerationState.POSTED } && drafting.isEmpty() && !summoning)
+        model.addAttribute("waitingOnRoom", !replies.anyPosted && replies.drafting.isEmpty() && !summoning)
         model.addAttribute("personas", personaViews)
         // Right-rail forum-wide feeds — the same boxes (same side) the home page carries, via RailFeeds.
         model.addAttribute("activeThreads", railFeeds.activeThreads())
@@ -238,16 +219,5 @@ class ThreadController(
         // Right-rail Shortcut box — the configured default query; hides itself when the integration is off.
         model.addAttribute("shortcut", shortcut.boxStories())
         return "thread"
-    }
-
-    /** Every reply id in the rendered tree (all depths) — so surfaced in-flight drafts aren't double-rendered. */
-    private fun collectIds(tree: List<ReplyView>): Set<String> {
-        val ids = mutableSetOf<String>()
-        fun walk(node: ReplyView) {
-            ids += node.id
-            node.children.forEach(::walk)
-        }
-        tree.forEach(::walk)
-        return ids
     }
 }

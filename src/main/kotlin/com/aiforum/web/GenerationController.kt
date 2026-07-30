@@ -16,6 +16,7 @@ import com.aiforum.repo.PersonaRepository
 import com.aiforum.repo.QuoteRepository
 import com.aiforum.service.AttachmentService
 import com.aiforum.service.GenerationService
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -73,6 +74,9 @@ class GenerationController(
     private val replyTree: ReplyTreeAssembler,
     // Quote edges from the composer's quotesJson are recorded against the freshly-posted owner node.
     private val quotes: QuoteRepository,
+    // The room poll renders the same union the thread page does (persisted tree + in-flight drafts),
+    // through the same seam — see ThreadReplies for why the read order is load-bearing.
+    private val threadReplies: ThreadReplies,
     private val objectMapper: ObjectMapper,
 ) {
 
@@ -335,17 +339,34 @@ class GenerationController(
     /**
      * Poll the create-time room summon (§4). While the dispatcher's routing call is still in flight the
      * thread has no drafts yet, so the thread page shows a "Summoning the room…" poller that hits this
-     * every second. Once routing picks who replies and the drafts are registered, this returns them as the
-     * reply-list fragment — htmx swaps the poller for the drafts, which then self-poll to settle. If the
-     * summon ends with no drafts (routing failed / empty roster), the poller drops itself so htmx stops.
+     * every second. Once the room has produced anything, this returns it as the reply-list fragment —
+     * htmx swaps the poller away for it, and any still-drafting node then self-polls to settle. Only a
+     * summon that ended with nothing at all (routing failed / empty roster) drops the poller silently.
+     *
+     * DB **and** registry, not registry alone. This used to answer from `inFlightViews` only — and a node
+     * LEAVES that registry the moment it settles (the worker persists the row, then evicts the entry), so
+     * a room whose drafts all settled before the first poll was indistinguishable from a room that
+     * produced nothing: the poller dropped itself and the owner sat on a thread with no replies until the
+     * next page load. [ThreadReplies] does the union in the one order that cannot lose a settling node.
      */
     @GetMapping("/threads/{threadId}/room")
-    fun room(@PathVariable threadId: String, model: Model): String {
-        val drafts = generation.inFlightViews(threadId)
-        if (drafts.isNotEmpty()) {
-            model.addAttribute("replies", drafts)
+    fun room(@PathVariable threadId: String, response: HttpServletResponse, model: Model): String {
+        val replies = threadReplies.read(threadId)
+        if (!replies.isEmpty()) {
+            // RETARGET THE WHOLE LIST, don't just replace the poller. The response now carries persisted
+            // rows, which include anything the owner posted from the composer WHILE the room was
+            // summoning — and that node is already in the page's reply list. Swapping this fragment in
+            // over the poller alone would leave the browser holding it twice; replacing the list wholesale
+            // makes the server render authoritative. Reswap is stated rather than inherited so the swap
+            // style can't drift out from under the retarget if the poller's own hx-swap changes.
+            response.setHeader(HX_RETARGET, ".reply-list")
+            response.setHeader(HX_RESWAP, "outerHTML")
+            model.addAttribute("replies", replies.all)
             model.addAttribute("threadId", threadId)
             model.addAttribute("personas", personaViews())
+            // Settled nodes are in the rail's remit (drafting ones aren't), and this response is the one
+            // that puts them on the page — so the rail's TOC refreshes with them, out of band.
+            model.addAttribute("branchIndex", branchIndex.forThread(threadId))
             return "fragments/replyList"
         }
         model.addAttribute("threadId", threadId)
@@ -460,5 +481,10 @@ class GenerationController(
         // Comfortably above the 120s generation timeout so the SSE doesn't lapse mid-generation; on timeout
         // the client still has the poll fallback. The emitter completes earlier on the terminal event.
         const val STREAM_TIMEOUT_MS = 300_000L
+
+        // htmx's per-response swap overrides: where the fragment lands, and how. Both are ASCII-only
+        // machine signals — the same discipline as HtmxErrorAdvice's HX-Trigger (header values are Latin-1).
+        const val HX_RETARGET = "HX-Retarget"
+        const val HX_RESWAP = "HX-Reswap"
     }
 }

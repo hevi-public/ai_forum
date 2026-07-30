@@ -45,6 +45,34 @@ Feature: New thread creation
     Then the thread exists with title "Scaling SQLite"
     And the room was summoned
 
+  # The create-time summon is async, so the thread page can render BEFORE routing concludes: it shows a
+  # poller that hits the room endpoint every second and swaps in whatever the room produced. That endpoint
+  # used to read ONLY the in-flight registry — which a node LEAVES the moment it settles (the worker
+  # persists the row, then evicts the entry). So a room whose drafts all settled before the first poll
+  # answered exactly like a room that produced nothing: the poller dropped itself and the owner sat on a
+  # thread with no replies until the next page load. Same read-skew shape as the thread-page fix in
+  # how-we-work/context.md — the registry is transient, the DB is the record, so the poll must read both.
+  Scenario: The room's replies reach the poller even when every draft has already settled
+    Given the LLM will respond with "sol"
+    And the LLM will respond with "Indexes are the trick"
+    When the owner creates a thread "Why is SQLite fast?" asking "explain the design" of "sol"
+    And the owner's page polls the room
+    Then the room fragment shows the reply "Indexes are the trick"
+    And the room fragment's reply is "posted"
+
+  # A note posted from the composer WHILE the room was still summoning is already in the page's reply
+  # list — and it is a DB row too, so it comes back in the poll's union. If a room fragment carrying
+  # content merely replaced the poller (the swap the poller itself declares), the browser would then hold
+  # that note twice. So the content response retargets the whole reply list and replaces it wholesale;
+  # the re-emitted poller (routing still in flight) carries no retarget and keeps replacing only itself,
+  # which is what stops a mid-wait poll from wiping the note.
+  Scenario: A room fragment carrying replies replaces the whole reply list
+    Given the LLM will respond with "sol"
+    And the LLM will respond with "Indexes are the trick"
+    When the owner creates a thread "Why is SQLite fast?" asking "explain the design" of "sol"
+    And the owner's page polls the room
+    Then the room fragment retargets the reply list
+
   # The new-thread form splits title from body: the body is the actual content of the post, rendered in
   # the thread's opening post (distinct from the room's replies in the comment tree). The dispatcher reads
   # that body to route, confirming the opening post reaches the room on the form path.

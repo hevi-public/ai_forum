@@ -6,6 +6,7 @@ import com.aiforum.acceptance.support.HttpClient
 import com.aiforum.acceptance.support.ScenarioWorld
 import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.fail
 
@@ -36,7 +37,7 @@ class ThreadSteps(
         // (summonAsync), so the create response carries no drafts yet. Poll the room endpoint until the
         // dispatcher has picked and the drafts are registered, then settle them so the dispatcher + persona
         // calls land in the LlmClient spy and the thread page shows the posted replies the Then steps read.
-        settle.awaitAllSettled(settle.awaitRoomDrafts(world.threadId ?: ""))
+        settle.awaitAllSettled(settle.awaitRoomReplies(world.threadId ?: ""))
     }
 
     @When("the owner starts a thread titled {string} from the browser")
@@ -111,6 +112,46 @@ class ThreadSteps(
         assertTrue(
             Html.contains(body, text),
             "expected the opening post \"$text\" on the thread page:\n$body",
+        )
+    }
+
+    /**
+     * The browser's room poll, read the way the browser reads it: the fragment body PLUS the htmx swap
+     * headers it carries. The create step has already settled the room, so this is the poll that lands
+     * AFTER every draft left the in-flight registry — the case the endpoint used to answer with nothing.
+     */
+    @When("the owner's page polls the room")
+    fun pollTheRoom() {
+        val resp = http.get("/threads/${world.threadId}/room")
+        world.lastStatus = resp.statusCode.value()
+        world.lastFragment = resp.body
+        world.lastHxRetarget = resp.headers.getFirst("HX-Retarget")
+    }
+
+    @Then("the room fragment shows the reply {string}")
+    fun roomFragmentShowsReply(body: String) {
+        val html = world.lastFragment ?: ""
+        assertTrue(
+            Html.contains(html, body),
+            "expected the room poll to carry the settled reply \"$body\":\n$html",
+        )
+    }
+
+    @Then("the room fragment's reply is {string}")
+    fun roomFragmentReplyState(state: String) {
+        val html = world.lastFragment ?: ""
+        assertTrue(
+            Html.hasAttr(html, "data-state", state),
+            "expected a reply in state \"$state\" in the room fragment:\n$html",
+        )
+    }
+
+    @Then("the room fragment retargets the reply list")
+    fun roomFragmentRetargetsReplyList() {
+        assertEquals(
+            ".reply-list",
+            world.lastHxRetarget,
+            "expected the room fragment to retarget the whole reply list (HX-Retarget), not just the poller",
         )
     }
 

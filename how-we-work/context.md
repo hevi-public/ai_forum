@@ -416,14 +416,21 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
 
 ## Open threads / near-term
 
-- **What's next, from the record rather than invention.** Persona memory landed 2026-07-26
-  (`persona-memory.md`, V28), closing the item named on 2026-07-21 as what follows S4b — so **S6,
-  the feed-style front page, is the only slice left on the direction doc's map** (§9); its open
-  question (§11.6) is unanswered and `home_rail` / `empty_and_unread` are already earmarked for
-  rework. Still deliberately open in §11.5 (S4b's leftover, untouched by memory): whether manual
-  create + the room map discharge the requirements' diversity lever, or the *synthesised,
-  centre-of-mass-aware* newcomer is a slice of its own. Memory's own deferred aspiration
-  (graph-walk recall, FTS/embeddings, root INJECTION) has no slice and no owner call yet.
+- **What's next, from the record rather than invention** (re-read 2026-07-30). S6 landed 2026-07-27
+  (V29), so **the direction doc's slice map is complete** — nothing is queued by name. What the record
+  actually hands forward, in the order it is written down:
+  - **The ambient-only stream filter** — the one thing §9 names as "a slice of its own". S6 ships the
+    stream as the honest superset called *Activity* because the schema carries no provenance marker;
+    its §2 must first decide what a `comment.origin` column means for the rows that predate it (the
+    NULL-for-all-history problem that killed `core` in S4b). Blast radius is small: the two
+    `FeedRepository` queries are the only readers. **Blocked on an owner call, not on design.**
+  - Deliberately open in §11.5 (S4b's leftover, untouched by memory): whether manual create + the room
+    map discharge the requirements' diversity lever, or the *synthesised, centre-of-mass-aware*
+    newcomer is a slice of its own. Memory's own deferred aspiration (graph-walk recall,
+    FTS/embeddings, root INJECTION) has no slice and no owner call yet either.
+  - Unbuilt but already designed: `plan_docs/composer-branch-context-controls.md` (proposed
+    2026-06-21). Needing a design spike: Artifacts — unblocked for the first time now that ambient is
+    all shipped, since it is what makes "latest/top" listings mean anything.
 - **Memory recall is categorically dead for an unspaced-script persona** (found by the persona-memory
   review, 2026-07-26; characterized, not fixed — plan doc §10.4). `MemoryRecall`'s ≥5-code-point word
   floor plus a tokenizer that splits only on `NON_WORD` means a CJK-language member matches on
@@ -435,10 +442,26 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
   because `wordsOf` feeds a matcher shared with `AmbientGate`, so redefining "word" moves ambient
   gating for every non-Latin ability string too. A per-script floor is the shape of the fix and it is
   a slice of its own — pick it up with any recall rework (FTS/embeddings would dissolve it).
-- **`GenerationController`'s `/room` fragment carries the flake that `ThreadController.renderThread`
-  was fixed for** (2026-07-26): it reads only the in-flight registry, so a summon whose drafts all
-  settle before the first poll reports a quiescent room with none of the settled replies in it. The
-  read-order fix does not generalise to it. Pre-existing, out of scope when found.
+- ~~**`GenerationController`'s `/room` fragment carries the flake that `ThreadController.renderThread`
+  was fixed for**~~ — ✅ **fixed 2026-07-30.** It read only the in-flight registry, which a node LEAVES
+  the moment it settles (persist, then evict), so a summon whose drafts all settled before the first
+  poll answered exactly like a summon that produced nothing: the poller dropped itself and the owner
+  sat on a thread with no replies until the next load. Three things the fix is worth remembering for:
+  - **The union now lives in one place — `web/ThreadReplies.read`** (registry first, then the DB,
+    dedupe by id) — because the read ORDER is the invariant and it had been stated once per surface.
+    Both `ThreadController.renderThread` and the room poll read through it; a third surface must too.
+  - **The room poll retargets the whole reply list** (`HX-Retarget: .reply-list` + `HX-Reswap`), it
+    does not replace the poller in place. The response now carries persisted rows, which include a
+    note the owner posted from the composer *while* the room was summoning — already in the page's
+    list — so an in-place swap would leave the browser holding it twice. The re-emitted poller sends
+    no retarget and still replaces only itself, which is what keeps that note alive mid-wait.
+    Un-pinnable end-to-end: no tier drives a browser, so acceptance pins the *header*, and the
+    no-duplication it buys is a DOM property nothing in `verifyAll` executes.
+  - **Widening the endpoint moved a test helper's meaning**: `GenerationSettle.awaitRoomDrafts` →
+    `awaitRoomReplies`, since the fragment now returns settled nodes too. That made it *wrong* for a
+    thread that starts non-empty — a Discuss thread posts the PR discussion synchronously, so the
+    first poll returns that comment and the helper waits for nothing; `GitHubPrThreadSteps` moved to
+    `awaitThreadSettled`. Widening a read widens every caller's definition of "has something landed".
 - **S4b follow-ups (none blocking, all verified against the code).**
   1. **`coarseFloor` is dead under the shipped config.** The floor is the oldest watermark and only when
      *every* member has one, but a member below the engagement floor is skipped before any judgment and

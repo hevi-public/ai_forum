@@ -84,7 +84,11 @@ class GitHubPrThreadSteps(
     @Then("the thread carries a reply reading {string}")
     fun threadCarriesReply(text: String) {
         // Settle the async create-time summon (mirrors the browser's htmx poll) before reading the page.
-        settle.awaitAllSettled(settle.awaitRoomDrafts(world.threadId ?: ""))
+        // Page-level, not the room poll: ingest posts the PR's discussion comment SYNCHRONOUSLY, so this
+        // thread is already non-empty and the room poll would return that comment without waiting for the
+        // summon at all. awaitThreadSettled waits on the states themselves (nothing summoning, nothing
+        // drafting), which is the honest signal on a thread that starts with content.
+        settle.awaitThreadSettled(world.threadId ?: "")
         val body = http.get("/threads/${world.threadId}").body ?: ""
         assertTrue(Html.contains(body, text), "expected a reply reading \"$text\" in:\n$body")
     }

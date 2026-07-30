@@ -19,6 +19,11 @@ class ScenarioWorld {
      *  out-of-band failure signal (T1.4). Null when the response carried no such header. */
     var lastHxTrigger: String? = null
 
+    /** The HX-Retarget response header on the last response, if any — how a fragment redirects its own
+     *  swap away from the element that asked for it (the room poll's content response retargets the whole
+     *  reply list). Null when the response carried no such header. */
+    var lastHxRetarget: String? = null
+
     /** The raw fragment a /generate POST returned (the htmx-swap payload), before any settle polling —
      *  so a scenario can assert on the swap structure the browser actually receives. */
     var lastFragment: String? = null

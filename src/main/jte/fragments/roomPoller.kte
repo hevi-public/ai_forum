@@ -2,10 +2,12 @@
 @param summoning: Boolean = true
 @if(summoning)
     <%-- "Summoning the room…": the create-time room summon is still routing on a worker (the dispatcher's
-         "who replies" LLM call). Self-polls GET /threads/{id}/room every second; that endpoint swaps this
-         poller for the drafts once they're registered (each then self-polls to settle), re-emits this
-         poller while routing is still in flight, or emits nothing once a summon ends with no drafts so
-         htmx stops. data-empty-state mirrors the static "waiting" state's hook. --%>
+         "who replies" LLM call). Self-polls GET /threads/{id}/room every second; that endpoint answers with
+         whatever the room has produced — drafts still in flight, replies that already settled, or both —
+         retargeting the whole reply list so the server render replaces it wholesale. Until then it
+         re-emits this poller (replacing only itself, so a note posted mid-wait survives), and emits
+         nothing once a summon ends having produced nothing at all, so htmx stops.
+         data-empty-state mirrors the static "waiting" state's hook. --%>
     <div data-empty-state="summoning"
          hx-get="/threads/${threadId}/room"
          hx-trigger="every 1s"
