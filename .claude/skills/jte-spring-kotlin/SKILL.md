@@ -293,6 +293,22 @@ and assertions then fail against half a row: loudly, but confusingly. Any templa
 reads (`admin_memory.kte`'s `data-memory-change` rows and their cited lines, the interest/stance logs)
 renders row internals as flat `<span>`/`<div>` children — one `<li>` per row, never a nested list.
 
+**Never put free-form text in a `data-*` ATTRIBUTE VALUE — JTE does not escape `>` there.** Measured on
+gg.jte's `OwaspHtmlTemplateOutput` (S6): in **body** context it emits `a &gt; b`, but in **attribute**
+context `>` passes through raw. Every acceptance probe that reads a hook is a single-tag regex
+(`Html.threadRowAttr`'s `<[^>]*…[^>]*>`), and none of them can cross a literal `>` — so one comment body
+containing `a > b` in a hook value truncates the opening tag and makes **every hook after it on that
+element unreadable**, on pages several feature files probe. The rule that falls out, and it is cheap:
+**a `data-*` value is an id, a slug, an enum slug, an integer, a relative-time label, or an explicit
+`"true"`/`"false"` — prose is CHILD TEXT** (S6's `data-thread-excerpt` carries the *thread id*; the
+excerpt itself is the span's text, read with the `Html.dialText` idiom).
+
+**A Boolean-valued attribute VANISHES when false.** `open="${threads.isEmpty()}"` is exactly how
+`index.kte` renders the collapsed ask-the-room composer that `home_rail` asserts — JTE omits the whole
+attribute rather than writing `open="false"`. Convenient there, a silent trap everywhere else: write
+`data-feed-unread="${e.unread.toString()}"` and `aria-pressed="${if (on) "true" else "false"}"`, or the
+false case has no markup at all and the test that "asserts" it is vacuous.
+
 ## JTE syntax cheat-sheet
 
 ```kotlin

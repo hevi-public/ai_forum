@@ -543,7 +543,9 @@ class PersonaMemorySteps(
         jdbc.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java) ?: 0
 
     /** The home page and both rails, as one comparable string: the main thread rows, the active rail
-     *  and the recently-posted rail, in document order. */
+     *  and the recently-posted rail, in document order. `data-thread-title` is a THREAD-CARD hook, so
+     *  this fingerprints the thread-card view specifically and depends on the front page defaulting
+     *  to it (plan_docs/ambient-slice-6.md §2.3: no stored preference means the thread cards). */
     private fun homeFingerprint(): String {
         val home = http.get("/").body ?: ""
         return "threads=" + Html.attrValues(home, "data-thread-title") +

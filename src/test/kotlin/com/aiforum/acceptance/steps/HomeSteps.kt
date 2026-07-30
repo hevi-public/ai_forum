@@ -7,6 +7,7 @@ import com.aiforum.acceptance.support.TestData
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -47,12 +48,36 @@ class HomeSteps(
         )
     }
 
+    /**
+     * The badge is read off THIS scenario's own row, not off the page. A page-wide
+     * `data-unread-count="3"` says only that some row somewhere carries the count — with a second
+     * thread on the front page it stops distinguishing "this thread's badge" from "a neighbour's",
+     * and it is the front page's only per-row number, so nothing else would catch the confusion
+     * (plan_docs/ambient-slice-6.md §6).
+     */
     @Then("the thread row shows a {string} badge")
     fun threadRowShowsBadge(badge: String) {
         val count = badge.removeSuffix(" new").trim()
-        assertTrue(
-            Html.hasAttr(world.lastBody ?: "", "data-unread-count", count),
-            "expected data-unread-count=\"$count\" in:\n${world.lastBody}",
+        val title = currentThreadTitle()
+        assertEquals(
+            count,
+            Html.threadRowAttr(world.lastBody ?: "", title, "data-unread-count"),
+            "expected the \"$title\" row to carry data-unread-count=\"$count\" in:\n${world.lastBody}",
         )
+    }
+
+    /**
+     * The title of the thread the scenario is about — the key its seeding Given recorded in
+     * [ScenarioWorld.threadIds], which is what lets the assertion above name one row. A thread
+     * arranged by some other route fails here rather than silently widening the probe back to the
+     * whole page, so the widening cannot happen by omission.
+     */
+    private fun currentThreadTitle(): String {
+        val id = world.threadId ?: error("no thread in ScenarioWorld — use 'a thread ... exists' first")
+        return world.threadIds.entries.firstOrNull { it.value == id }?.key
+            ?: error(
+                "no title recorded for thread $id, so the badge cannot be scoped to its row — " +
+                    "seed the thread through a step that records its title (world.threadIds)",
+            )
     }
 }

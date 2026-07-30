@@ -386,6 +386,34 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
   their own logged events — the paid record is never refused over a stale reference, and letters
   keep digits out of a model-facing protocol.
 
+- **S6 — the feed front page** ✅ built 2026-07-27 (V29, `plan_docs/ambient-slice-6.md`). Two views over
+  one front page — activity-sorted thread **cards** and a reverse-chronological **activity stream** —
+  chosen by a toggle persisted in a one-row `owner_pref` table. Suite 263 → 283; tier 0/1/2 439/265/156,
+  jsTest 100.
+  **The slice map is now complete.** Five durable learnings, each bought by running something:
+
+  - **JTE does NOT escape `>` in ATTRIBUTE context** (measured on `OwaspHtmlTemplateOutput`; it does in
+    body context). Since `Html.threadRowAttr`'s `<[^>]*…[^>]*>` cannot cross a literal `>`, any
+    free-form prose in a `data-*` value truncates the tag and makes **every hook after it unreadable** —
+    silently, on a page four feature files probe. **Rule: `data-*` values carry ids, slugs, enums,
+    integers or explicit `"true"`/`"false"`; prose is CHILD TEXT.**
+  - **JTE DROPS a Boolean-valued attribute when it is false.** That is how `open="${threads.isEmpty()}"`
+    yields the collapsed composer `home_rail` asserts. A boolean hook must be `.toString()`, or the
+    false case becomes unassertable and its test silently vacuous.
+  - **A page-wide `Html.contains` probe is a test waiting to stop failing.** `HomeRailSteps.railShows`
+    asserted a comment body *anywhere* on the page, justified by a KDoc claiming the home page renders
+    bodies only inside one rail box — which a card excerpt falsifies. It was scoped through a new
+    `Html.railBox` **before** the markup moved. When tightening a probe, verify NEGATIVELY: mutate the
+    markup so the old probe would have passed, and confirm the new one reddens.
+  - **A mutation-ledger row is a hypothesis until it is run.** Three of S6's were wrong: one claimed a
+    mutation reddens "#1 only" (21 scenarios redden), one claimed a distinction the step shape cannot
+    deliver, and one named a mutation that reddens with *or* without the fix, so it proved nothing.
+    All three were caught by executing them, and corrected in place.
+  - **Under a fixed test `Clock`, every seeded row shares one `created_at`.** An ordering scenario
+    written naively passes while asserting an arbitrary UUID order, then breaks later on an unrelated
+    id change. `TestData` gained per-call defaulted `agoSeconds`; a **global monotonic stagger was
+    refused** because it moves the unread boundary under every scenario that seeds a comment then reads.
+
 ## Open threads / near-term
 
 - **What's next, from the record rather than invention.** Persona memory landed 2026-07-26

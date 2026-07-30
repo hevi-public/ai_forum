@@ -1,9 +1,10 @@
-@import com.aiforum.web.ThreadRow
+@import com.aiforum.web.FeedPage
+@import com.aiforum.web.FeedView
 @import com.aiforum.web.PersonaView
 @import com.aiforum.web.ActiveThreadRow
 @import com.aiforum.web.RecentCommentRow
 @import com.aiforum.web.StarredCommentRow
-@param threads: List<ThreadRow>
+@param feed: FeedPage
 @param personas: List<PersonaView>
 @param activeThreads: List<ActiveThreadRow>
 @param recentComments: List<RecentCommentRow>
@@ -20,29 +21,34 @@
           @template.fragments.forumNavBox(threadCount = threadCount, personaCount = personaCount)
           @template.fragments.membersBox(personas = personas)
       </aside>
-      <div class="home__main">
+      <%-- data-feed-view sits on the main column, which is rendered whatever the forum holds — so the
+           view the page is showing stays assertable on an empty forum, where the toggle is the only way
+           back (ambient-slice-6 §2.5). --%>
+      <div class="home__main" data-feed-view="${feed.view.slug}">
         @template.fragments.wideToggle()
-        <h1 class="home__title">Threads</h1>
-        @if(threads.isEmpty())
-            <div data-empty-state="no-threads">No threads yet — start one!</div>
+        <h1 class="home__title">${feed.view.title}</h1>
+        @template.fragments.feedToggle(view = feed.view)
+        <%-- One view's cards, never both. The two lists are separately typed (D5), so handing a stream
+             card to the thread-card fragment is a build failure rather than a review question; and only
+             the active view's query was issued, so the other list is empty by construction. The two
+             empty states are DIFFERENT — "no threads yet" is not "nothing has happened yet" — which is
+             why the key comes off the view itself. --%>
+        @if(feed.view == FeedView.THREADS)
+            @if(feed.threadCards.isEmpty())
+                <div data-empty-state="${feed.view.emptyStateKey}">No threads yet — start one!</div>
+            @else
+                <div class="thread-index">
+                    @for(card in feed.threadCards)
+                        @template.fragments.threadCard(card = card)
+                    @endfor
+                </div>
+            @endif
         @else
-            <div class="thread-index">
-                @for(thread in threads)
-                    <%-- data-thread-author is emitted ONLY for a persona-authored (ambient) thread — a JTE
-                         smart attribute omits it entirely when thread.author is null, so the acceptance
-                         probe reads it off an ambient row and no owner-authored thread false-matches. --%>
-                    <div class="thread-row" data-thread-id="${thread.id}" data-thread-title="${thread.title}" data-unread-count="${thread.unreadCount}" data-thread-author="${thread.author}">
-                        <span class="thread-row__title"><a href="/threads/${thread.id}">${thread.title}</a></span>
-                        @if(thread.author != null)
-                            <span class="thread-row__author" data-thread-byline>${thread.author}</span>
-                        @endif
-                        @if(thread.unreadCount > 0)
-                            <span class="pill">${thread.unreadCount} new</span>
-                        @endif
-                        @template.fragments.rowDelete(postUrl = "/threads/${thread.id}/delete", rowSelector = ".thread-row", label = "Delete thread", warning = "Delete this thread and all of its comments? This can't be undone.")
-                    </div>
-                @endfor
-            </div>
+            @if(feed.events.isEmpty())
+                <div data-empty-state="${feed.view.emptyStateKey}">Nothing has happened yet.</div>
+            @else
+                @template.fragments.activityStream(events = feed.events)
+            @endif
         @endif
         <%-- Ask the room: a click-to-reveal new-thread composer in the main column (was a right-rail
              CTA). The <summary> is the design's "Ask the room" card; opening the disclosure reveals
@@ -52,9 +58,12 @@
              Creating the thread auto-summons the room (a "Whole Topic + Anyone" call, §2), so the fresh
              thread page shows the room already drafting its replies. Enter submits the form (Shift+Enter
              = newline; app.js, [data-new-thread]).
-             On an empty forum there's nothing to browse, so it starts open — the form is the one
-             thing a first-time visitor is here to do, no click required. --%>
-        <details class="ask-card" id="new-thread" data-ask-room open="${threads.isEmpty()}">
+             It sits OUTSIDE the view branch — posting is the one thing you can do from either reading —
+             and its "start open" test is the forum's thread COUNT rather than "this view rendered no
+             cards", which would spring the composer open on an activity view that simply has no thread
+             cards to show. On an empty forum there's nothing to browse, so it starts open: the form is
+             the one thing a first-time visitor is here to do, no click required. --%>
+        <details class="ask-card" id="new-thread" data-ask-room open="${threadCount == 0}">
             <summary class="ask-card__summary">
                 <span class="ask-card__title">Ask the room</span>
                 <span class="ask-card__lead">Post a question; pick who answers.</span>
@@ -84,7 +93,14 @@
       <aside class="home__rail-right" data-home-rail-right>
           @template.fragments.shortcutBox(shortcut = shortcut)
           @template.fragments.starredCommentsBox(starred = starredComments)
-          @template.fragments.recentCommentsBox(comments = recentComments)
+          <%-- D11, the owner's call: in the ACTIVITY view the recent-comments box is a strict subset of
+               the stream beside it — the same five comments twice on one screen — so it is suppressed
+               there and only there. The suppression lives HERE and not in the fragment or in RailFeeds,
+               because both are shared byte-for-byte with every thread page, which is the property their
+               KDoc exists to protect. --%>
+          @if(feed.view == FeedView.THREADS)
+              @template.fragments.recentCommentsBox(comments = recentComments)
+          @endif
           @template.fragments.activeThreadsBox(threads = activeThreads)
       </aside>
     </div>

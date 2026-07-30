@@ -7,6 +7,7 @@ import com.aiforum.acceptance.support.ScenarioWorld
 import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.fail
 
 /**
  * Step definitions for thread-level operations (create, view). The When step POSTs to /threads; the Then
@@ -44,10 +45,7 @@ class ThreadSteps(
         // thread. We locate the freshly-created thread on the home page by title — robust whether or not
         // the HTTP client auto-follows the redirect.
         http.postForm("/threads", mapOf("title" to title))
-        val home = http.get("/").body ?: ""
-        world.threadId = Regex("""data-thread-id="([^"]+)"\s+data-thread-title="${Regex.escape(title)}"""")
-            .find(home)?.groupValues?.get(1)
-        assertTrue(world.threadId != null, "expected thread \"$title\" on the home page after create:\n$home")
+        world.threadId = createdThreadId(title)
     }
 
     @When("the owner starts a thread titled {string} with body {string} from the browser")
@@ -55,10 +53,21 @@ class ThreadSteps(
         // Same browser form path as the title-only step, but the new-thread form now carries a body
         // (name="text") alongside the title — the opening post's content.
         http.postForm("/threads", mapOf("title" to title, "text" to body))
+        world.threadId = createdThreadId(title)
+    }
+
+    /**
+     * The id of the thread just created, read off the home page's row for [title] through the row's
+     * own hooks. The pair regex this replaces (`data-thread-id="…"\s+data-thread-title="…"`) pinned
+     * more than it meant to: it required the two attributes to be ADJACENT and in that order, so
+     * inserting a third hook between them — a restyle, not a regression — would fail here as
+     * "expected thread … on the home page after create" and send the reader hunting a creation bug
+     * that does not exist (plan_docs/ambient-slice-6.md §6).
+     */
+    private fun createdThreadId(title: String): String {
         val home = http.get("/").body ?: ""
-        world.threadId = Regex("""data-thread-id="([^"]+)"\s+data-thread-title="${Regex.escape(title)}"""")
-            .find(home)?.groupValues?.get(1)
-        assertTrue(world.threadId != null, "expected thread \"$title\" on the home page after create:\n$home")
+        return Html.threadRowAttr(home, title, "data-thread-id")
+            ?: fail("expected thread \"$title\" on the home page after create:\n$home")
     }
 
     @Then("the thread page shows the post body {string}")

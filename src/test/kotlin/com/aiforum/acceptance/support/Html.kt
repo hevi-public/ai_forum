@@ -244,6 +244,66 @@ object Html {
      */
     fun latestMemoryChangeRow(html: String): String? = liBlock(html, "data-memory-change")
 
+    /**
+     * One rail box as a self-contained block — its opening `<section … data-rail-box="[name]" …>`
+     * through the FIRST `</section>` — or null when the page renders no such box.
+     *
+     * A block rather than a page-wide probe because a rail's CONTENT is not unique to its rail: the
+     * thread page renders the same comment prose in the tree that the starred box quotes in the
+     * margin, so an un-scoped `contains` there reads the tree. Measured, not assumed — with the
+     * thread page's starred box rendered empty, the page-wide probe still passed and only the scoped
+     * one reddened. Scoping is what makes "this box shows it" mean the box.
+     *
+     * Slicing to the first close is sound because every rail fragment is a single `<section>` with
+     * nothing sectioned inside it — verified across all eight (`activeThreads`, `branchIndex`,
+     * `contextLegend`, `forumNav`, `members`, `recentComments`, `shortcut`, `starredComments`), and
+     * over the one sub-template a box includes (`storyCard`). A rail box that ever nests a
+     * `<section>` would truncate here, which is why the fragments are the place to keep flat.
+     */
+    fun railBox(html: String, name: String): String? {
+        val open = Regex("<section\\b[^>]*data-rail-box=\"${Regex.escape(name)}\"[^>]*>").find(html) ?: return null
+        val close = html.indexOf("</section>", open.range.last + 1)
+        if (close < 0) return null
+        return html.substring(open.range.first, close + "</section>".length)
+    }
+
+    /**
+     * One activity card as a self-contained block — its opening `<li … data-feed-event="[eventId]" …>`
+     * through the FIRST `</li>` — or null when the stream renders no such card
+     * (plan_docs/ambient-slice-6.md §2.5, I7).
+     *
+     * A block rather than a page-wide probe for the reason every sibling above has one: a stream card's
+     * author, excerpt, unread marker and link-into-the-thread all have to be asserted against the SAME
+     * card, and a page-wide probe would happily satisfy a claim about one card with a neighbour's field.
+     * Slicing to the first `</li>` is sound only because the design forbids nesting anything list-shaped
+     * inside a card — which is exactly why I7 pins the card's internals flat.
+     */
+    fun feedEventRow(html: String, eventId: String): String? =
+        liBlock(html, "data-feed-event=\"${Regex.escape(eventId)}\"")
+
+    /** Every activity card's event id, in document order — the stream's shape, which is what an
+     *  ordering assertion reads and what "the stream shows nothing saying …" has to iterate. */
+    fun feedEventIds(html: String): List<String> =
+        Regex("data-feed-event=\"([^\"]*)\"").findAll(html).map { it.groupValues[1] }.toList()
+
+    /**
+     * The visible text of the `<span [attr]="[value]">…</span>` — tags stripped, whitespace collapsed —
+     * or null when no such span is rendered. The [dialText] idiom, generalised to any hook.
+     *
+     * This is how the thread card's preview is read, and it is the whole reason the excerpt's prose is
+     * CHILD TEXT rather than an attribute value (I2/D6): gg.jte does not escape `>` in attribute
+     * context, so a prose excerpt in a hook would truncate the tag and make every hook after it
+     * unreadable. Slicing to the first `</span>` is why I7 also forbids a nested `<span>` inside a
+     * hooked one — the excerpt's byline is a `<b>`.
+     */
+    fun spanText(html: String, attr: String, value: String): String? {
+        val m = Regex(
+            "<span\\b[^>]*${Regex.escape(attr)}=\"${Regex.escape(value)}\"[^>]*>(.*?)</span>",
+            RegexOption.DOT_MATCHES_ALL,
+        ).find(html) ?: return null
+        return textOf(m.groupValues[1])
+    }
+
     /** The visible text of a fragment: tags stripped, entities left alone, whitespace collapsed. */
     fun textOf(html: String): String =
         html.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()

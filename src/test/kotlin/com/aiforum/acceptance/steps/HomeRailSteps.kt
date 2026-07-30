@@ -32,8 +32,21 @@ class HomeRailSteps(
         "starred-comments" to "data-starred-comments-empty",
     )
 
-    private fun entries(rail: String): List<String> =
-        Html.attrValues(body(), entryAttr[rail] ?: error("unknown rail \"$rail\""))
+    /**
+     * The named box as a block, or a loud failure. Every entry- and text-level assertion below reads
+     * through this rather than through the whole page: a rail's content is not unique to its rail —
+     * the thread page renders in its tree the very comment the starred box quotes in the margin — so
+     * a page-wide probe answers "is this text anywhere?" when the scenario asked "does this box show
+     * it?", and would keep answering yes with the box deleted (plan_docs/ambient-slice-6.md §6).
+     */
+    private fun box(rail: String): String =
+        Html.railBox(body(), rail)
+            ?: error("no \"$rail\" rail box (data-rail-box=\"$rail\") on the page:\n${body()}")
+
+    private fun entries(rail: String): List<String> {
+        val attr = entryAttr[rail] ?: error("unknown rail \"$rail\"")
+        return Html.attrValues(box(rail), attr)
+    }
 
     @Then("the front page shows the {string} rail box")
     fun frontPageShowsRailBox(rail: String) {
@@ -62,9 +75,12 @@ class HomeRailSteps(
 
     @Then("the {string} rail shows {string}")
     fun railShows(rail: String, text: String) {
-        // The home page renders comment bodies only inside the recent-comments box, so a page-level
-        // contains is a safe proxy for "this box shows the text".
-        assertTrue(Html.contains(body(), text), "expected the $rail rail to show \"$text\" in:\n${body()}")
+        // Read inside the box (see [box]). The page-level proxy this replaces rested on "the home page
+        // renders comment bodies only inside the recent-comments box" — which said nothing about the
+        // thread page, where the same step also runs and where the tree carries the very text the
+        // starred box quotes.
+        val box = box(rail)
+        assertTrue(Html.contains(box, text), "expected the $rail rail to show \"$text\"; the box was:\n$box")
     }
 
     @Then("the {string} rail shows an empty state")

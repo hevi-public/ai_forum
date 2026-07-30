@@ -1,0 +1,27 @@
+@import com.aiforum.web.FeedView
+@param view: FeedView
+
+<%-- The front page's view control: one plain form per view, each with a FIXED action and a FIXED hidden
+     value, POSTing to /feed-view and redirecting back (PRG, so a refresh doesn't re-post the choice).
+     Deliberately not htmx and deliberately not localStorage (ambient-slice-6 §2.4): a control whose
+     target URL flips with state is the shape that shipped broken once with no tier to catch it, and a
+     client-only preference is invisible to an acceptance suite that drives no browser — "the toggle
+     persists" would be unpinnable. Zero new JavaScript; the price is a full page load per switch.
+
+     aria-pressed is rendered as an explicit STRING on BOTH controls, never as a Boolean: JTE DROPS a
+     Boolean-valued attribute when it is false, so the unselected control would stop carrying the marker
+     at all and "is not marked as showing" would pass by omission (§2.5).
+
+     The active modifier is --on and never --open: the home-rail probe word-boundary-matches `open`
+     inside the ask-card's opening tag, and a class spelled --open there would read as the composer
+     being expanded. --%>
+<div class="feed-toggle" data-feed-toggle>
+    @for(option in FeedView.entries)
+        <form class="feed-toggle__option" method="post" action="/feed-view" data-feed-option="${option.slug}">
+            <input type="hidden" name="view" value="${option.slug}">
+            <button type="submit"
+                    class="${if (option == view) "feed-toggle__btn feed-toggle__btn--on" else "feed-toggle__btn"}"
+                    aria-pressed="${if (option == view) "true" else "false"}">${option.title}</button>
+        </form>
+    @endfor
+</div>

@@ -63,7 +63,14 @@ class DatabaseResetHooks(
         // additionally self-references through its composite same-persona FK; a single DELETE FROM clears
         // parent and child rows in one statement, so no intra-table ordering is needed.
         // (`persona.memory_judged_at` needs no wiping — it goes with the persona row.)
-        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "stance_change", "persona_stance", "interest_change", "persona_interest", "memory_change", "persona_memory", "persona").forEach {
+        // owner_pref (V29) has NO foreign keys in either direction, so its position in this list is free;
+        // it sits last because that is where a table nothing else depends on belongs. What is not free is
+        // its PRESENCE: it holds ONE GLOBAL ROW (id = 1) whose absence IS the default front-page view, so
+        // a scenario that switches to the activity view would otherwise hand its choice to every scenario
+        // that ran after it — the exact leak shape a singleton preference row has, and one that shows up
+        // as an unrelated feature failing only in certain run orders. Deleting the row restores the
+        // default rather than some other stored value, which is why no seed row is re-inserted here.
+        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "stance_change", "persona_stance", "interest_change", "persona_interest", "memory_change", "persona_memory", "persona", "owner_pref").forEach {
             jdbc.update("DELETE FROM $it")
         }
     }
