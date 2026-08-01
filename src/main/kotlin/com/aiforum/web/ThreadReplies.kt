@@ -52,13 +52,13 @@ class ThreadReplies(
      */
     fun read(threadId: String): Assembled {
         val inFlight = generation.inFlightViews(threadId)
-        val all = comments.threadComments(threadId)
-        val tree = replyTree.assemble(all)
+        val rows = comments.threadComments(threadId)
+        val tree = replyTree.assemble(rows)
         val rendered = collectIds(tree)
         return Assembled(
             tree = tree,
             drafting = inFlight.filter { it.id !in rendered },
-            anyPosted = all.any { it.state == GenerationState.POSTED },
+            anyPosted = rows.any { it.state == GenerationState.POSTED },
         )
     }
 

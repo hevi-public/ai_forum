@@ -59,6 +59,9 @@ Feature: New thread creation
     And the owner's page polls the room
     Then the room fragment shows the reply "Indexes are the trick"
     And the room fragment's reply is "posted"
+    # Terminal, so it replaces the whole reply list rather than the poller: it carries persisted rows the
+    # page may already hold (a note posted mid-wait), and an in-place swap would show them twice.
+    And the room fragment retargets the reply list
 
   # The mid-summon note, which is where the union nearly cost more than it bought. The owner posts a note
   # while the dispatcher is still routing; that note is a POSTED row, so the poll's union returns content
@@ -80,17 +83,6 @@ Feature: New thread creation
     When the room's routing is released
     Then the thread carries the reply "Indexes are the trick"
     And the thread still shows the note "meanwhile, my own hunch"
-
-  # A note posted from the composer WHILE the room was still summoning is already in the page's reply
-  # list — and it is a DB row too, so it comes back in the poll's union. If a room fragment carrying
-  # content merely replaced the poller (the swap the poller itself declares), the browser would then hold
-  # that note twice. So the content response retargets the whole reply list and replaces it wholesale.
-  Scenario: A room fragment carrying replies replaces the whole reply list
-    Given the LLM will respond with "sol"
-    And the LLM will respond with "Indexes are the trick"
-    When the owner creates a thread "Why is SQLite fast?" asking "explain the design" of "sol"
-    And the owner's page polls the room
-    Then the room fragment retargets the reply list
 
   # The new-thread form splits title from body: the body is the actual content of the post, rendered in
   # the thread's opening post (distinct from the room's replies in the comment tree). The dispatcher reads

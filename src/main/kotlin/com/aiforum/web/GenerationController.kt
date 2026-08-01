@@ -499,8 +499,10 @@ class GenerationController(
         // the client still has the poll fallback. The emitter completes earlier on the terminal event.
         const val STREAM_TIMEOUT_MS = 300_000L
 
-        // htmx's per-response swap overrides: where the fragment lands, and how. Both are ASCII-only
-        // machine signals — the same discipline as HtmxErrorAdvice's HX-Trigger (header values are Latin-1).
+        // htmx's per-response swap overrides: where the fragment lands, and how. Named here rather than
+        // inlined because the pair is a contract two branches of [room] must agree on — the terminal
+        // response sets both, the poller sets neither, and pinning that is what stops a "simplify" edit
+        // from hoisting them out of the branch (RoomPollTest).
         const val HX_RETARGET = "HX-Retarget"
         const val HX_RESWAP = "HX-Reswap"
     }

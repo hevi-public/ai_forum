@@ -470,6 +470,19 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
     ROUTING phase open in a scenario. `HangUntilCancelled` cannot serve there — routing registers no
     draft, so the cancel endpoint has no node id to reach, and a parked routing worker survives
     `inFlight.reset()`. The gate is open by default and `reset()` opens it as a seatbelt.
+  - **A controller-tier test reaches what acceptance cannot here.** `tier2/web/RoomPollTest` constructs
+    the real controller with `MockHttpServletResponse` and pins all three answers — poller while
+    routing (headers absent), terminal + `HX-Retarget`/`HX-Reswap` once it concludes, empty poller when
+    a summon produced nothing — deterministically, no worker, no waiting. The htmx headers are the half
+    no browserless suite can watch LAND, but *that they are set, and on which branch*, is a plain
+    controller fact; "no tier can pin this" was half true and cost a blocker. `ThreadRepliesTest`
+    likewise pins the deterministic halves (dedupe, `anyPosted`, `isEmpty`) — only the read ORDER is a
+    genuine race, and the class doc says so rather than implying the tests cover it.
+  - **A page-wide `Html.contains` over a fragment carrying an OOB rail is the same trap S6 recorded.**
+    The branch index renders a snippet of each posted body, so "the fragment carries this reply" stayed
+    green with the list regressed to drafts-only. `Html.replyNodes` scopes the probe to the reply
+    articles; verified by mutation (render `replies.drafting` → the scenario reddens, and did not
+    before).
   - **Widening the endpoint moved a test helper's meaning**: `GenerationSettle.awaitRoomDrafts` →
     `awaitRoomReplies`, since the fragment now returns settled nodes too. That made it *wrong* for a
     thread that starts non-empty — a Discuss thread posts the PR discussion synchronously, so the

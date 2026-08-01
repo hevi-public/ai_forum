@@ -118,8 +118,12 @@ class ThreadSteps(
 
     /**
      * The browser's room poll, read the way the browser reads it: the fragment body PLUS the htmx swap
-     * headers it carries. The create step has already settled the room, so this is the poll that lands
-     * AFTER every draft left the in-flight registry — the case the endpoint used to answer with nothing.
+     * headers it carries.
+     *
+     * After the create step the room is settled, so this is the poll the endpoint used to answer with
+     * nothing. Note the narrow claim: a settled node's registry entry is evicted in a `finally` AFTER the
+     * row is persisted, and the settle helper returns on the row — so the last node may still be in the
+     * registry here. Either way the DB half of the union is what carries the body this asserts on.
      */
     @When("the owner's page polls the room")
     fun pollTheRoom() {
@@ -132,9 +136,12 @@ class ThreadSteps(
     @Then("the room fragment shows the reply {string}")
     fun roomFragmentShowsReply(body: String) {
         val html = world.lastFragment ?: ""
+        // Scoped to the reply NODES, not the whole fragment: the response also carries the rail's branch
+        // index out of band, and its entries render a snippet of the same body — so a page-wide probe would
+        // stay green if the list itself regressed to drafts-only.
         assertTrue(
-            Html.contains(html, body),
-            "expected the room poll to carry the settled reply \"$body\":\n$html",
+            Html.contains(Html.replyNodes(html), body),
+            "expected the room poll's reply list to carry the settled reply \"$body\":\n$html",
         )
     }
 
