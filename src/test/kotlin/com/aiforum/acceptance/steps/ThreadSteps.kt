@@ -7,6 +7,7 @@ import com.aiforum.acceptance.support.ScenarioWorld
 import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.fail
 
@@ -144,6 +145,38 @@ class ThreadSteps(
             Html.hasAttr(html, "data-state", state),
             "expected a reply in state \"$state\" in the room fragment:\n$html",
         )
+    }
+
+    @Then("the room fragment still offers the summoning poller")
+    fun roomFragmentStillPolls() {
+        val html = world.lastFragment ?: ""
+        assertTrue(
+            Html.hasAttr(html, "data-empty-state", "summoning"),
+            "expected the room poll to re-emit the summoning poller while routing is in flight:\n$html",
+        )
+    }
+
+    @Then("the room fragment does not retarget the reply list")
+    fun roomFragmentDoesNotRetarget() {
+        assertNull(
+            world.lastHxRetarget,
+            "a poller re-emitted mid-routing must replace only itself — retargeting the whole reply list " +
+                "would swap the poller away (and take any mid-wait note with it)",
+        )
+    }
+
+    @Then("the thread carries the reply {string}")
+    fun threadCarriesTheReply(text: String) {
+        // Settle first: the released routing has to run, pick, and let the persona's reply land. This reads
+        // the page the browser would hold once the poller that survived did its job.
+        val body = settle.awaitThreadSettled(world.threadId ?: "")
+        assertTrue(Html.contains(body, text), "expected the room's reply \"$text\" on the thread page:\n$body")
+    }
+
+    @Then("the thread still shows the note {string}")
+    fun threadStillShowsNote(text: String) {
+        val body = http.get("/threads/${world.threadId}").body ?: ""
+        assertTrue(Html.contains(body, text), "expected the owner's note \"$text\" still on the page:\n$body")
     }
 
     @Then("the room fragment retargets the reply list")

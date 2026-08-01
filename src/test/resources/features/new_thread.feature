@@ -60,12 +60,31 @@ Feature: New thread creation
     Then the room fragment shows the reply "Indexes are the trick"
     And the room fragment's reply is "posted"
 
+  # The mid-summon note, which is where the union nearly cost more than it bought. The owner posts a note
+  # while the dispatcher is still routing; that note is a POSTED row, so the poll's union returns content
+  # while the room has produced NOTHING yet. If content alone decided the response, the fragment would
+  # retarget and replace the whole reply list — poller included — and once the poller is gone nothing
+  # polls: routing concludes into a page that never asks again, and the room's replies are invisible until
+  # a reload. The same failure this endpoint was fixed for, re-entered from the other side. So the routing
+  # window, not the emptiness of the thread, is what decides: while a summon is still routing the answer is
+  # the poller and only the poller, replacing itself and touching nothing else on the page.
+  Scenario: A note posted while the room is still routing leaves the poller polling
+    Given the LLM will hang until released, then answer "sol"
+    And the LLM will respond with "Indexes are the trick"
+    When the owner starts a thread titled "Scaling SQLite" from the browser
+    And the owner posts a note "meanwhile, my own hunch"
+    And the owner's page polls the room
+    Then the room fragment still offers the summoning poller
+    And the room fragment does not retarget the reply list
+    # And once routing lands, the poller that survived delivers the room — the note kept its place.
+    When the room's routing is released
+    Then the thread carries the reply "Indexes are the trick"
+    And the thread still shows the note "meanwhile, my own hunch"
+
   # A note posted from the composer WHILE the room was still summoning is already in the page's reply
   # list — and it is a DB row too, so it comes back in the poll's union. If a room fragment carrying
   # content merely replaced the poller (the swap the poller itself declares), the browser would then hold
-  # that note twice. So the content response retargets the whole reply list and replaces it wholesale;
-  # the re-emitted poller (routing still in flight) carries no retarget and keeps replacing only itself,
-  # which is what stops a mid-wait poll from wiping the note.
+  # that note twice. So the content response retargets the whole reply list and replaces it wholesale.
   Scenario: A room fragment carrying replies replaces the whole reply list
     Given the LLM will respond with "sol"
     And the LLM will respond with "Indexes are the trick"

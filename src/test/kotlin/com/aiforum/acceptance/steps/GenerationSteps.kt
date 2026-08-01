@@ -33,6 +33,15 @@ class GenerationSteps(
     @Given("the generation hangs until cancelled")
     fun generationHangs() = llm.enqueue(Behavior.HangUntilCancelled)
 
+    // Holds the ROUTING phase of an async summon open, which the cancel endpoint cannot reach (routing
+    // registers no draft, so there is no node id to cancel). A scenario arms it, acts on the page while the
+    // summon is provably still routing, then releases — no sleep, no timing window.
+    @Given("the LLM will hang until released, then answer {string}")
+    fun llmHangsUntilReleased(text: String) = llm.enqueue(Behavior.HangUntilReleased(text))
+
+    @When("the room's routing is released")
+    fun releaseRouting() = llm.release()
+
     // The model leaked its chain-of-thought: the parsers (ReplySanitizer) would clean the body and tag it
     // ACTUAL (stripped <think>) or POSSIBLE (heuristic). We inject the already-classified response here —
     // the fake stands in for the parser at the seam — so the persist/render path is exercised for real.
