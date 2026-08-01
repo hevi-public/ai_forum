@@ -48,9 +48,11 @@ class InFlightGenerations {
 
     // Threads with a summon whose ROUTING is still in flight: the async create path (§4) hands the
     // dispatcher's "who replies" LLM call to the worker, so there's a window after the request returns
-    // but before any per-persona draft is registered. The thread page polls /threads/{id}/room while
-    // this is set, then swaps in the drafts once they appear. Count, not flag, so a thread summoned twice
-    // in quick succession only clears once both routings finish. Cleared in [reset] between scenarios.
+    // but before any per-persona draft is registered. This is the ONLY answer to "is more still coming" —
+    // the thread page carries its poller for exactly as long as this is set (a thread with replies in it
+    // can still be routing, e.g. a note posted mid-wait), and the room poll re-emits that poller rather
+    // than answering terminally until it clears. Count, not flag, so a thread summoned twice in quick
+    // succession only clears once both routings finish. Cleared in [reset] between scenarios.
     private val summoning = ConcurrentHashMap<String, Int>()
 
     // BOUNDED worker pool (T2.3): each generation worker runs an LLM call AND DB writes against the

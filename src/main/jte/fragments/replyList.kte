@@ -5,11 +5,18 @@
 @param threadId: String? = null
 @param personas: List<PersonaView> = emptyList()
 @param branchIndex: List<BranchIndexEntry>? = null
+<%-- True while a summon is still routing: the list carries the poller alongside whatever it already
+     holds, so the page keeps asking for the room. Default false — every fragment response that is NOT
+     the full page render (a note, an auto-grow, a settled node) is terminal by nature. --%>
+@param summoning: Boolean = false
 
 <div class="reply-list">
     @for(reply in replies)
         @template.fragments.replyNode(reply = reply, threadId = threadId, personas = personas)
     @endfor
+    @if(summoning && threadId != null)
+        @template.fragments.roomPoller(threadId = threadId, summoning = true)
+    @endif
 </div>
 <%-- When this list is a fragment response to a post that changed the posted set (a new owner node, a
      /note, an auto-grown branch), carry a fresh branch index as an out-of-band swap so the rail's TOC

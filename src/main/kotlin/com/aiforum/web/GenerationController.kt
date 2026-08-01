@@ -16,6 +16,7 @@ import com.aiforum.repo.PersonaRepository
 import com.aiforum.repo.QuoteRepository
 import com.aiforum.service.AttachmentService
 import com.aiforum.service.GenerationService
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -73,6 +74,9 @@ class GenerationController(
     private val replyTree: ReplyTreeAssembler,
     // Quote edges from the composer's quotesJson are recorded against the freshly-posted owner node.
     private val quotes: QuoteRepository,
+    // The room poll renders the same union the thread page does (persisted tree + in-flight drafts),
+    // through the same seam — see ThreadReplies for why the read order is load-bearing.
+    private val threadReplies: ThreadReplies,
     private val objectMapper: ObjectMapper,
 ) {
 
@@ -333,23 +337,57 @@ class GenerationController(
     }
 
     /**
-     * Poll the create-time room summon (§4). While the dispatcher's routing call is still in flight the
-     * thread has no drafts yet, so the thread page shows a "Summoning the room…" poller that hits this
-     * every second. Once routing picks who replies and the drafts are registered, this returns them as the
-     * reply-list fragment — htmx swaps the poller for the drafts, which then self-poll to settle. If the
-     * summon ends with no drafts (routing failed / empty roster), the poller drops itself so htmx stops.
+     * Poll the create-time room summon (§4). The thread page shows a "Summoning the room…" poller while a
+     * summon is routing (the dispatcher's "who replies" call, on a worker); it hits this every second.
+     *
+     * **The ROUTING WINDOW decides, not the emptiness of the thread.** While `isSummoning` holds, the
+     * answer is the poller and only the poller — it replaces itself and touches nothing else on the page.
+     * Once routing has concluded this answers with what the room produced, and that response is terminal:
+     * it retargets the whole reply list, so the poller goes with it and the polling stops.
+     *
+     * Both halves are bought failures. Reading the registry ALONE (before the fix) lost a room whose
+     * drafts all settled before the first poll, because a node leaves the registry the moment it settles —
+     * hence [ThreadReplies], which unions registry and DB in the one order that cannot drop a settling
+     * node. But then deciding on CONTENT alone lost the room a second way: a note the owner posts
+     * mid-routing is a POSTED row, so the union goes non-empty while the room has produced nothing, and a
+     * terminal response there swaps the poller away before the drafts ever land. Neither read is wrong;
+     * the question each answers is "has the room produced anything", and only `isSummoning` answers
+     * "is more still coming".
      */
     @GetMapping("/threads/{threadId}/room")
-    fun room(@PathVariable threadId: String, model: Model): String {
-        val drafts = generation.inFlightViews(threadId)
-        if (drafts.isNotEmpty()) {
-            model.addAttribute("replies", drafts)
+    fun room(@PathVariable threadId: String, response: HttpServletResponse, model: Model): String {
+        // Routing first, and before the reads: a summon that concludes between this check and the reads
+        // costs one more poll (the next one carries it), where the reverse order costs the room entirely.
+        if (generation.isSummoning(threadId)) {
             model.addAttribute("threadId", threadId)
-            model.addAttribute("personas", personaViews())
+            model.addAttribute("summoning", true)
+            return "fragments/roomPoller"
+        }
+        val replies = threadReplies.read(threadId)
+        if (!replies.isEmpty()) {
+            // RETARGET THE WHOLE LIST, don't just replace the poller. This response carries persisted rows,
+            // which include anything the owner posted from the composer while the room was summoning — and
+            // that node is already in the page's reply list. Swapping this fragment in over the poller alone
+            // would leave the browser holding it twice; replacing the list wholesale makes the server render
+            // authoritative. Reswap is stated rather than inherited so the swap style can't drift out from
+            // under the retarget if the poller's own hx-swap changes.
+            response.setHeader(HX_RETARGET, ".reply-list")
+            response.setHeader(HX_RESWAP, "outerHTML")
+            model.addAttribute("replies", replies.all)
+            model.addAttribute("threadId", threadId)
+            val personaViews = personaViews()
+            model.addAttribute("personas", personaViews)
+            // Settled nodes are in the rail's remit (drafting ones aren't), and this response is the one
+            // that puts them on the page — so the rail's TOC refreshes with them, out of band. Built from
+            // the tree already in hand: `forThread` would re-read the thread and re-assemble it (a second
+            // whole-vote-table GROUP BY), and from a THIRD read instant the swapped list wouldn't match.
+            model.addAttribute("branchIndex", branchIndex.fromTree(replies.tree, personaViews))
             return "fragments/replyList"
         }
+        // Nothing routing and nothing produced: a summon that ended empty (routing failed / empty roster).
+        // The poller drops itself so htmx stops.
         model.addAttribute("threadId", threadId)
-        model.addAttribute("summoning", generation.isSummoning(threadId))
+        model.addAttribute("summoning", false)
         return "fragments/roomPoller"
     }
 
@@ -460,5 +498,12 @@ class GenerationController(
         // Comfortably above the 120s generation timeout so the SSE doesn't lapse mid-generation; on timeout
         // the client still has the poll fallback. The emitter completes earlier on the terminal event.
         const val STREAM_TIMEOUT_MS = 300_000L
+
+        // htmx's per-response swap overrides: where the fragment lands, and how. Named here rather than
+        // inlined because the pair is a contract two branches of [room] must agree on — the terminal
+        // response sets both, the poller sets neither, and pinning that is what stops a "simplify" edit
+        // from hoisting them out of the branch (RoomPollTest).
+        const val HX_RETARGET = "HX-Retarget"
+        const val HX_RESWAP = "HX-Reswap"
     }
 }

@@ -442,10 +442,66 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
   because `wordsOf` feeds a matcher shared with `AmbientGate`, so redefining "word" moves ambient
   gating for every non-Latin ability string too. A per-script floor is the shape of the fix and it is
   a slice of its own — pick it up with any recall rework (FTS/embeddings would dissolve it).
-- **`GenerationController`'s `/room` fragment carries the flake that `ThreadController.renderThread`
-  was fixed for** (2026-07-26): it reads only the in-flight registry, so a summon whose drafts all
-  settle before the first poll reports a quiescent room with none of the settled replies in it. The
-  read-order fix does not generalise to it. Pre-existing, out of scope when found.
+- ~~**`GenerationController`'s `/room` fragment carries the flake that `ThreadController.renderThread`
+  was fixed for**~~ — ✅ **fixed 2026-07-30.** It read only the in-flight registry, which a node LEAVES
+  the moment it settles (persist, then evict), so a summon whose drafts all settled before the first
+  poll answered exactly like a summon that produced nothing: the poller dropped itself and the owner
+  sat on a thread with no replies until the next load. Three things the fix is worth remembering for:
+  - **The union now lives in one place — `web/ThreadReplies.read`** (registry first, then the DB,
+    dedupe by id) — because the read ORDER is the invariant and it had been stated once per surface.
+    Both `ThreadController.renderThread` and the room poll read through it; a third surface must too.
+  - **`isSummoning` is the only answer to "is more still coming" — content is not.** The fix's first
+    cut decided poller-vs-content on whether the union was empty, which the review caught as a
+    blocker: an owner note posted mid-routing is a POSTED row, so the union goes non-empty while the
+    room has produced *nothing*, and the terminal response swapped the poller away before the drafts
+    landed — **the same bug, re-entered from the other side.** The old registry-only read had hidden
+    this, because a registry entry cannot exist until routing registered it, so "non-empty" silently
+    meant "routing concluded"; widening the read dropped that implication. Both surfaces now gate on
+    the routing window: while `isSummoning` holds, the poll re-emits the poller and only the poller.
+  - **The page had the same hole, and closing it fixed a test barrier for free.** `thread.kte` rendered
+    the poller only under `summoning && replies.isEmpty()`, so an owner who posted a note mid-routing
+    and reloaded got a page that never polled. It now renders one reply list with the poller inside it
+    whenever a summon is routing — which also makes `data-empty-state="summoning"` observable on a
+    non-empty thread, and *that* is what makes `awaitThreadSettled` a real barrier on a Discuss thread
+    (which starts non-empty, so the hook never rendered and the helper waited for nothing).
+    Verified by mutation: a 500ms delay in the summon worker fails that scenario before the change and
+    passes it after.
+  - **The room poll retargets the whole reply list** (`HX-Retarget: .reply-list` + `HX-Reswap`) once
+    routing has concluded, rather than replacing the poller in place — the response carries persisted
+    rows including that mid-wait note, so an in-place swap would leave the browser holding it twice.
+    Un-pinnable end-to-end: no tier drives a browser, so acceptance pins the *header*, and the
+    no-duplication it buys is a DOM property nothing in `verifyAll` executes. **That gap is exactly
+    where the blocker lived** — green CI over a broken poller, found by reading htmx's source against
+    the templates in review, not by any test.
+  - **`ScriptableLlmClient.Behavior.HangUntilReleased`** exists now: the deterministic way to hold the
+    ROUTING phase open in a scenario. `HangUntilCancelled` cannot serve there — routing registers no
+    draft, so the cancel endpoint has no node id to reach, and a parked routing worker survives
+    `inFlight.reset()`. The gate is open by default and `reset()` opens it as a seatbelt.
+  - **A controller-tier test reaches what acceptance cannot here.** `tier2/web/RoomPollTest` constructs
+    the real controller with `MockHttpServletResponse` and pins all three answers — poller while
+    routing (headers absent), terminal + `HX-Retarget`/`HX-Reswap` once it concludes, empty poller when
+    a summon produced nothing — deterministically, no worker, no waiting. The htmx headers are the half
+    no browserless suite can watch LAND, but *that they are set, and on which branch*, is a plain
+    controller fact; "no tier can pin this" was half true and cost a blocker. `ThreadRepliesTest`
+    likewise pins the deterministic halves (dedupe, `anyPosted`, `isEmpty`) — only the read ORDER is a
+    genuine race, and the class doc says so rather than implying the tests cover it.
+  - **A page-wide `Html.contains` over a fragment carrying an OOB rail is the same trap S6 recorded.**
+    The branch index renders a snippet of each posted body, so "the fragment carries this reply" stayed
+    green with the list regressed to drafts-only. `Html.replyNodes` scopes the probe to the reply
+    articles; verified by mutation (render `replies.drafting` → the scenario reddens, and did not
+    before).
+  - **Widening the endpoint moved a test helper's meaning**: `GenerationSettle.awaitRoomDrafts` →
+    `awaitRoomReplies`, since the fragment now returns settled nodes too. That made it *wrong* for a
+    thread that starts non-empty — a Discuss thread posts the PR discussion synchronously, so the
+    first poll returns that comment and the helper waits for nothing; `GitHubPrThreadSteps` moved to
+    `awaitThreadSettled`. Widening a read widens every caller's definition of "has something landed".
+- **A summon parked between `beginSummon` and `register` escapes the between-scenario reset**
+  (found by the PR #10 review under an artificial worker delay, 2026-07-31; **pre-existing, not fixed**).
+  `InFlightGenerations.reset()` cancels and joins registered *holders*, and routing registers none — so a
+  summon still routing at scenario end keeps a pool thread and bleeds its LLM calls into the next
+  scenario's spy (`trigger_modes.feature` fails with a leaked call sequence). Invisible at normal speed
+  because routing against the fake returns instantly. If it ever bites for real, the fix is a
+  routing-phase token the reset can trip, not a longer await.
 - **S4b follow-ups (none blocking, all verified against the code).**
   1. **`coarseFloor` is dead under the shipped config.** The floor is the oldest watermark and only when
      *every* member has one, but a member below the engagement floor is skipped before any judgment and

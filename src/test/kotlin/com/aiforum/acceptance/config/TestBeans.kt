@@ -51,6 +51,13 @@ class ScriptableLlmClient : LlmClient {
         data class Fail(val ex: () -> RuntimeException) : Behavior
         /** Block until the cancellation token is tripped, then report cancellation. */
         object HangUntilCancelled : Behavior
+        /**
+         * Block until the scenario RELEASES it (or the token trips), then answer [text]. The deterministic
+         * way to hold a phase of the async summon open — routing especially, which registers no draft and
+         * so cannot be reached by the cancel endpoint. A scenario that needs to observe the page mid-summon
+         * arms this, acts, asserts, then releases; nothing depends on a sleep or a timing window.
+         */
+        data class HangUntilReleased(val text: String) : Behavior
         /** Stream these chunks as individual TextDeltas (the aggregate is their concatenation), driving the
          *  AG-UI event path. Through the non-streaming generate() it degrades to the aggregate reply. */
         data class Stream(val deltas: List<String>, val leak: ReasoningLeak? = null) : Behavior
@@ -63,9 +70,30 @@ class ScriptableLlmClient : LlmClient {
      *  safe iteration and visibility without locking the readers. */
     val received = CopyOnWriteArrayList<LlmRequest>()
 
-    fun enqueue(behavior: Behavior) = script.addLast(behavior)
+    /**
+     * The gate [Behavior.HangUntilReleased] waits on. Open by default, so every scenario that never arms a
+     * hang is untouched; arming one closes it, and [release] (or [reset], as the between-scenario seatbelt
+     * for a worker a scenario forgot to free) opens it again. A plain flag rather than a latch because it
+     * has to be re-closable across scenarios.
+     */
+    @Volatile
+    private var released = true
+
+    fun enqueue(behavior: Behavior): Unit {
+        if (behavior is Behavior.HangUntilReleased) released = false
+        script.addLast(behavior)
+    }
+
+    /** Let a hanging call finish and answer its scripted text. */
+    fun release() {
+        released = true
+    }
 
     fun reset() {
+        // Release BEFORE clearing: a worker parked in a hang outlives the scenario that armed it (routing
+        // holds no registered draft, so inFlight.reset() cannot reach it), and a parked worker holds one of
+        // the pool's threads and would bleed its LLM call into the next scenario's spy.
+        released = true
         script.clear()
         received.clear()
     }
@@ -107,6 +135,11 @@ class ScriptableLlmClient : LlmClient {
         Behavior.HangUntilCancelled -> {
             while (!cancellation.isCancelled) Thread.sleep(10)
             throw com.aiforum.llm.LlmException.Cancelled()
+        }
+        is Behavior.HangUntilReleased -> {
+            while (!released && !cancellation.isCancelled) Thread.sleep(10)
+            if (cancellation.isCancelled) throw com.aiforum.llm.LlmException.Cancelled()
+            LlmResponse(behavior.text)
         }
     }
 }

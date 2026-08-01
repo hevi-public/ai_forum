@@ -6,6 +6,8 @@ import com.aiforum.acceptance.support.HttpClient
 import com.aiforum.acceptance.support.ScenarioWorld
 import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.fail
 
@@ -36,7 +38,7 @@ class ThreadSteps(
         // (summonAsync), so the create response carries no drafts yet. Poll the room endpoint until the
         // dispatcher has picked and the drafts are registered, then settle them so the dispatcher + persona
         // calls land in the LlmClient spy and the thread page shows the posted replies the Then steps read.
-        settle.awaitAllSettled(settle.awaitRoomDrafts(world.threadId ?: ""))
+        settle.awaitAllSettled(settle.awaitRoomReplies(world.threadId ?: ""))
     }
 
     @When("the owner starts a thread titled {string} from the browser")
@@ -111,6 +113,85 @@ class ThreadSteps(
         assertTrue(
             Html.contains(body, text),
             "expected the opening post \"$text\" on the thread page:\n$body",
+        )
+    }
+
+    /**
+     * The browser's room poll, read the way the browser reads it: the fragment body PLUS the htmx swap
+     * headers it carries.
+     *
+     * After the create step the room is settled, so this is the poll the endpoint used to answer with
+     * nothing. Note the narrow claim: a settled node's registry entry is evicted in a `finally` AFTER the
+     * row is persisted, and the settle helper returns on the row — so the last node may still be in the
+     * registry here. Either way the DB half of the union is what carries the body this asserts on.
+     */
+    @When("the owner's page polls the room")
+    fun pollTheRoom() {
+        val resp = http.get("/threads/${world.threadId}/room")
+        world.lastStatus = resp.statusCode.value()
+        world.lastFragment = resp.body
+        world.lastHxRetarget = resp.headers.getFirst("HX-Retarget")
+    }
+
+    @Then("the room fragment shows the reply {string}")
+    fun roomFragmentShowsReply(body: String) {
+        val html = world.lastFragment ?: ""
+        // Scoped to the reply NODES, not the whole fragment: the response also carries the rail's branch
+        // index out of band, and its entries render a snippet of the same body — so a page-wide probe would
+        // stay green if the list itself regressed to drafts-only.
+        assertTrue(
+            Html.contains(Html.replyNodes(html), body),
+            "expected the room poll's reply list to carry the settled reply \"$body\":\n$html",
+        )
+    }
+
+    @Then("the room fragment's reply is {string}")
+    fun roomFragmentReplyState(state: String) {
+        val html = world.lastFragment ?: ""
+        assertTrue(
+            Html.hasAttr(html, "data-state", state),
+            "expected a reply in state \"$state\" in the room fragment:\n$html",
+        )
+    }
+
+    @Then("the room fragment still offers the summoning poller")
+    fun roomFragmentStillPolls() {
+        val html = world.lastFragment ?: ""
+        assertTrue(
+            Html.hasAttr(html, "data-empty-state", "summoning"),
+            "expected the room poll to re-emit the summoning poller while routing is in flight:\n$html",
+        )
+    }
+
+    @Then("the room fragment does not retarget the reply list")
+    fun roomFragmentDoesNotRetarget() {
+        assertNull(
+            world.lastHxRetarget,
+            "a poller re-emitted mid-routing must replace only itself — retargeting the whole reply list " +
+                "would swap the poller away (and take any mid-wait note with it)",
+        )
+    }
+
+    @Then("the thread carries the reply {string}")
+    fun threadCarriesTheReply(text: String) {
+        // Settle first: the released routing has to run, pick, and let the persona's reply land. This reads
+        // the page the browser would hold once the poller that survived did its job.
+        val body = settle.awaitThreadSettled(world.threadId ?: "")
+        assertTrue(Html.contains(body, text), "expected the room's reply \"$text\" on the thread page:\n$body")
+    }
+
+    @Then("the thread still shows the note {string}")
+    fun threadStillShowsNote(text: String) {
+        val body = http.get("/threads/${world.threadId}").body ?: ""
+        assertTrue(Html.contains(body, text), "expected the owner's note \"$text\" still on the page:\n$body")
+    }
+
+    @Then("the room fragment retargets the reply list")
+    fun roomFragmentRetargetsReplyList() {
+        assertEquals(
+            ".reply-list",
+            world.lastHxRetarget,
+            "expected the room fragment to retarget the whole reply list (HX-Retarget), not just the poller",
         )
     }
 

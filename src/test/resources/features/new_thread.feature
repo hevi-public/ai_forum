@@ -45,6 +45,45 @@ Feature: New thread creation
     Then the thread exists with title "Scaling SQLite"
     And the room was summoned
 
+  # The create-time summon is async, so the thread page can render BEFORE routing concludes: it shows a
+  # poller that hits the room endpoint every second and swaps in whatever the room produced. That endpoint
+  # used to read ONLY the in-flight registry — which a node LEAVES the moment it settles (the worker
+  # persists the row, then evicts the entry). So a room whose drafts all settled before the first poll
+  # answered exactly like a room that produced nothing: the poller dropped itself and the owner sat on a
+  # thread with no replies until the next page load. Same read-skew shape as the thread-page fix in
+  # how-we-work/context.md — the registry is transient, the DB is the record, so the poll must read both.
+  Scenario: The room's replies reach the poller even when every draft has already settled
+    Given the LLM will respond with "sol"
+    And the LLM will respond with "Indexes are the trick"
+    When the owner creates a thread "Why is SQLite fast?" asking "explain the design" of "sol"
+    And the owner's page polls the room
+    Then the room fragment shows the reply "Indexes are the trick"
+    And the room fragment's reply is "posted"
+    # Terminal, so it replaces the whole reply list rather than the poller: it carries persisted rows the
+    # page may already hold (a note posted mid-wait), and an in-place swap would show them twice.
+    And the room fragment retargets the reply list
+
+  # The mid-summon note, which is where the union nearly cost more than it bought. The owner posts a note
+  # while the dispatcher is still routing; that note is a POSTED row, so the poll's union returns content
+  # while the room has produced NOTHING yet. If content alone decided the response, the fragment would
+  # retarget and replace the whole reply list — poller included — and once the poller is gone nothing
+  # polls: routing concludes into a page that never asks again, and the room's replies are invisible until
+  # a reload. The same failure this endpoint was fixed for, re-entered from the other side. So the routing
+  # window, not the emptiness of the thread, is what decides: while a summon is still routing the answer is
+  # the poller and only the poller, replacing itself and touching nothing else on the page.
+  Scenario: A note posted while the room is still routing leaves the poller polling
+    Given the LLM will hang until released, then answer "sol"
+    And the LLM will respond with "Indexes are the trick"
+    When the owner starts a thread titled "Scaling SQLite" from the browser
+    And the owner posts a note "meanwhile, my own hunch"
+    And the owner's page polls the room
+    Then the room fragment still offers the summoning poller
+    And the room fragment does not retarget the reply list
+    # And once routing lands, the poller that survived delivers the room — the note kept its place.
+    When the room's routing is released
+    Then the thread carries the reply "Indexes are the trick"
+    And the thread still shows the note "meanwhile, my own hunch"
+
   # The new-thread form splits title from body: the body is the actual content of the post, rendered in
   # the thread's opening post (distinct from the room's replies in the comment tree). The dispatcher reads
   # that body to route, confirming the opening post reaches the room on the form path.
