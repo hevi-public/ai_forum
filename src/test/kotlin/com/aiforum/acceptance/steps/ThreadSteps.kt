@@ -172,12 +172,28 @@ class ThreadSteps(
         )
     }
 
+    @Then("the thread page still shows the summoning poller")
+    fun threadPageStillShowsPoller() {
+        // The page half of the same rule, asserted directly rather than inferred from a later failure: a
+        // thread that already holds a note must STILL carry the poller while its summon is routing, or an
+        // owner who reloads mid-wait lands on a page that never asks for the room again.
+        val body = http.get("/threads/${world.threadId}").body ?: ""
+        assertTrue(
+            Html.hasAttr(body, "data-empty-state", "summoning"),
+            "expected the thread page to keep its poller while the summon is routing:\n$body",
+        )
+    }
+
     @Then("the thread carries the reply {string}")
     fun threadCarriesTheReply(text: String) {
         // Settle first: the released routing has to run, pick, and let the persona's reply land. This reads
-        // the page the browser would hold once the poller that survived did its job.
+        // the page the browser would hold once the poller that survived did its job — scoped to the reply
+        // nodes, since the rail echoes each body as a snippet (see Html.replyNodes).
         val body = settle.awaitThreadSettled(world.threadId ?: "")
-        assertTrue(Html.contains(body, text), "expected the room's reply \"$text\" on the thread page:\n$body")
+        assertTrue(
+            Html.contains(Html.replyNodes(body), text),
+            "expected the room's reply \"$text\" in the thread's reply list:\n$body",
+        )
     }
 
     @Then("the thread still shows the note {string}")

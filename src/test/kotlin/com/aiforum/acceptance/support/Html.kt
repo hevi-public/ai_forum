@@ -82,8 +82,15 @@ object Html {
      */
     fun replyNodes(html: String): String {
         val first = Regex("<article\\b[^>]*data-reply-id=").find(html)?.range?.first ?: return ""
-        val oob = Regex("<[^>]*hx-swap-oob=").find(html)?.range?.first ?: html.length
-        return if (oob > first) html.substring(first, oob) else html.substring(first)
+        // Two terminators, so the same probe scopes either shape: a fragment response ends the list at its
+        // out-of-band block (the rail's branch index), a FULL PAGE ends it at the rail <aside>. Without the
+        // second, this widens to end-of-document on a page and re-admits the rail snippets it exists to
+        // exclude.
+        val end = listOfNotNull(
+            Regex("<[^>]*hx-swap-oob=").find(html)?.range?.first,
+            Regex("<aside\\b").find(html)?.range?.first,
+        ).filter { it > first }.minOrNull() ?: html.length
+        return html.substring(first, end)
     }
 
     /** Count of elements carrying data-[name]="[value]". */

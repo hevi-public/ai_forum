@@ -1,6 +1,7 @@
 package com.aiforum.tier2.web
 
 import com.aiforum.domain.Comment
+import com.aiforum.dto.BranchIndexEntry
 import com.aiforum.dto.GenerationState
 import com.aiforum.dto.ReplyView
 import com.aiforum.images.DescribeRequest
@@ -23,6 +24,7 @@ import com.aiforum.web.GenerationController
 import com.aiforum.web.ReplyTreeAssembler
 import com.aiforum.web.ThreadReplies
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -134,6 +136,14 @@ class RoomPollTest {
         assertEquals(".reply-list", response.getHeader("HX-Retarget"))
         // Stated, not inherited from the poller's own hx-swap, so the two can't drift apart.
         assertEquals("outerHTML", response.getHeader("HX-Reswap"))
+        // TERMINAL MEANS TERMINAL: replyList renders a poller when handed summoning=true, and this response
+        // replaces the whole list — so a poller inside it would retarget and replace the list again every
+        // second, forever. The param defaults false; this is what holds the default to its job.
+        assertNotEquals(true, lastModel.getAttribute("summoning"), "a terminal response must carry no poller")
+        // The rail rides along out of band, because this response is what puts the settled rows on the page.
+        // Nothing else asserts it: the reply-body probe is deliberately scoped away from the rail, so
+        // without this an emptied branch index would silently blank the thread's TOC on every room poll.
+        assertEquals(listOf("n1"), branchIndex().map { it.id }, "posted rows only — the draft is not in the rail")
     }
 
     @Test
@@ -147,6 +157,9 @@ class RoomPollTest {
 
     @Suppress("UNCHECKED_CAST")
     private fun replies() = lastModel.getAttribute("replies") as List<ReplyView>
+
+    @Suppress("UNCHECKED_CAST")
+    private fun branchIndex() = lastModel.getAttribute("branchIndex") as List<BranchIndexEntry>
 
     private companion object {
         const val THREAD = "t1"

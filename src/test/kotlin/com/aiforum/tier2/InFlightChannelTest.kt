@@ -7,6 +7,7 @@ import com.aiforum.dto.GenerationState
 import com.aiforum.dto.ReplyView
 import com.aiforum.service.InFlightGenerations
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -105,5 +106,27 @@ class InFlightChannelTest {
     fun `publishing to an unknown run is a no-op`() {
         val reg = InFlightGenerations()
         reg.publish("missing", AguiEvent.RunStarted("missing")) // must not throw
+    }
+
+    @Test
+    fun `an unpaired endSummon leaves the thread not summoning`() {
+        // The room poll gates its whole content branch on isSummoning, so a flag that sticks true means the
+        // room never lands on the page. `merge` would INSERT -1 here (it skips the remapping function when
+        // the key is absent) and containsKey would answer true forever; the decrement must be a no-op
+        // instead. Reachable when reset() wipes the map out from under a routing worker.
+        val reg = InFlightGenerations()
+        reg.endSummon("never-began")
+        assertFalse(reg.isSummoning("never-began"), "decrementing an absent summon must not create one")
+    }
+
+    @Test
+    fun `overlapping summons clear only when both routings finish`() {
+        val reg = InFlightGenerations()
+        reg.beginSummon("t")
+        reg.beginSummon("t")
+        reg.endSummon("t")
+        assertTrue(reg.isSummoning("t"), "one routing is still in flight")
+        reg.endSummon("t")
+        assertFalse(reg.isSummoning("t"))
     }
 }

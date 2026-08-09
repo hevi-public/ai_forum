@@ -478,6 +478,17 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
     controller fact; "no tier can pin this" was half true and cost a blocker. `ThreadRepliesTest`
     likewise pins the deterministic halves (dedupe, `anyPosted`, `isEmpty`) — only the read ORDER is a
     genuine race, and the class doc says so rather than implying the tests cover it.
+  - **The cost the fix accepts, so it isn't rediscovered as a bug:** the terminal response replaces the
+    whole reply list, and a summon can now be routing on a thread that already has replies (the ambient
+    tick comments on live threads; PR ingestion summons under a posted discussion). So when routing
+    concludes, any *client-only* state inside that list is destroyed — text typed into an inline
+    composer, an open regenerate/delete `<details>`, a drafting node's accumulated SSE text. Nothing
+    carries `hx-preserve`. Judged the better trade — the alternative is the room staying invisible —
+    but if it ever bites, `hx-preserve` on the inline composer is the cheap half.
+  - **A summon that BEGINS after the page rendered still puts no poller there.** The page reads
+    `isSummoning` once, at render; an ambient tick on a thread the owner already has open therefore
+    delivers nothing until a reload. Pre-existing and unfixed — noted because the fix above makes the
+    poller look more universal than it is.
   - **A page-wide `Html.contains` over a fragment carrying an OOB rail is the same trap S6 recorded.**
     The branch index renders a snippet of each posted body, so "the fragment carries this reply" stayed
     green with the list regressed to drafts-only. `Html.replyNodes` scopes the probe to the reply

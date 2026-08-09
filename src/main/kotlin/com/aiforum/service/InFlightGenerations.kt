@@ -48,11 +48,14 @@ class InFlightGenerations {
 
     // Threads with a summon whose ROUTING is still in flight: the async create path (§4) hands the
     // dispatcher's "who replies" LLM call to the worker, so there's a window after the request returns
-    // but before any per-persona draft is registered. This is the ONLY answer to "is more still coming" —
-    // the thread page carries its poller for exactly as long as this is set (a thread with replies in it
-    // can still be routing, e.g. a note posted mid-wait), and the room poll re-emits that poller rather
-    // than answering terminally until it clears. Count, not flag, so a thread summoned twice in quick
-    // succession only clears once both routings finish. Cleared in [reset] between scenarios.
+    // but before any per-persona draft is registered. This is the ONLY answer to "is more still coming":
+    // the room poll re-emits its poller rather than answering terminally for as long as this is set, and a
+    // thread page renders one whenever this is set AT RENDER TIME — a thread with replies in it can still
+    // be routing (a note posted mid-wait). Note the limit of that second half: the page reads this once,
+    // when it renders, so a summon that BEGINS after the owner's page loaded (an ambient tick on a thread
+    // they already have open) puts no poller there and its replies wait for a reload. Count, not flag, so a
+    // thread summoned twice in quick succession only clears once both routings finish. Cleared in [reset]
+    // between scenarios.
     private val summoning = ConcurrentHashMap<String, Int>()
 
     // BOUNDED worker pool (T2.3): each generation worker runs an LLM call AND DB writes against the
@@ -84,9 +87,18 @@ class InFlightGenerations {
         summoning.merge(threadId, 1, Int::plus)
     }
 
-    /** Routing done (drafts registered, or it failed): decrement, removing the key when it hits zero. */
+    /**
+     * Routing done (drafts registered, or it failed): decrement, removing the key when it hits zero.
+     *
+     * `computeIfPresent`, NOT `merge`: merge INSERTS its value when the key is absent without calling the
+     * remapping function at all, so an unpaired `endSummon` — a worker whose [reset] wiped the map out from
+     * under it — would leave `-1` behind and [isSummoning] (a `containsKey`) would answer true forever. That
+     * used to cost only a poller that never went away; since the room poll gates its whole content branch
+     * on this flag, a stuck one means the room never lands. An absent key is already "not summoning", so
+     * decrementing it is correctly a no-op.
+     */
     fun endSummon(threadId: String) {
-        summoning.merge(threadId, -1) { current, delta -> (current + delta).takeIf { it > 0 } }
+        summoning.computeIfPresent(threadId) { _, current -> (current - 1).takeIf { it > 0 } }
     }
 
     /** True while a summon's dispatcher routing is still in flight for [threadId] (no drafts registered yet). */

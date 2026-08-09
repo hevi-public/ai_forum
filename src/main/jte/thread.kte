@@ -38,10 +38,13 @@
              dispatcher's "who replies" call runs on a worker), whether or not the thread already holds
              replies. It used to render only on an EMPTY thread, which meant an owner who posted a note
              mid-routing and then reloaded got a page with no poller at all: routing concluded into a page
-             that never asked again, and the room stayed invisible until another reload. The poller also
-             has to live INSIDE the .reply-list wrapper — the bottom composer's hx-target=".reply-list"
-             resolves against it (without which a note posted while summoning hits htmx:targetError and
-             silently does nothing), and so does the room poll's own HX-Retarget. --%>
+             that never asked again, and the room stayed invisible until another reload.
+             The poller has to live INSIDE the list, and the reason is the terminal swap: the room poll's
+             content response carries HX-Retarget=".reply-list" + outerHTML, and replacing the list is what
+             REMOVES the poller — htmx only re-arms a poll while its element is still in the document. Move
+             the poller to a sibling of the list and nothing ever removes it: it polls at 1Hz forever, each
+             poll replacing the whole list under the reader. (The wrapper is also the bottom composer's
+             hx-target, but replyList.kte now emits it unconditionally, so that no longer depends on this.) --%>
         @template.fragments.replyList(replies = replies, threadId = threadId, personas = personas, summoning = summoning)
         <%-- Auto-grow: drives bounded autonomous growth (§4) down every branch that still has depth
              budget. Appends the newly-grown nodes to the reply list (same pattern as the bottom

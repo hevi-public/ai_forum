@@ -79,7 +79,11 @@ Feature: New thread creation
     And the owner's page polls the room
     Then the room fragment still offers the summoning poller
     And the room fragment does not retarget the reply list
-    # And once routing lands, the poller that survived delivers the room — the note kept its place.
+    # And the page itself, for the owner who reloads mid-wait rather than leaving the tab polling.
+    And the thread page still shows the summoning poller
+    # And once routing lands, the poller that survived delivers the room. (The note's survival is a
+    # server-side read — the row renders — not proof about the browser's DOM; what protects it there is the
+    # assertion above that a mid-routing poll retargets nothing.)
     When the room's routing is released
     Then the thread carries the reply "Indexes are the trick"
     And the thread still shows the note "meanwhile, my own hunch"
