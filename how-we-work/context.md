@@ -414,6 +414,38 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
     id change. `TestData` gained per-call defaulted `agoSeconds`; a **global monotonic stagger was
     refused** because it moves the unread boundary under every scenario that seeds a comment then reads.
 
+- **Issue #17 — room-poll read-order re-verification + `<pre>` scroll containment** ✅ 2026-08-09. Two
+  independent, unrelated fixes filed under one issue number:
+  - **Part 1 (verification, no production code change).** The read-skew flake this context.md file
+    already recorded as fixed (the struck-through entry in Open threads / near-term, below) genuinely
+    was fixed — but mutation-checking it (temporarily flip the two reads in `ThreadReplies.read`, run
+    `RoomPollTest`) showed the existing pins are order-INSENSITIVE: green whether the order is right or
+    wrong, because their fixtures are static snapshots with nothing changing between the two reads. See
+    the dated addendum on that entry for the full mutation-check record. Closed by adding a
+    controlled-interleaving test to `ThreadRepliesTest` — no new production code.
+  - **Part 2 (`static/app.css`).** `.reply .body pre`, `.thread__body pre`, and `.attachment__caption
+    pre` had no `max-height`, so a long body stretched the page — about to become routine once issue
+    #15's tool-output persistence lands. Added `max-height: 60vh` and made `pre` the single scroll
+    container (both axes) across all three sites, neutralizing hljs-theme.css's own `overflow-x:auto`
+    on `code.hljs` so a highlighted block doesn't double-scroll (an inner bar plus an outer one). Closed
+    a second, previously-unnoticed gap in the same rules: an UNHIGHLIGHTED fence (no language, or a
+    language `highlight.js` doesn't recognise — see `MarkdownRenderer.kt`'s `HighlightedCodeBlockRenderer`)
+    never carries the `.hljs` class, so none of hljs-theme.css's rules reached it at all — no padding,
+    and a long line was silently clipped by the old `overflow: hidden` rather than scrollable. Verified
+    `overflow: auto` (not `hidden`) still clips descendants to the border-radius (an element's own
+    overflow always clips to its own border-box, whatever the value) both by reasoning and visually.
+  - **Visual verification without touching the dev DB.** The Browser-pane MCP tool (`preview_start`)
+    timed out twice (600s combined) in this environment. Fallback: a hand-assembled static harness
+    (structurally real — read verbatim off `replyNode.kte`/`threadOp.kte`/`MarkdownRenderer.kt`'s actual
+    output shape, not executed) linking the real `app.css`/`hljs-theme.css`, driven headlessly over CDP
+    via a cached Playwright Chromium binary and Node 22's built-in `WebSocket` (no npm install) — full-
+    page screenshots plus `getBoundingClientRect`/`getComputedStyle`/`scrollHeight` assertions per case,
+    both `data-theme` values. A scrolled-state capture (`scrollTop`/`scrollLeft` set before the shot)
+    confirmed the clip is a genuine scroll, not a hard truncation that merely looks similar.
+  - **No new acceptance scenario.** A CSS-only change adds no new markup, class, or `data-*` hook for an
+    HTTP-level probe to assert against — "the class is present" would be a test that cannot fail. Floor
+    left untouched (S4b lens: what implementation would make this assertion red? none).
+
 ## Open threads / near-term
 
 - **What's next, from the record rather than invention** (re-read 2026-07-30). S6 landed 2026-07-27
@@ -506,6 +538,22 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
     thread that starts non-empty — a Discuss thread posts the PR discussion synchronously, so the
     first poll returns that comment and the helper waits for nothing; `GitHubPrThreadSteps` moved to
     `awaitThreadSettled`. Widening a read widens every caller's definition of "has something landed".
+  - **Issue #17 re-verification, 2026-08-09 — the fix holds, but the race itself was unpinned.**
+    Filed against the pre-PR-#10 state, so re-checked against current `main` first: mutation-tested by
+    temporarily flipping `ThreadReplies.read`'s two reads (DB first, registry second — the buggy order).
+    `RoomPollTest` stayed green 3/3 **genuine** re-executions (Gradle's task-level UP-TO-DATE cache
+    silently no-ops a rerun with unchanged inputs — `--rerun-tasks` was needed to force real
+    re-execution each time; the first attempt at runs 2–3 caught nothing but its own cache hit). Green
+    under the buggy order isn't a pass — it means the pin can't see the order at all: `RoomPollTest`'s
+    and `ThreadRepliesTest`'s fixtures are static snapshots, nothing changes *between* the two reads, so
+    no implementation order could redden them. That was already known and stated, not hidden —
+    `ThreadRepliesTest`'s own class doc said "no test at any tier can observe the instant it protects."
+    Closed the gap instead of re-affirming it: `ThreadRepliesTest` gained a controlled-interleaving
+    test — the two accessors `ThreadReplies.read` calls share a call counter, so whichever one `read`
+    invokes FIRST sees the pre-settle world (draft registered, no row yet) and whichever it invokes
+    SECOND sees post-settle (row persisted, draft evicted), reproducing the worker's persist-then-evict
+    gap without racing a real thread or waiting on timing. Verified red against the flipped order,
+    green against the shipped one.
 - **A summon parked between `beginSummon` and `register` escapes the between-scenario reset**
   (found by the PR #10 review under an artificial worker delay, 2026-07-31; **pre-existing, not fixed**).
   `InFlightGenerations.reset()` cancels and joins registered *holders*, and routing registers none — so a

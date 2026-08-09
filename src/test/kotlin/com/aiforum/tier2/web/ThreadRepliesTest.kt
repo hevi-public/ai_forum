@@ -30,11 +30,20 @@ import java.time.ZoneOffset
  * Tier-2: [ThreadReplies] — the union both the thread page and the room poll read through — against a
  * real [InFlightGenerations] registry and a stubbed comment read.
  *
- * What is NOT pinned here, stated so the coverage isn't overread: the read ORDER (registry before DB) is a
- * race between a settling worker and a rendering request, and no test at any tier can observe the instant
- * it protects. What IS deterministic — and is what the order exists to make safe — is everything below:
- * a node caught in BOTH reads renders once with the settled row winning, a draft with no row still shows,
- * and the two flags the callers branch on say what they mean.
+ * The read ORDER (registry before DB) used to be marked as unpinnable here: a race between a settling
+ * worker and a rendering request that no test could observe by waiting on real timing. It IS pinned now
+ * (`a settle landing in the gap between the two reads…` below), not by racing a real thread but by
+ * controlling the interleaving directly — the two accessors [ThreadReplies.read] calls share a call
+ * counter, so whichever one `read` invokes FIRST sees the pre-settle world and whichever it invokes
+ * SECOND sees post-settle, regardless of wall-clock time. That makes the fixture order-SENSITIVE by
+ * construction. Verified by mutation (issue #17 part 1, 2026-08-09): swapping the two reads inside
+ * [ThreadReplies.read] turns that test red 3/3 runs; the pre-existing tests below and in
+ * [com.aiforum.tier2.web.RoomPollTest] do not move under the same swap, 3/3 runs — their fixtures are
+ * static snapshots, so no implementation order could make them red (see how-we-work/context.md).
+ *
+ * Everything else below was already deterministic without needing that trick: a node caught in BOTH reads
+ * renders once with the settled row winning, a draft with no row still shows, and the two flags the callers
+ * branch on say what they mean.
  */
 @Tag("tier2")
 class ThreadRepliesTest {
@@ -107,6 +116,41 @@ class ThreadRepliesTest {
         assertFalse(repliesOver(listOf(comment("f", state = GenerationState.FAILED))).anyPosted)
         assertTrue(repliesOver(listOf(comment("p"))).anyPosted)
         assertFalse(repliesOver(emptyList()).anyPosted)
+    }
+
+    @Test
+    fun `a settle landing in the gap between the two reads is never lost, regardless of read order`() {
+        // The race ThreadReplies.read's KDoc describes: the worker's persist-then-evict can land in the
+        // gap between the two reads. repliesOver()'s fixtures above are static — nothing changes between
+        // the two reads — so no implementation order could turn them red. This fixture makes the world
+        // CHANGE between the first and second read, deterministically: the two accessors share a counter
+        // rather than racing a real thread. Whichever accessor `read` calls FIRST sees the pre-settle
+        // state (draft registered, no row yet); whichever it calls SECOND sees post-settle (row
+        // persisted, draft evicted) — exactly the window a real worker crosses, pinned without timing.
+        var reads = 0
+        val comments = object : CommentRepository(JdbcTemplate(), clock) {
+            override fun threadComments(threadId: String): List<Comment> =
+                if (++reads > 1) listOf(comment("n1", body = "the posted body")) else emptyList()
+        }
+        val generation = object : GenerationService(
+            object : LlmClient {
+                override fun generate(request: LlmRequest, cancellation: CancellationToken) = LlmResponse("unused")
+            },
+            comments,
+            PersonaRepository(JdbcTemplate()),
+            inFlight = registry,
+        ) {
+            override fun inFlightViews(threadId: String): List<ReplyView> =
+                if (++reads > 1) emptyList() else listOf(draftView("n1"))
+        }
+
+        val replies = ThreadReplies(generation, comments, flatAssembler()).read(THREAD)
+
+        // Buggy (DB-first) order: DB read is first, sees no row yet (empty); registry read is second,
+        // sees the draft already evicted (empty) — the node is in NEITHER and vanishes. Real (registry-
+        // first) order: registry read is first, sees the draft (not yet evicted); DB read is second, sees
+        // the persisted row — the union renders it once, as posted. This assertion is what tells them apart.
+        assertEquals(listOf("n1"), replies.all.map { it.id }, "a node settling between the two reads must not vanish from both")
     }
 
     @Test
