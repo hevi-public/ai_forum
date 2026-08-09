@@ -336,4 +336,30 @@ object Html {
         if (close < 0) return null
         return html.substring(open.range.first, close + "</li>".length)
     }
+
+    /**
+     * The value of [attr] on the /admin/ambient usage-aggregates strip (issue #16: rolling 24h/7d spend
+     * + tool-call counts), or null when [attr] isn't rendered at all — the same absent-means-unknown
+     * idiom [latestAmbientRunAttr] reads off a run row: an all-NULL cost window renders NO
+     * data-cost-24h/7d attribute (never a claimed "0.0000"), while the tool-call counts always render
+     * (0 is a real, known count — never "unknown"). Null also before the strip exists at all, the
+     * honest RED case ahead of the section landing in admin_ambient.kte.
+     */
+    fun usageAggregatesAttr(html: String, attr: String): String? {
+        val tag = Regex("<section\\b[^>]*data-usage-aggregates[^>]*>").find(html)?.value ?: return null
+        return Regex("${Regex.escape(attr)}=\"([^\"]*)\"").find(tag)?.groupValues?.get(1)
+    }
+
+    /**
+     * Every `<li data-tool-call=\"…\" data-tool-run=\"[runId]\" …>…</li>` block on /admin/tools
+     * belonging to generation [runId], in document order (issue #16). A generation can make several
+     * calls, one row each; `GenerationToolCallRepository.recent` renders newest-id-first, so a caller
+     * wanting seq order should reverse this list. Empty when the generation made no calls, or when the
+     * view renders no such rows yet — the honest RED case ahead of the route/template landing.
+     */
+    fun toolCallRowsForRun(html: String, runId: String): List<String> =
+        Regex("<li\\b[^>]*data-tool-run=\"${Regex.escape(runId)}\"[^>]*>").findAll(html).mapNotNull { open ->
+            val close = html.indexOf("</li>", open.range.last + 1)
+            if (close < 0) null else html.substring(open.range.first, close + "</li>".length)
+        }.toList()
 }

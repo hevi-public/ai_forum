@@ -91,6 +91,21 @@ class AmbientRunRepository(
     /** Total recorded ticks — the /admin stat tile figure and the round-robin key (count BEFORE this run). */
     fun count(): Int = jdbc.queryForObject("SELECT COUNT(*) FROM ambient_run", Int::class.java) ?: 0
 
+    /**
+     * Summed cost of every run whose `tick_time` is at or after [cutoffIso] (issue #16) — the
+     * /admin/ambient usage strip's 24h/7d windows. The boundary is INCLUSIVE (`>=`): the strip computes
+     * [cutoffIso] as `now.minus(Duration...)`, so "24h ago" is itself the oldest instant IN the window,
+     * and a run stamped exactly there must count.
+     *
+     * `SUM` over zero matching rows, or over rows that are ALL NULL, is SQL NULL — and `queryForObject`
+     * hands that back as Kotlin `null` rather than a misleading `0.0`, the same absent-means-unknown
+     * distinction [addCost]'s `COALESCE` preserves on the write side. A NULL-cost row *inside* the
+     * window never breaks the sum either: SQL `SUM` silently skips NULLs, summing only what the priced
+     * siblings actually cost.
+     */
+    fun costSince(cutoffIso: String): Double? =
+        jdbc.queryForObject("SELECT SUM(cost_usd) FROM ambient_run WHERE tick_time >= ?", Double::class.java, cutoffIso)
+
     /** The most recent ticks, newest first — the /admin/ambient run list. */
     fun recent(limit: Int): List<AmbientRun> =
         jdbc.query(

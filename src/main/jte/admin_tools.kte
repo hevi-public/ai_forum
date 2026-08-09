@@ -1,0 +1,66 @@
+@import com.aiforum.web.AdminToolCallView
+@import com.aiforum.web.AuthorLabel
+@param listTitle: String
+@param rows: List<AdminToolCallView>
+
+@template.layout(title = "Admin · " + listTitle + " · AI Forum", activeNav = "admin", content = @`
+    <div class="admin-list" data-admin-list="tools">
+        <p class="admin-list__back"><a href="/admin">← Admin</a></p>
+        <h1 class="admin-list__title">${listTitle}</h1>
+        <p class="admin-list__lede">What a generation actually reached for — the tool it called, what it was given, and what came back. A trace with no linked reply is a generation that never posted (a failed run); it stays here rather than nowhere, because that is exactly when an operator most wants to see what the model was doing.</p>
+        @if(rows.isEmpty())
+            <p class="admin-list__empty" data-admin-list-empty="true">No tool calls recorded yet.</p>
+        @else
+            <ul class="admin-list__items">
+                <%-- Every hook lives on this ONE <li> (the house rule: a hooked row stays flat, and
+                     prose never rides in an attribute value — JTE does not escape '>' in attribute
+                     context, so a tool summary containing one would truncate every hook after it).
+                     data-tool-comment is null-omitted for an unlinked (failed-run) trace, the same
+                     absent-means-unknown idiom the rest of /admin uses. data-tool-error is an explicit
+                     .toString() — a bare Boolean attribute VANISHES when false, so the un-stringified
+                     form would make the common "no error" case unassertable. --%>
+                @for(row in rows)
+                    <li class="admin-list__item admin-list__item--tools" data-tool-call="${row.id}" data-tool-run="${row.runId}" data-tool-comment="${row.commentId}" data-tool-seq="${row.seq}" data-tool-name="${row.toolName}" data-tool-error="${row.isError.toString()}">
+                        <span class="admin-list__meta">
+                            <span class="admin-list__badge">${row.toolName}</span>
+                            <span class="admin-list__sep">·</span>
+                            <span class="admin-list__state">seq ${row.seq}</span>
+                            @if(row.isError)
+                                <span class="admin-list__sep">·</span>
+                                <span class="admin-list__badge">error</span>
+                            @endif
+                            @if(row.authorId != null)
+                                <span class="admin-list__sep">·</span>
+                                <span class="admin-ambient__persona">by ${AuthorLabel.display(row.authorId)}</span>
+                            @endif
+                            @if(row.threadId != null && row.commentId != null)
+                                <span class="admin-list__sep">·</span>
+                                <%-- .admin-ambient__thread, not .admin-list__link: that class lays out a
+                                     flex column with padding for a row-wide clickable anchor (see
+                                     admin_comments.kte) — wrong shape for a small inline link. Mirrors
+                                     admin_ambient.kte's own "view thread" anchor instead. --%>
+                                <span class="admin-ambient__thread"><a href="/threads/${row.threadId}#reply-${row.commentId}" data-tool-thread-link>view reply</a></span>
+                            @endif
+                            @if(row.ago != null)
+                                <span class="admin-list__sep">·</span>
+                                <span class="admin-list__ago">${row.ago}</span>
+                            @endif
+                        </span>
+                        <%-- Input/output render as CHILD TEXT ONLY, never as an attribute value (the
+                             same S6 reason as the comment above). ${} HTML-escapes: this is untrusted
+                             text a tool produced (a fetched page, a diff, a model-composed argument
+                             blob), never routed through $unsafe{}. Plain inline styling only — #17's
+                             global pre-containment CSS lives on a different branch; this neither depends
+                             on it nor tries to duplicate it. --%>
+                            @if(row.inputSummary != null)
+                                <div class="admin-list__tool-text" style="white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:4px;"><b>in:</b> ${row.inputSummary}</div>
+                            @endif
+                            @if(row.outputSummary != null)
+                                <div class="admin-list__tool-text" style="white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:4px;"><b>out:</b> ${row.outputSummary}</div>
+                            @endif
+                    </li>
+                @endfor
+            </ul>
+        @endif
+    </div>
+`)

@@ -1883,6 +1883,11 @@ mark.nav-hit {
 .admin-list__item--memory { display: flex; flex-direction: column; gap: 6px; padding: 12px 4px; }
 .admin-list__item--memory p { margin: 0; }
 
+/* /admin/tools rows (issue #16): same "ride .admin-list__* wholesale, add only the row-variant" shape
+   as --memory above. The input/output blocks carry their own inline wrap styling (see admin_tools.kte —
+   deliberately not a shared class here, so this stays the one rule the page needs). */
+.admin-list__item--tools { display: flex; flex-direction: column; gap: 4px; padding: 12px 4px; }
+
 /* ------------------------------------------------------- native file input */
 /* The bare OS control sat unstyled inside the polished composer; dress its button like a ghost .btn. */
 input[type="file"] { font-family: var(--mono); font-size: 11px; color: var(--faint); max-width: 100%; }

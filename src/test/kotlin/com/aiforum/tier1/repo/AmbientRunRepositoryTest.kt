@@ -85,4 +85,42 @@ class AmbientRunRepositoryTest {
     private fun costOf(id: Long): Double? =
         jdbc.query("SELECT cost_usd FROM ambient_run WHERE id = ?", { rs, _ -> rs.getObject("cost_usd") as? Double }, id)
             .single()
+
+    // --- costSince (issue #16) --------------------------------------------------------------------
+
+    private fun stampAndPrice(tickTime: String, costUsd: Double?) {
+        val id = record()
+        jdbc.update("UPDATE ambient_run SET tick_time = ? WHERE id = ?", tickTime, id)
+        if (costUsd != null) runs.addCost(id, costUsd)
+    }
+
+    @Test
+    fun `costSince sums runs at or after the cutoff, excluding an older one`() {
+        val cutoff = "2026-01-01T00:00:00Z"
+        stampAndPrice("2025-12-31T23:59:59Z", 99.0)   // one tick before the cutoff — must be excluded
+        stampAndPrice(cutoff, 0.10)                    // exactly AT the cutoff — inclusive, must count
+        stampAndPrice("2026-01-01T00:00:01Z", 0.20)    // after the cutoff — must count
+
+        assertEquals(
+            0.30, runs.costSince(cutoff)!!, 1e-9,
+            "the row exactly at the cutoff counts (>=); the older row must not be summed in",
+        )
+    }
+
+    @Test
+    fun `costSince ignores a NULL-cost row inside the window rather than treating it as zero`() {
+        val cutoff = "2026-01-01T00:00:00Z"
+        stampAndPrice(cutoff, 0.10)
+        stampAndPrice(cutoff, null)   // unpriced run in the same window — SQL SUM must skip it, not zero it
+
+        assertEquals(0.10, runs.costSince(cutoff)!!, 1e-9, "SUM ignores SQL NULL; an unpriced row must not zero out the total")
+    }
+
+    @Test
+    fun `costSince is null, not zero, when nothing in the window is priced`() {
+        assertNull(runs.costSince("2026-01-01T00:00:00Z"), "no runs at all in the window -> unknown, never a claimed 0.0")
+
+        stampAndPrice("2026-01-01T00:00:00Z", null)
+        assertNull(runs.costSince("2026-01-01T00:00:00Z"), "an all-NULL window must render as unknown, never a claimed 0.0")
+    }
 }

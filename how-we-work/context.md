@@ -499,6 +499,39 @@ would put audit plumbing into the failure taxonomy). Acceptance floor 285 → **
 branches touch that line, so expect a conflict there at merge. Full `verifyAll` green (tier0 480,
 tier1 295, tier2 177, acceptance 290).
 
+**2026-08-09 (issue #16, usage observability):** the readers and pages for #15's data —
+`AmbientRunRepository.costSince(cutoffIso)` (SQL `SUM`, NULL when the window has no priced rows —
+distinct from a coalesced 0.0) and `GenerationToolCallRepository.countSince(cutoffIso)` /
+`.recent(limit, commentId?)` (the latter LEFT JOINing `comment` for author/thread, null for an unlinked
+failed-run trace). `/admin/ambient` gained a usage strip (`UsageAggregatesView`, computed each request
+from the injected `Clock` — `now.minus(Duration.ofHours(24))` / `.ofDays(7)` — never cached) above the
+run list, plus a visible `$0.1200`-style cost on each priced row (the attribute from #15 stays; this is
+its human-visible half). A new `/admin/tools?comment=` view (`AdminController`, `admin_tools.kte`) lists
+the newest `generation_tool_call` rows, input/output as child text only (never in a `data-*` value — the
+S6 truncated-tag rule), with plain inline wrap styling deliberately NOT depending on or duplicating
+issue #17's global `pre`-containment CSS (different branch). Two things worth carrying forward:
+
+- **The reconcile is proven, not assumed.** `usage_observability.feature`'s first scenario backdates one
+  of two priced ticks 3 days (a new `UsageSteps` Given pair — `the latest ambient run happened {int}
+  days ago` / `that run's tool calls started {int} days ago`, both direct-SQL against `MAX(id)`, the
+  latter deliberately updating ALL `generation_tool_call` rows rather than joining back to the tick —
+  `run_id` has no FK to `ambient_run` by design, so "all rows" and "that run's rows" coincide as long as
+  exactly one tooled tick has run so far), then asserts the strip's `data-cost-7d` equals the SUM of the
+  two run rows' own `data-cost-usd` values, read independently off the page rather than by construction.
+- **Owner-driven spend is invisible to `/admin/ambient`, and this is now written down rather than
+  assumed away** (`plan_docs/usage-observability.md` §3 "Known understatements"). `settleOne` prices
+  every generation it settles, ambient or owner-summoned alike, but only `AmbientTickService`'s
+  `onSettled` hook ever calls `addCost` — an owner's own summons/auto-grow are priced at settle and then
+  dropped, because there is no `ambient_run` row to charge them to. `retry`/`regenerate` capture neither
+  cost nor tool calls at all (already documented in `GenerationService`'s own KDoc, pre-#16). The plan
+  doc also records THE CEILING: the 5h/weekly subscription plan-limit bars are not programmatically
+  readable at all (`/usage` is an interactive TUI over local session history; OTel export carries
+  tokens/cost but not plan windows) — per-run stream cost is the maximum observability this app can ever
+  have, worth stating once so it isn't re-investigated later.
+
+Acceptance floor 290 → **295** (`usage_observability.feature`, five scenarios). Full `verifyAll` green
+(tier0 480, tier1 304, tier2 177, acceptance 295; jsTest + both MCP test tasks unaffected by this slice).
+
 ## Open threads / near-term
 
 - **What's next, from the record rather than invention** (re-read 2026-07-30). S6 landed 2026-07-27

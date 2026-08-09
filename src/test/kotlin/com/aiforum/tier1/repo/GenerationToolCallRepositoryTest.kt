@@ -128,4 +128,68 @@ class GenerationToolCallRepositoryTest {
         assertEquals(listOf("Bash"), remaining.map { it.toolName }, "the linked trace went with its reply")
         assertFalse(remaining.any { it.commentId != null }, "nothing linked survives the delete")
     }
+
+    // --- countSince (issue #16) -------------------------------------------------------------------
+
+    @Test
+    fun `countSince counts calls at or after the cutoff, excluding an older one`() {
+        val cutoff = "2026-01-01T00:00:00Z"
+        repo.record("run-old", null, listOf(ToolCall("t1", "Read", startedAt = Instant.parse("2025-12-31T23:59:59Z"))))
+        repo.record("run-at", null, listOf(ToolCall("t2", "Read", startedAt = Instant.parse(cutoff))))
+        repo.record("run-new", null, listOf(ToolCall("t3", "Read", startedAt = Instant.parse("2026-01-01T00:00:01Z"))))
+
+        assertEquals(2, repo.countSince(cutoff), "the call exactly at the cutoff counts (>=); the older one must not")
+    }
+
+    @Test
+    fun `countSince is 0, not an error, when nothing falls in the window`() {
+        assertEquals(0, repo.countSince("2026-01-01T00:00:00Z"))
+    }
+
+    // --- recent (issue #16) ------------------------------------------------------------------------
+
+    @Test
+    fun `recent joins author and thread for a linked row, and leaves them null for an unlinked failed-run trace`() {
+        val thread = data.insertThread("Scaling SQLite")
+        val reply = data.insertComment(thread, authorId = "sol", body = "the answer")
+        repo.record(reply, reply, listOf(ToolCall("t1", "Read")))
+        repo.record("failed-run", null, listOf(ToolCall("t2", "Bash")))
+
+        val rowsById = repo.recent(10).associateBy { it.toolName }
+
+        val linked = rowsById.getValue("Read")
+        assertEquals(reply, linked.commentId)
+        assertEquals("sol", linked.authorId)
+        assertEquals(thread, linked.threadId)
+
+        val unlinked = rowsById.getValue("Bash")
+        assertNull(unlinked.commentId)
+        assertNull(unlinked.authorId, "an unlinked (failed-run) trace has no comment row to join author/thread from")
+        assertNull(unlinked.threadId)
+    }
+
+    @Test
+    fun `recent renders newest call (highest id) first`() {
+        repo.record("run-1", null, listOf(ToolCall("t1", "Read"), ToolCall("t2", "Bash"), ToolCall("t3", "Grep")))
+
+        assertEquals(listOf("Grep", "Bash", "Read"), repo.recent(10).map { it.toolName })
+    }
+
+    @Test
+    fun `recent filters to one comment's trace when a commentId is given`() {
+        val thread = data.insertThread("Scaling SQLite")
+        val replyA = data.insertComment(thread, authorId = "sol", body = "a")
+        val replyB = data.insertComment(thread, authorId = "vex", body = "b")
+        repo.record(replyA, replyA, listOf(ToolCall("t1", "Read")))
+        repo.record(replyB, replyB, listOf(ToolCall("t2", "Bash")))
+
+        assertEquals(listOf("Read"), repo.recent(10, commentId = replyA).map { it.toolName })
+    }
+
+    @Test
+    fun `recent honours the limit`() {
+        repo.record("run-1", null, listOf(ToolCall("t1", "Read"), ToolCall("t2", "Bash"), ToolCall("t3", "Grep")))
+
+        assertEquals(2, repo.recent(2).size)
+    }
 }

@@ -10,7 +10,7 @@
              data-stat="interest-changes" count would be four more files for a number nobody acts on, and
              once the ungrouped total exists the same COUNT grouped by member is one line away — which is a
              drift-frequency score wearing an auditor's badge. The interest log is read, never reduced. --%>
-        <p class="admin__links"><a href="/admin/stats" data-admin-link="routing-stats">Routing health →</a> <a href="/admin/interests" data-admin-link="interest-drift">Interest drift →</a> <a href="/admin/memory" data-admin-link="memory">Memory →</a></p>
+        <p class="admin__links"><a href="/admin/stats" data-admin-link="routing-stats">Routing health →</a> <a href="/admin/interests" data-admin-link="interest-drift">Interest drift →</a> <a href="/admin/memory" data-admin-link="memory">Memory →</a> <a href="/admin/tools" data-admin-link="tools">Tool calls →</a></p>
 
         <section class="admin__section">
             <h2 class="admin__section-title">Overview</h2>
