@@ -198,13 +198,17 @@ class JailRuntime(
         if (vars.isEmpty()) {
             envFile.delete()   // a stale file from a previous boot must not outlive the token it held
         } else {
-            envFile.writeText(vars.joinToString("\n", postfix = "\n"))
+            // Perms BEFORE content: writeText-then-chmod leaves the tokens world-readable for the umask
+            // window on a first boot. Creating empty, restricting, then writing means the window only
+            // ever exposes an empty file.
+            envFile.writeText("")
             runCatching {
                 Files.setPosixFilePermissions(
                     envFile.toPath(),
                     setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
                 )
             }
+            envFile.writeText(vars.joinToString("\n", postfix = "\n"))
         }
         return invocation()
     }
