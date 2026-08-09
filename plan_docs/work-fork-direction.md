@@ -292,8 +292,9 @@ header on top, one worktree, one PR, acceptance scenarios written **RED-first** 
 ## 10. Acceptance-spec delta
 
 **Not produced.** Fork B's §10 was a full review of 45 feature files / 154 scenarios against its
-direction; the suite is 283 scenarios now, and Fork C owes the same review when its first slice is
-designed — not before, since a delta written against an undesigned slice is fiction.
+direction; the suite executes 285 scenarios as of 2026-08-09, and Fork C owes the same review when
+its first slice is designed — not before, since a delta written against an undesigned slice is
+fiction.
 
 Named now only so the review is not started from zero, the features most likely strained by a trace
 that is a tree of tool calls rather than a conversation: `context_scoping` (branch-only scope over a
