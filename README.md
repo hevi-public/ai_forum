@@ -159,8 +159,42 @@ structurally (allowlisted commands, no shell, a re-checked guard), not by trust.
   (`mcp/gh-readonly/`, registered via [`.mcp.json`](.mcp.json)) so a persona can pull a live PR/issue into
   its reply. Enable with `aiforum.llm.github-tools-enabled: true` and `aiforum.llm.github-mcp-config:` set
   to an absolute path to `.mcp.json` (cli provider only). ⚠ GitHub content is untrusted input (prompt
-  injection, like web-fetch) and the Docker jail isn't built yet — the server is read-only, but reads
-  whatever the host `gh` is authed to see.
+  injection, like web-fetch), and the Docker jail that isolates the spawned CLI is **available but OFF by
+  default** (below) — the server is read-only, but reads whatever the host `gh` is authed to see.
+
+### Sandboxing the persona subprocess (Docker jail)
+
+The thing that reads untrusted text is `claude -p`, so that is what gets jailed — not the app. With the
+jail on, a prompt-injected persona runs in a container with a read-only rootfs, every capability dropped,
+tmpfs scratch that dies with the invocation, no host bind mount but the credential, and **no route off the
+host except an egress proxy that allows two hostnames**. Full design + decision log:
+[`plan_docs/llm-sandbox.md`](plan_docs/llm-sandbox.md).
+
+⚠ **What it does not cover:** RSS/feed article fetching runs **in-JVM**, on the host, and is *not* jailed —
+the jail contains the persona, not the collector. Nor are the `openai`/`opencode` providers, nor the app
+itself. And it protects the host, not the model's **context**: injected text still reaches the prompt.
+
+```bash
+# 1. build the image (from the repo root)
+docker build -t aiforum-claude-jail -f docker/claude-jail/Dockerfile .
+
+# 2. prove containment holds — opt-in, needs Docker + network, NOT part of verifyAll
+./gradlew jailContract
+
+# 3. auth the container. macOS hosts keep claude's credential in the KEYCHAIN, which a Linux
+#    container can't read — so mint a token once and export it where the app is launched:
+claude setup-token
+export CLAUDE_CODE_OAUTH_TOKEN=<the token it printed>
+
+# 4. enable — one line (aiforum.llm.jail.enabled), reversible, byte-identical behaviour when off
+SPRING_PROFILES_ACTIVE=dev AIFORUM_LLM_JAIL_ENABLED=true ./gradlew bootRun
+#    boot line to look for:  INFO … event=llm.jail.ready … credentialMode=token
+#    egress audit trail:     docker exec aiforum-jail-proxy tail -f /var/log/squid/access.log
+```
+
+With the jail on, any WebFetch or article host must be added to `aiforum.llm.jail.egress-allowlist` or the
+fetch is denied — deny-by-default is the control, and it is deliberately not auto-merged from the
+web-fetch allowlist (a blank one means "any host", which deny-by-default can't express).
 
 **Discovery mode** — let a sea of red run without failing the build (useful while scaffolding):
 

@@ -497,9 +497,11 @@ aiforum:
     # Headless `claude -p` can't prompt for tool permission, so WebFetch is denied unless pre-authorised
     # here (a persona asked to check the web otherwise just reports it can't reach the network). Off by
     # default; turned on per-profile (dev + prod on — see application-dev.yml / application-prod.yml).
-    # ⚠ SECURITY: enabling this lets personas fetch the open web, and the Docker jail (requirements §12)
-    # that's meant to isolate that from the host is NOT built yet — so today the only mitigation is the
-    # domain allowlist below. Web content is untrusted input (prompt injection). See requirements §12.
+    # ⚠ SECURITY: enabling this lets personas fetch the open web. Web content is untrusted input (prompt
+    # injection). The Docker jail below (requirements §12) now exists to isolate that from the host, but it
+    # is OFF by default — until it's on, the domain allowlist here is the only mitigation. Note the two
+    # allowlists are independent by design: this one scopes WHAT the tool may fetch, the jail's scopes WHAT
+    # THE CONTAINER MAY REACH, and with the jail on a host must be in BOTH.
     web-fetch-enabled: false
     web-fetch-allowed-domains: ""   # blank => any host; else comma-separated allowlist, e.g.
                                     # "news.ycombinator.com,github.com" → personas can only fetch those
@@ -507,12 +509,49 @@ aiforum:
     # is given the gh-readonly MCP server (--mcp-config + --strict-mcp-config) and its tools are
     # pre-authorised (mcp__gh-readonly), so a persona can pull a live PR/issue into its reply. Distinct from
     # the human /github page above — this is the AI path, and it goes THROUGH the MCP server.
-    # ⚠ SECURITY: same prompt-injection risk class as web-fetch (GitHub bodies are untrusted) and the Docker
-    # jail (§12) isn't built; the server is read-only but reads whatever the host `gh` is authed to. Off by default.
+    # ⚠ SECURITY: same prompt-injection risk class as web-fetch (GitHub bodies are untrusted); the server is
+    # read-only but reads whatever the host `gh` is authed to. Off by default. With the jail on, the MCP
+    # server used is the copy BAKED INTO THE IMAGE — the config value below is rewritten for the container.
     github-tools-enabled: false
     github-mcp-config: ""                 # passed to `claude --mcp-config` (file path or inline JSON);
                                           # e.g. an ABSOLUTE path to this repo's .mcp.json. Blank => inert.
     github-mcp-server-name: gh-readonly   # must match the server key in that config; authorises mcp__<name>
+    # Docker jail for the persona SUBPROCESS (requirements §12; design plan_docs/llm-sandbox.md). Jails
+    # `claude -p`, not the app: the subprocess is what reads attacker-authored text (PR bodies, articles)
+    # and holds a tool loop. With it on, a generation runs in a one-shot container — read-only rootfs, all
+    # capabilities dropped, tmpfs scratch, no host bind mount but the credential — on an INTERNAL Docker
+    # network that has no route off the host except an egress proxy filtering by hostname.
+    #
+    # Build the image first:  docker build -t aiforum-claude-jail -f docker/claude-jail/Dockerfile .
+    # Prove it holds:         ./gradlew jailContract      (opt-in; needs Docker + network)
+    #
+    # ⚠ NOT covered: RSS/feed fetching runs IN-JVM on the host; the openai/opencode providers; the app
+    # itself. And the jail protects the HOST, not the model's context — injected text still reaches it.
+    jail:
+      enabled: false            # off by default: a broken Docker setup must never take generation down,
+                                # and with this false the spawned argv is byte-identical to the un-jailed
+                                # one (pinned by a tier-1 test), so enabling/rolling back is one line.
+      image: aiforum-claude-jail        # local build (never pulled); a missing image is a startup WARN
+      proxy-image: ubuntu/squid:latest  # the egress sidecar — CONNECT filtering by host, no TLS interception
+      # The perimeter, deny-by-default. This is the control that actually protects the credential: a
+      # prompt-injected agent can READ whatever credential the container holds however it's mounted, so what
+      # matters is that it can only be SPENT against these hosts. Web-fetch/feed domains are deliberately
+      # NOT auto-merged (a blank web-fetch allowlist means "any host", which deny-by-default can't express)
+      # — add hosts here on purpose, or the fetch is denied.
+      egress-allowlist:
+        - api.anthropic.com
+        - api.github.com
+      memory: 2g                # --memory, and --memory-swap pinned to it so swap adds no headroom back
+      cpus: "2"
+      pids-limit: 256           # a fork bomb inside the jail hits this before it hits the host
+      max-wall-clock-seconds: 900   # in-container `timeout` BACKSTOP under the app's own request deadline
+      credential-file: ""       # blank => ~/.claude/.credentials.json IF it exists. On macOS hosts whose
+                                # claude auth lives in the Keychain there is no such file — run
+                                # `claude setup-token` once and export CLAUDE_CODE_OAUTH_TOKEN in the app's
+                                # environment instead (forwarded via a 0600 --env-file, never in argv).
+      user: ""                  # blank => the image's own `USER node`; set only to match a host uid
+      network: aiforum-jail-net       # the internal network (no gateway ⇒ no route out)
+      proxy-name: aiforum-jail-proxy  # also the proxy HOSTNAME the container's HTTP_PROXY points at
     # OpenAiLlmClient (provider: openai only). Talks the OpenAI Chat Completions API over HTTP. The model
     # name reuses `default-model` above (and per-persona PersonaRef.model) — no separate model key here.
     openai:

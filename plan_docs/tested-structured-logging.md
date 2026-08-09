@@ -23,6 +23,10 @@ deliberately deferred for later consideration.
   - `gh.*` — `gh.unavailable` (WARN), `gh.startup.ok` (INFO), `gh.startup.unavailable` (WARN),
     `gh.list.failed` (DEBUG).
   - `llm.*` — `llm.spawn` (DEBUG), `llm.timeout` (WARN), `llm.cancelled` (INFO).
+  - `llm.jail.*` (added 2026-08-09 with the Docker jail — `llm-sandbox.md` §7) — `llm.jail.ready` (INFO),
+    `llm.jail.image_missing` (WARN), `llm.jail.startup_failed` (ERROR) on `JailRuntime`;
+    `llm.jail.docker_unavailable` (ERROR), `llm.jail.run_failed` (WARN) on `ProcessLlmClient`. The `ready`
+    line reports the credential **mode**, never the token — asserted, because that leak would be silent.
 
 ## Follow-ups (deferred — for later consideration)
 
