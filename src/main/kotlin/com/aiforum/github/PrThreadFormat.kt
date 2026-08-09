@@ -61,13 +61,20 @@ object PrThreadFormat {
             sb.append("\n")
         }
 
-        // The diff, fenced (highlights as a diff) and capped to the line budget. Unified-diff lines are
-        // always prefixed (space/+/-) or a header (diff/index/@@/---/+++), so a bare ``` can't appear to
-        // close the fence early.
+        // The diff, fenced (highlights as a diff) and capped to the line budget. The fence length is
+        // DYNAMIC — see [codeFence] — because a FIXED 3-backtick opener is not safe: a unified-diff
+        // CONTEXT line carries a single-space prefix, and commonmark accepts a CLOSING fence indented up
+        // to 3 spaces, so a context line that happens to BE a bare code fence (e.g. a markdown file's own
+        // fence, unchanged and therefore shown as context) legally closes a fixed 3-backtick opener early,
+        // spilling the rest of the diff into the real markdown parser. (A `+`/`-` prefixed line can't do
+        // this — its first character is neither whitespace nor a backtick — but [codeFence] solves it
+        // generally rather than trusting that every dangerous shape has been enumerated.)
         val diff = pull.diff.trim()
         if (diff.isNotEmpty()) {
             val lines = diff.lines()
-            sb.append("## Diff\n\n```diff\n").append(lines.take(DIFF_LINE_BUDGET).joinToString("\n")).append("\n```\n")
+            val fencedDiff = lines.take(DIFF_LINE_BUDGET).joinToString("\n")
+            val fence = codeFence(fencedDiff)
+            sb.append("## Diff\n\n").append(fence).append("diff\n").append(fencedDiff).append("\n").append(fence).append("\n")
             if (lines.size > DIFF_LINE_BUDGET) {
                 sb.append("\n> Diff truncated to $DIFF_LINE_BUDGET of ${lines.size} lines — ")
                     .append("[see the full diff on GitHub](${pull.url}/files).\n")
@@ -75,5 +82,18 @@ object PrThreadFormat {
         }
 
         return sb.toString().trimEnd()
+    }
+
+    /**
+     * The backtick fence to wrap [text] in: at least 3 backticks, and always ONE MORE than the longest
+     * run of consecutive backticks found anywhere inside [text]. Commonmark closes a fenced code block on
+     * the first line that is (up to 3 spaces of indent, then) a run of backticks AT LEAST AS LONG as the
+     * opening fence — so an opener strictly longer than every interior run can never be closed early by
+     * anything inside [text], regardless of where it sits or how it's indented. `maxOf(3, …)` keeps the
+     * common case — no backticks in the diff at all — at the conventional 3-backtick fence.
+     */
+    private fun codeFence(text: String): String {
+        val longestBacktickRun = Regex("`+").findAll(text).maxOfOrNull { it.value.length } ?: 0
+        return "`".repeat(maxOf(3, longestBacktickRun + 1))
     }
 }

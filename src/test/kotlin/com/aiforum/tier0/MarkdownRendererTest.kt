@@ -1,6 +1,10 @@
 package com.aiforum.tier0
 
+import com.aiforum.github.ChangedFile
+import com.aiforum.github.PrThreadFormat
+import com.aiforum.github.PullDetail
 import com.aiforum.markdown.MarkdownRenderer
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
@@ -127,5 +131,85 @@ class MarkdownRendererTest {
     @Test
     fun `a blank body renders to empty string`() {
         assertTrue(MarkdownRenderer.render("   ").isEmpty())
+    }
+
+    // --- PR diffs (issue #18): PrThreadFormat's diff fence end-to-end through the real renderer. A PR
+    // diff is attacker-influenceable (anyone can open a PR against a public repo), so the two-half XSS
+    // firewall (escapeHtml + sanitizeUrls, PR #92) must hold across this path too, AND the diff must stay
+    // genuinely CONTAINED in its code block — the fence-escape bug it's guarding against isn't raw-HTML
+    // XSS (escapeHtml already inerts literal HTML), it's markdown injection: a fence that closes early
+    // hands the rest of the diff to the real markdown parser, and MARKDOWN-SYNTAX images/links (not raw
+    // HTML) render for real off an https: URL that sanitizeUrls has no reason to touch.
+
+    private fun prPull(diff: String) = PullDetail(
+        number = 7, title = "Hostile diff", author = "octocat",
+        url = "https://github.com/o/r/pull/7", state = "OPEN", isDraft = false,
+        body = "", baseRef = "main", headRef = "feature", headSha = "deadbeef",
+        changedFiles = listOf(ChangedFile("README.md", 2, 2)), diff = diff,
+    )
+
+    @Test
+    fun `a PR diff that fence-escapes stays contained — the attacker's markdown never goes live`() {
+        // " ```" (one leading space — a diff context-line marker — then three backticks) is what a
+        // markdown file's own fence looks like as UNCHANGED context in a real PR diff, fully within an
+        // attacker's control on their own fork. Followed by a markdown image, a script-scheme link, and a
+        // raw HTML tag: if the fence breaks early, the image is the dangerous one — markdown image syntax
+        // isn't raw HTML, so escapeHtml doesn't touch it, and its https: URL isn't a scheme sanitizeUrls
+        // blocks either.
+        val diff = listOf(
+            "diff --git a/README.md b/README.md",
+            "index 1111111..2222222 100644",
+            "--- a/README.md",
+            "+++ b/README.md",
+            "@@ -10,5 +10,5 @@",
+            " ```",
+            " ![pwned](https://evil.example/pwned.png)",
+            " [click me](javascript:alert(1))",
+            " <img src=x onerror=alert(1)>",
+            " ```",
+            "-old line",
+            "+new line",
+        ).joinToString("\n")
+        val body = PrThreadFormat.body(prPull(diff))
+        val html = MarkdownRenderer.render(body)
+
+        assertEquals(
+            1, Regex("language-diff").findAll(html).count(),
+            "expected exactly one highlighted diff block, no accidental second fence reopening:\n$html",
+        )
+        assertFalse(html.contains("<img"), "the attacker's markdown image must stay inert diff text, never a live <img>:\n$html")
+        assertFalse(html.contains("src=\"https://evil.example"), "the attacker's image src must never go live:\n$html")
+        assertFalse(html.contains("href=\"javascript:", ignoreCase = true), "a script-scheme href must never survive, even from diff content:\n$html")
+        assertTrue(html.contains("language-diff"), "the diff should still render highlighted:\n$html")
+        assertTrue(html.contains("evil.example"), "the attacker's URL text should still be visible, just as inert code — not dropped, not live:\n$html")
+    }
+
+    @Test
+    fun `a script-scheme URL on an ordinary diff line never becomes a live link`() {
+        // A "+"-prefixed line can't masquerade as a closing fence (its first character isn't whitespace
+        // or a backtick), so this content is already inside the fence either way — a defense-in-depth
+        // check that the URL half of the firewall holds for diff content generally, fence bug or not.
+        val diff = listOf(
+            "diff --git a/notes.md b/notes.md",
+            "@@ -1 +1 @@",
+            "-old",
+            "+[click me](javascript:alert(1))",
+        ).joinToString("\n")
+        val html = MarkdownRenderer.render(PrThreadFormat.body(prPull(diff)))
+        assertTrue(html.contains("language-diff"), "the diff should render highlighted, not fall back:\n$html")
+        assertFalse(html.contains("href=\"javascript:", ignoreCase = true), "a script-scheme URL inside diff content must never surface as a live href:\n$html")
+    }
+
+    @Test
+    fun `a fenced diff block highlights with hljs-addition and hljs-deletion spans for + and - lines`() {
+        // End-to-end proof the highlight.js bundle's "diff" language is wired up (the issue's "check
+        // before building" — see plan_docs and PrThreadFormat's DIFF fence): a real +/- diff renders both
+        // the language class and hljs's own addition/deletion token spans, which is what static/hljs-
+        // theme.css's .hljs-addition/.hljs-deletion colors key off.
+        val md = "```diff\n+added line\n-removed line\n context line\n```"
+        val html = MarkdownRenderer.render(md)
+        assertTrue(html.contains("class=\"hljs language-diff\""), "expected the diff language to be recognized:\n$html")
+        assertTrue(html.contains("hljs-addition"), "expected an hljs-addition span for the + line:\n$html")
+        assertTrue(html.contains("hljs-deletion"), "expected an hljs-deletion span for the - line:\n$html")
     }
 }

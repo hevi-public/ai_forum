@@ -83,6 +83,60 @@ class PrThreadFormatTest {
         assertFalse(body.contains("```diff"), "no fence when there's no diff:\n$body")
     }
 
+    // --- diff fencing: a PR diff is attacker-influenceable (anyone can open a PR against a public repo),
+    // so it must not be able to break out of its own fence. A unified-diff CONTEXT line carries a
+    // single-space prefix, and commonmark accepts a CLOSING fence indented up to 3 spaces — so a context
+    // line that is exactly "```" (e.g. a markdown file's own fence, unchanged and therefore shown as
+    // context) legally closes a fixed 3-backtick opener early. The fence must instead be sized to the
+    // content: strictly longer than the longest run of backticks anywhere inside it.
+
+    /** The opening fence string ("```", "````", …) PrThreadFormat used for the "## Diff" section. */
+    private fun openingDiffFence(body: String): String =
+        Regex("## Diff\n\n(`+)diff\n").find(body)?.groupValues?.get(1)
+            ?: error("no diff fence found in body:\n$body")
+
+    @Test
+    fun `a diff whose context line is a bare code fence stays inside one fenced block`() {
+        val diff = listOf(
+            "diff --git a/README.md b/README.md",
+            "index 1111111..2222222 100644",
+            "--- a/README.md",
+            "+++ b/README.md",
+            "@@ -1,3 +1,3 @@",
+            " ```",
+            "-old fenced content",
+            "+new fenced content",
+            " ```",
+        ).joinToString("\n")
+        val body = PrThreadFormat.body(pull(diff = diff))
+        val fence = openingDiffFence(body)
+        assertTrue(
+            fence.length > 3,
+            "opening fence must be longer than any backtick run in the diff (a fixed \"```\" is closeable by the diff's own \" ```\" context line), got \"$fence\":\n$body",
+        )
+        assertTrue(
+            body.contains("${fence}diff\n$diff\n$fence"),
+            "the whole diff — including its own \" ```\" lines — must sit verbatim between ONE opening and ONE closing fence of the SAME (longer) length:\n$body",
+        )
+    }
+
+    @Test
+    fun `a diff containing a 5-backtick run gets a fence of at least 6 backticks`() {
+        val diff = "diff --git a/x.md b/x.md\n+line with a run: `````\n-plain line"
+        val body = PrThreadFormat.body(pull(diff = diff))
+        val fence = openingDiffFence(body)
+        assertTrue(
+            fence.length >= 6,
+            "a 5-backtick run inside the diff needs a fence of at least 6 backticks, got \"$fence\" (len ${fence.length}):\n$body",
+        )
+    }
+
+    @Test
+    fun `a diff with no backticks still uses the conventional 3-backtick fence`() {
+        val body = PrThreadFormat.body(pull()) // default fixture diff carries no backticks
+        assertEquals("```", openingDiffFence(body), "clean diffs must render exactly as before:\n$body")
+    }
+
     // --- commentBody: one PR-discussion node's markdown (Slice 2) ---
 
     private fun comment(body: String, kind: String = "comment", reviewState: String? = null) =
