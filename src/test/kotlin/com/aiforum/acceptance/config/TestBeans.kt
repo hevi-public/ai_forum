@@ -51,6 +51,27 @@ class ScriptableLlmClient : LlmClient {
         data class Fail(val ex: () -> RuntimeException) : Behavior
         /** Block until the cancellation token is tripped, then report cancellation. */
         object HangUntilCancelled : Behavior
+        /**
+         * Block until the scenario RELEASES it, then answer [text] — the deterministic way to hold a phase
+         * of the async summon open, routing especially, which registers no draft and so cannot be reached
+         * by the cancel endpoint. A scenario arms this, acts, asserts, then releases; nothing depends on a
+         * sleep or a timing window.
+         *
+         * The gate is per-armed-behaviour, and that is load-bearing. A scenario that fails before its
+         * release step leaves a worker parked in here; teardown ABORTS that worker's own gate ([Gate.abort])
+         * rather than opening it, so the zombie throws out of the seam instead of resuming inside the NEXT
+         * scenario — which, when the gate was one shared flag, is exactly what happened: it completed a
+         * whole routing round and wrote a comment against the wiped DB (an FK violation in the log of a
+         * scenario that had nothing to do with it). A per-behaviour gate also means a later scenario arming
+         * its own hang cannot un-abort the previous one's.
+         */
+        data class HangUntilReleased(val text: String, val gate: Gate = Gate()) : Behavior
+
+    /** One armed hang's gate: released by the scenario, aborted by teardown. */
+    class Gate {
+        @Volatile var released = false
+        @Volatile var aborted = false
+    }
         /** Stream these chunks as individual TextDeltas (the aggregate is their concatenation), driving the
          *  AG-UI event path. Through the non-streaming generate() it degrades to the aggregate reply. */
         data class Stream(val deltas: List<String>, val leak: ReasoningLeak? = null) : Behavior
@@ -63,9 +84,28 @@ class ScriptableLlmClient : LlmClient {
      *  safe iteration and visibility without locking the readers. */
     val received = CopyOnWriteArrayList<LlmRequest>()
 
-    fun enqueue(behavior: Behavior) = script.addLast(behavior)
+    /** Every gate this scenario armed — so [release] opens them and [reset] aborts them, by identity. */
+    private val gates = CopyOnWriteArrayList<Behavior.Gate>()
+
+    fun enqueue(behavior: Behavior): Unit {
+        if (behavior is Behavior.HangUntilReleased) gates += behavior.gate
+        script.addLast(behavior)
+    }
+
+    /** Let every hang armed by this scenario finish and answer its scripted text. */
+    fun release() {
+        gates.forEach { it.released = true }
+    }
 
     fun reset() {
+        // ABORT, don't release. A worker parked in a hang outlives the scenario that armed it — routing
+        // holds no registered draft, so inFlight.reset() cannot reach it — and releasing it here would let
+        // it RESUME inside the next scenario: consuming that scenario's scripted behaviour, landing in its
+        // spy, and writing a comment against the just-wiped DB. Aborting makes it throw out of the seam
+        // instead, which summonAsync already handles as a routing failure. The gates are dropped rather
+        // than reused, so a hang armed next scenario starts from a clean one.
+        gates.forEach { it.aborted = true }
+        gates.clear()
         script.clear()
         received.clear()
     }
@@ -107,6 +147,14 @@ class ScriptableLlmClient : LlmClient {
         Behavior.HangUntilCancelled -> {
             while (!cancellation.isCancelled) Thread.sleep(10)
             throw com.aiforum.llm.LlmException.Cancelled()
+        }
+        is Behavior.HangUntilReleased -> {
+            val gate = behavior.gate
+            while (!gate.released && !gate.aborted && !cancellation.isCancelled) Thread.sleep(10)
+            // Aborted (teardown) and cancelled both leave the seam the same way a real killed call would;
+            // only an actual release answers.
+            if (gate.aborted || cancellation.isCancelled) throw com.aiforum.llm.LlmException.Cancelled()
+            LlmResponse(behavior.text)
         }
     }
 }

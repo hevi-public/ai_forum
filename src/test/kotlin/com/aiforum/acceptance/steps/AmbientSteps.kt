@@ -82,14 +82,13 @@ class AmbientSteps(
         world.lastBody = resp.body
         val afterThread = newestThreadId()
         if (afterThread != null && afterThread != beforeThread) {
-            // A new thread appeared — the "post" outcome. First wait (the room-draft poll) for routing to
-            // conclude, then settle the WHOLE thread page rather than just the ids awaitRoomDrafts happened
-            // to catch: a multi-persona dispatcher fan-out (S2's ambient trigger_modes variant) can settle
-            // unevenly fast, and a node that's already done and evicted from the in-flight "room" fragment
-            // before the first poll would otherwise go uncounted. awaitThreadSettled unions the persisted
-            // tree with whatever's still in flight, so every persona's outcome is captured regardless.
+            // A new thread appeared — the "post" outcome. First wait (the room poll) for the round to have
+            // started, then settle the WHOLE thread page rather than just the ids that poll happened to
+            // catch: a multi-persona dispatcher fan-out (S2's ambient trigger_modes variant) settles
+            // unevenly fast, and the first non-empty poll is only whoever landed first. awaitThreadSettled
+            // waits out every persona's outcome.
             world.threadId = afterThread
-            settle.awaitRoomDrafts(afterThread)
+            settle.awaitRoomReplies(afterThread)
             world.lastBody = settle.awaitThreadSettled(afterThread)
             return
         }

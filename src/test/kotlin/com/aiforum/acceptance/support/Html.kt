@@ -72,6 +72,27 @@ object Html {
 
     fun contains(html: String, needle: String): Boolean = html.contains(needle, ignoreCase = true)
 
+    /**
+     * Just the reply-node markup of a fragment: from the first `<article … data-reply-id=…>` up to the
+     * first out-of-band block (`hx-swap-oob`), which in a reply-list response is the rail's branch index.
+     *
+     * A page-wide [contains] over such a response is a probe that can stop failing: the branch index
+     * renders a SNIPPET of each posted body, so "the fragment carries this reply" is satisfied by the rail
+     * echoing it even if the reply list itself regressed to drafts-only. Scope the probe here instead.
+     */
+    fun replyNodes(html: String): String {
+        val first = Regex("<article\\b[^>]*data-reply-id=").find(html)?.range?.first ?: return ""
+        // Two terminators, so the same probe scopes either shape: a fragment response ends the list at its
+        // out-of-band block (the rail's branch index), a FULL PAGE ends it at the rail <aside>. Without the
+        // second, this widens to end-of-document on a page and re-admits the rail snippets it exists to
+        // exclude.
+        val end = listOfNotNull(
+            Regex("<[^>]*hx-swap-oob=").find(html)?.range?.first,
+            Regex("<aside\\b").find(html)?.range?.first,
+        ).filter { it > first }.minOrNull() ?: html.length
+        return html.substring(first, end)
+    }
+
     /** Count of elements carrying data-[name]="[value]". */
     fun countAttr(html: String, name: String, value: String): Int =
         Regex("$name=\"${Regex.escape(value)}\"").findAll(html).count()
