@@ -18,6 +18,8 @@ import com.aiforum.llm.CancellationToken
 import com.aiforum.llm.LlmClient
 import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.LlmResponse
+import com.aiforum.llm.LlmUsage
+import com.aiforum.llm.ToolCall
 import com.aiforum.shortcut.ShortcutClient
 import com.aiforum.shortcut.StoryCard
 import org.springframework.context.annotation.Bean
@@ -47,7 +49,17 @@ class ScriptableLlmClient : LlmClient {
     sealed interface Behavior {
         // `leak` mirrors what the real parsers (ReplySanitizer) would attach to a leaked completion, so a
         // scenario can drive the reasoning-leak badge through the real persist/render path. Null = clean.
-        data class Respond(val text: String, val leak: ReasoningLeak? = null) : Behavior
+        //
+        // `usage`/`toolCalls` (issue #15) mirror what ClaudeStreamParser + LlmResponseParser would attach
+        // to a real streaming turn — the fake stands in for the parsers at the seam, exactly as `leak`
+        // already does, so the persist/settle path is exercised for real. Both defaulted: a scenario that
+        // scripts neither drives the openai/opencode/stub SHAPE (no usage, no tools) at acceptance level.
+        data class Respond(
+            val text: String,
+            val leak: ReasoningLeak? = null,
+            val usage: LlmUsage? = null,
+            val toolCalls: List<ToolCall> = emptyList(),
+        ) : Behavior
         data class Fail(val ex: () -> RuntimeException) : Behavior
         /** Block until the cancellation token is tripped, then report cancellation. */
         object HangUntilCancelled : Behavior
@@ -74,7 +86,12 @@ class ScriptableLlmClient : LlmClient {
     }
         /** Stream these chunks as individual TextDeltas (the aggregate is their concatenation), driving the
          *  AG-UI event path. Through the non-streaming generate() it degrades to the aggregate reply. */
-        data class Stream(val deltas: List<String>, val leak: ReasoningLeak? = null) : Behavior
+        data class Stream(
+            val deltas: List<String>,
+            val leak: ReasoningLeak? = null,
+            val usage: LlmUsage? = null,
+            val toolCalls: List<ToolCall> = emptyList(),
+        ) : Behavior
     }
 
     private val script = ConcurrentLinkedDeque<Behavior>()
@@ -141,8 +158,8 @@ class ScriptableLlmClient : LlmClient {
 
     /** The behaviour → response mapping shared by both generate paths (no event emission here). */
     private fun produce(behavior: Behavior, cancellation: CancellationToken): LlmResponse = when (behavior) {
-        is Behavior.Respond -> LlmResponse(behavior.text, behavior.leak)
-        is Behavior.Stream -> LlmResponse(behavior.deltas.joinToString(""), behavior.leak)
+        is Behavior.Respond -> LlmResponse(behavior.text, behavior.leak, behavior.usage, behavior.toolCalls)
+        is Behavior.Stream -> LlmResponse(behavior.deltas.joinToString(""), behavior.leak, behavior.usage, behavior.toolCalls)
         is Behavior.Fail -> throw behavior.ex()
         Behavior.HangUntilCancelled -> {
             while (!cancellation.isCancelled) Thread.sleep(10)

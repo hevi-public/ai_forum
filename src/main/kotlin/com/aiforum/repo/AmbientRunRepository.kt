@@ -7,11 +7,15 @@ import java.sql.ResultSet
 import java.time.Clock
 
 /**
- * The append-only run log for the ambient loop (plan_docs/ambient-slice-1.md), mirroring
- * [RoutingEventRepository]'s shape: [record] lands one row per tick, [recent] feeds the /admin/ambient
- * drill-down, and [count] backs both the /admin stat tile AND the round-robin author pick (index =
- * count % roster size). The injected [Clock] stamps `tick_time` (no `Instant.now()`), so a fixed test
- * clock keeps timestamps deterministic — the same seam discipline as the rest of persistence.
+ * The run log for the ambient loop (plan_docs/ambient-slice-1.md), mirroring [RoutingEventRepository]'s
+ * shape: [record] lands one row per tick, [recent] feeds the /admin/ambient drill-down, and [count]
+ * backs both the /admin stat tile AND the round-robin author pick (index = count % roster size). The
+ * injected [Clock] stamps `tick_time` (no `Instant.now()`), so a fixed test clock keeps timestamps
+ * deterministic — the same seam discipline as the rest of persistence.
+ *
+ * "Append-only" now has one exception, [addCost] (issue #15): a run's SPEND is not knowable when the row
+ * is written, because the generations it dispatched settle afterwards on a worker. So the row is
+ * inserted unpriced and updated once the replies come back. Nothing else about a run is ever rewritten.
  */
 @Repository
 class AmbientRunRepository(
@@ -37,10 +41,20 @@ class AmbientRunRepository(
     )
 
     /**
-     * Append one tick outcome. [outcome] is the wire string the drill-down renders verbatim ('posted' /
-     * 'no-op' / 'failed'); [action] is which action it dispatched ('post' | 'comment', V22). The
-     * article/persona/thread fields are populated only on a 'posted' run, [detail] only on a skip or
-     * failure. `cost_usd` stays NULL until per-run cost capture lands.
+     * Append one tick outcome and RETURN ITS ID. [outcome] is the wire string the drill-down renders
+     * verbatim ('posted' / 'no-op' / 'failed'); [action] is which action it dispatched ('post' |
+     * 'comment', V22). The article/persona/thread fields are populated only on a 'posted' run, [detail]
+     * only on a skip or failure.
+     *
+     * `cost_usd` is still NULL at insert — the spend isn't known yet, because the generations this run
+     * dispatches settle asynchronously afterwards. That is what the returned id is FOR (issue #15): the
+     * tick holds it and the summon's post-settle hook calls [addCost] with what the replies actually
+     * cost. V21's header said cost awaited an LlmClient contract change; that change has landed, and
+     * this is the slice that spends it.
+     *
+     * The id comes back via `INSERT … RETURNING id` — one statement, one round trip, and correct under a
+     * connection pool. `last_insert_rowid()` would NOT be: it is per-connection state, so a second
+     * statement can land on a different pooled connection and read someone else's insert.
      */
     fun record(
         source: TickSource,
@@ -52,13 +66,26 @@ class AmbientRunRepository(
         personaId: String? = null,
         threadId: String? = null,
         costUsd: Double? = null,
-    ) {
-        jdbc.update(
+    ): Long =
+        jdbc.queryForObject(
             "INSERT INTO ambient_run(tick_time, source, outcome, action, detail, article_title, article_url, persona_id, thread_id, cost_usd) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            Long::class.java,
             clock.instant().toString(), source.name.lowercase(), outcome, action, detail,
             articleTitle, articleUrl, personaId, threadId, costUsd,
-        )
+        ) ?: 0L
+
+    /**
+     * Add [deltaUsd] to run [runId]'s cost, treating NULL as the starting point rather than as zero-so-far
+     * (`COALESCE`), so the FIRST addition turns an unknown into a known figure and later ones accumulate.
+     *
+     * Additive rather than set-once because one run's spend arrives in instalments: the ambient comment
+     * action pays for its own fan-out, then again for the growth round its settle triggers, and those are
+     * two separate moments on the worker (see AmbientTickService.recordRunCost). A caller with nothing to
+     * add must not call this at all — writing 0 would turn "we don't know" into "it was free".
+     */
+    fun addCost(runId: Long, deltaUsd: Double) {
+        jdbc.update("UPDATE ambient_run SET cost_usd = COALESCE(cost_usd, 0) + ? WHERE id = ?", deltaUsd, runId)
     }
 
     /** Total recorded ticks — the /admin stat tile figure and the round-robin key (count BEFORE this run). */

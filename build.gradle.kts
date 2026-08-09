@@ -212,10 +212,14 @@ tasks.register<Test>("acceptance") {
         val executed = report.get().asFile.takeIf { it.isFile }?.readText()
             ?.let { Regex("\"type\"\\s*:\\s*\"scenario\"").findAll(it).count() } ?: 0
         println("acceptance: $executed Cucumber scenarios executed")
-        if (executed < 1 && !discoveryMode)
+        // Ratchet, not just a zero-check: ONLY catches "some scenarios silently stopped running" if it
+        // tracks the real count. Bump to the actual executed count whenever a scenario is added (last
+        // bumped 285 -> 290 by issue #15's five generation_usage.feature scenarios).
+        val floor = 290
+        if (executed < floor && !discoveryMode)
             throw GradleException(
-                "acceptance executed 0 Cucumber scenarios (green would lie) — check cucumber.filter.tags " +
-                "in src/test/resources/junit-platform.properties and feature discovery.")
+                "acceptance executed only $executed of a floor of $floor Cucumber scenarios (green would lie) — " +
+                "check cucumber.filter.tags in src/test/resources/junit-platform.properties and feature discovery.")
     }
 }
 

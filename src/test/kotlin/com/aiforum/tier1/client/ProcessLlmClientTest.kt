@@ -91,6 +91,23 @@ class ProcessLlmClientTest {
         argv.indexOf("--system-prompt").takeIf { it >= 0 }?.let { argv.getOrNull(it + 1) }
 
     @Test
+    fun `the non-streaming path carries usage out but never a tool trace — the pinned asymmetry`() {
+        // Issue #15's one deliberate difference between the two generate paths. Cost comes from the same
+        // LlmResponseParser both paths use, so it is identical here. Tool calls cannot be: the plain-json
+        // envelope has no content array to collect them from, so an EMPTY list is the structurally correct
+        // answer rather than a gap. If a future change makes this list non-empty, that is a real design
+        // change, and this is the test that should say so.
+        val envelope = """{"is_error":false,"subtype":"success","result":"ok","stop_reason":"end_turn","duration_ms":1500,"total_cost_usd":0.09}"""
+        val client = ShellClient("printf '%s' '$envelope'")
+
+        val resp = client.generate(request(Duration.ofSeconds(10)), CancellationToken())
+
+        assertEquals(0.09, resp.usage!!.costUsd)
+        assertEquals(1500L, resp.usage!!.durationMs)
+        assertTrue(resp.toolCalls.isEmpty(), "the plain-json envelope structurally carries no tool calls")
+    }
+
+    @Test
     fun `a persona's pinned model is passed as --model and wins over the configured default`() {
         val client = CapturingClient(defaultModel = "sonnet")
         client.generate(request(Duration.ofSeconds(10), personaModel = "opus"), CancellationToken())

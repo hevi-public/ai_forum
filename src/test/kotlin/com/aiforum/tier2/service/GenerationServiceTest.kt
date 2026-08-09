@@ -4,13 +4,17 @@ import com.aiforum.domain.Comment
 import com.aiforum.dto.FailureCategory
 import com.aiforum.dto.GenerationState
 import com.aiforum.dto.ReasoningLeak
+import com.aiforum.dto.ReplyView
 import com.aiforum.dto.ScopeMode
 import com.aiforum.llm.CancellationToken
 import com.aiforum.llm.LlmClient
 import com.aiforum.llm.LlmException
 import com.aiforum.llm.LlmRequest
 import com.aiforum.llm.LlmResponse
+import com.aiforum.llm.LlmUsage
+import com.aiforum.llm.ToolCall
 import com.aiforum.repo.CommentRepository
+import com.aiforum.repo.GenerationToolCallRepository
 import com.aiforum.repo.PersonaRepository
 import com.aiforum.repo.RelationStanceRepository
 import com.aiforum.repo.Revision
@@ -503,5 +507,145 @@ class GenerationServiceTest {
         val sol = comments.saved.singleOrNull { it.authorId == "Sol" }
         assertEquals("Sol's take", sol?.body, "the persona the dispatcher picked drafted and settled")
         assertFalse(service.isSummoning("t1"), "the summon clears once routing + draft registration finish")
+    }
+
+    // --- issue #15: the settle writes the trace and carries the cost out -----------------------------
+
+    /** One captured trace write, so the tier can assert WHAT was recorded and against WHICH node. */
+    private data class TraceWrite(val runId: String, val commentId: String?, val calls: List<ToolCall>)
+
+    /** The audit repository in memory; [throws] models an INSERT that fails at exactly the wrong moment. */
+    private class RecordingTraces(private val throws: Boolean = false) :
+        GenerationToolCallRepository(JdbcTemplate(), Clock.systemUTC()) {
+        val writes = mutableListOf<TraceWrite>()
+        override fun record(runId: String, commentId: String?, toolCalls: List<ToolCall>) {
+            if (throws) throw IllegalStateException("simulated trace write failure")
+            writes += TraceWrite(runId, commentId, toolCalls)
+        }
+    }
+
+    /** A seam that reports a priced turn with a tool trace — what the real streaming CLI now returns. */
+    private fun toolingLlm(costUsd: Double? = 0.12, vararg calls: ToolCall) = object : LlmClient {
+        override fun generate(request: LlmRequest, cancellation: CancellationToken) =
+            LlmResponse("Indexes help here", null, costUsd?.let { LlmUsage(costUsd = it) }, calls.toList())
+    }
+
+    private fun call(id: String, name: String) = ToolCall(id, name)
+
+    @Test
+    fun `a settled reply records its trace under the generation id and links the posted comment`() {
+        val traces = RecordingTraces()
+        val service = GenerationService(
+            toolingLlm(calls = arrayOf(call("t1", "Read"), call("t2", "WebFetch"))),
+            RecordingComments(), personas, toolCalls = traces,
+        )
+
+        val view = service.generate("t1", null, listOf("sol"), "q?", ScopeMode.WHOLE_THREAD).single()
+
+        val write = traces.writes.single()
+        assertEquals(view.id, write.runId, "the run id IS the settled node's id")
+        assertEquals(view.id, write.commentId, "a POSTED reply links its trace")
+        assertEquals(listOf("Read", "WebFetch"), write.calls.map { it.name }, "order is preserved")
+    }
+
+    @Test
+    fun `the settled view carries the generation's cost out to the caller`() {
+        val service = GenerationService(toolingLlm(costUsd = 0.12), RecordingComments(), personas)
+
+        val view = service.generate("t1", null, listOf("sol"), "q?", ScopeMode.WHOLE_THREAD).single()
+
+        assertEquals(0.12, view.costUsd)
+    }
+
+    @Test
+    fun `a turn the provider did not price leaves the view's cost null, never zero`() {
+        val service = GenerationService(toolingLlm(costUsd = null), RecordingComments(), personas)
+
+        val view = service.generate("t1", null, listOf("sol"), "q?", ScopeMode.WHOLE_THREAD).single()
+
+        assertNull(view.costUsd, "unknown must stay unknown all the way to the run row")
+    }
+
+    @Test
+    fun `a failed settle records no trace at all`() {
+        // The documented limitation: tool calls a turn made before it timed out are lost, because the only
+        // place they exist is inside the parser owned by the seam that threw. Smuggling parser state out
+        // through the exception would put audit plumbing into the failure taxonomy.
+        val failing = object : LlmClient {
+            override fun generate(request: LlmRequest, cancellation: CancellationToken): LlmResponse =
+                throw LlmException.Timeout()
+        }
+        val traces = RecordingTraces()
+        val service = GenerationService(failing, RecordingComments(), personas, toolCalls = traces)
+
+        val view = service.generate("t1", null, listOf("sol"), "q?", ScopeMode.WHOLE_THREAD).single()
+
+        assertEquals(GenerationState.FAILED, view.state)
+        assertTrue(traces.writes.isEmpty())
+        assertNull(view.costUsd)
+    }
+
+    @Test
+    fun `a couldn't-save settle still records the trace, with a NULL comment id`() {
+        // The generation SUCCEEDED and the model really did fetch things; only the write failed. The trace
+        // is exactly what explains a reply the owner can see the draft of but has no row for — so it is
+        // recorded, unlinked, rather than dropped along with the failed insert.
+        val traces = RecordingTraces()
+        val service = GenerationService(
+            toolingLlm(calls = arrayOf(call("t1", "Read"))),
+            FailingOnceComments(), personas, toolCalls = traces,
+        )
+
+        val view = service.generate("t1", null, listOf("sol"), "q?", ScopeMode.WHOLE_THREAD).single()
+
+        assertEquals(FailureCategory.COULDNT_SAVE, view.failureCategory)
+        val write = traces.writes.single()
+        assertEquals(view.id, write.runId)
+        assertNull(write.commentId, "an unsaveable reply's trace is kept unlinked, not thrown away")
+    }
+
+    @Test
+    fun `a trace write that throws never fails the settle`() {
+        // The reply is the product; the audit row is commentary on it. Losing a persona's answer because
+        // an accounting INSERT tripped would be the tail wagging the dog.
+        val comments = RecordingComments()
+        val service = GenerationService(
+            toolingLlm(calls = arrayOf(call("t1", "Read"))),
+            comments, personas, toolCalls = RecordingTraces(throws = true),
+        )
+
+        val view = service.generate("t1", null, listOf("sol"), "q?", ScopeMode.WHOLE_THREAD).single()
+
+        assertEquals(GenerationState.POSTED, view.state)
+        assertEquals("Indexes help here", view.body)
+        assertEquals(1, comments.saved.size, "the reply landed despite the trace failure")
+    }
+
+    @Test
+    fun `a turn with no tool calls writes nothing — empty is an account, not a row`() {
+        val traces = RecordingTraces()
+        val service = GenerationService(okLlm, RecordingComments(), personas, toolCalls = traces)
+
+        service.generate("t1", null, listOf("sol"), "q?", ScopeMode.WHOLE_THREAD)
+
+        assertTrue(traces.writes.isEmpty(), "no INSERT at all for a turn that used no tools")
+    }
+
+    @Test
+    fun `summonAsync hands the post-settle hook the settled views, cost included`() {
+        val settled = CountDownLatch(1)
+        val handed = java.util.concurrent.CopyOnWriteArrayList<ReplyView>()
+        val hookRan = CountDownLatch(1)
+        val service = GenerationService(
+            toolingLlm(costUsd = 0.07),
+            RecordingComments { if (it.state == GenerationState.POSTED) settled.countDown() },
+            personas, InFlightGenerations(),
+        )
+
+        service.summonAsync("t1", null, listOf("sol"), "", onSettled = { handed += it; hookRan.countDown() })
+
+        assertTrue(settled.await(5, TimeUnit.SECONDS), "the reply should settle on the worker")
+        assertTrue(hookRan.await(5, TimeUnit.SECONDS), "the post-settle hook runs after the settle")
+        assertEquals(listOf(0.07), handed.map { it.costUsd }, "the hook is handed priced views, not bare ids")
     }
 }

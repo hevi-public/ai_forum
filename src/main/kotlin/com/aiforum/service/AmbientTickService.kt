@@ -4,6 +4,7 @@ import com.aiforum.ambient.AmbientGate
 import com.aiforum.ambient.ArticleSource
 import com.aiforum.ambient.TickSource
 import com.aiforum.domain.budget.DepthBudget
+import com.aiforum.dto.ReplyView
 import com.aiforum.dto.ScopeMode
 import com.aiforum.persona.Dials
 import com.aiforum.repo.AmbientRunRepository
@@ -141,6 +142,20 @@ class AmbientTickService(
         val threadId = UUID.randomUUID().toString()
         // OP body is the article summary + its link (no LLM call of its own). authorId attributes the thread.
         threads.insert(threadId, article.title, "${article.summary}\n\n${article.url}", authorId = persona.id)
+        // The run row is written BEFORE the dispatch (issue #15), not after. The summon's post-settle hook
+        // needs a row to price, and it runs on a worker: recording afterwards is a race the tick loses
+        // whenever a fake — or a fast model — settles before this thread gets back here. Ordering it this
+        // way removes the race rather than papering it with a retry: `record` is a synchronous,
+        // autocommitted INSERT on THIS thread, so the row is committed before summonAsync is even called,
+        // and the hook cannot run before the dispatch that schedules it.
+        // Accepted pathological case: if the executor REJECTS the dispatch below, this row stands as a
+        // 'posted' run that produced nothing and the catch records a second, 'failed' one. Two rows
+        // describing one tick is a better failure than a settled reply whose cost had nowhere to go.
+        val runId = ambientRuns.record(
+            source, OUTCOME_POSTED, action = ACTION_POST,
+            articleTitle = article.title, articleUrl = article.url,
+            personaId = persona.id, threadId = threadId,
+        )
         // Summon the room exactly as ThreadController.newThread does (async "Whole Topic + Anyone").
         generation.summonAsync(
             threadId = threadId,
@@ -149,11 +164,10 @@ class AmbientTickService(
             text = "",
             scope = ScopeMode.WHOLE_THREAD,
             routingScope = ScopeMode.WHOLE_THREAD,
-        )
-        ambientRuns.record(
-            source, OUTCOME_POSTED, action = ACTION_POST,
-            articleTitle = article.title, articleUrl = article.url,
-            personaId = persona.id, threadId = threadId,
+            // The post action still grows nothing on settle (a fresh article thread's first round is born
+            // at budget 0 and must stall without owner engagement — depth_budget's ambient-stall scenario).
+            // The hook exists here ONLY to price the run.
+            onSettled = { settled -> recordRunCost(runId, settled) },
         )
         log.atInfo().setMessage("ambient tick posted \"{}\" authored by {}")
             .addArgument(article.title).addArgument(persona.id)
@@ -185,6 +199,11 @@ class AmbientTickService(
         // that the owner deliberately left un-grown never has its fuel spent by an ambient tick. Safe on
         // failure: autoGrow only grows POSTED leaves with budget > 0, so a FAILED comment (or a growth
         // error, swallowed by the hook's own catch) leaves the thread exactly as the dispatch made it.
+        // Recorded BEFORE the dispatch, for the reason spelled out in [tryPost].
+        val runId = ambientRuns.record(
+            source, OUTCOME_POSTED, action = ACTION_COMMENT,
+            personaId = pick.persona.id, threadId = pick.threadId,
+        )
         generation.summonAsync(
             threadId = pick.threadId,
             parentId = null,
@@ -193,19 +212,38 @@ class AmbientTickService(
             scope = ScopeMode.WHOLE_THREAD,
             routingScope = ScopeMode.WHOLE_THREAD,
             initialBudget = DepthBudget.AMBIENT_GRANT,
-            onSettled = { settledIds ->
-                settledIds.forEach { generation.autoGrow(pick.threadId, withinSubtreeOf = it) }
+            onSettled = { settled ->
+                // TWO-PHASE on purpose (issue #15). The comment's own spend is committed FIRST, before
+                // growth is attempted, so a growth round that throws still leaves the run priced for what
+                // it definitely cost. Charging once at the end would lose the whole figure to the one
+                // failure mode the hook's own catch already tolerates. Growth semantics are untouched:
+                // still one branch-scoped autoGrow per settled node, so an owner-granted branch elsewhere
+                // in the thread is never drained by an ambient settle.
+                recordRunCost(runId, settled)
+                val grown = settled.flatMap { generation.autoGrow(pick.threadId, withinSubtreeOf = it.id) }
+                recordRunCost(runId, grown)
             },
-        )
-        ambientRuns.record(
-            source, OUTCOME_POSTED, action = ACTION_COMMENT,
-            personaId = pick.persona.id, threadId = pick.threadId,
         )
         log.atInfo().setMessage("ambient tick commented as {} in thread {}")
             .addArgument(pick.persona.id).addArgument(pick.threadId)
             .addKeyValue("event", EV_COMMENTED).addKeyValue("source", source.name.lowercase())
             .addKeyValue("persona", pick.persona.id).addKeyValue("thread", pick.threadId).log()
         return true
+    }
+
+    /**
+     * Add what [replies] cost to run [runId] (issue #15) — the slice that finally puts a figure in
+     * `ambient_run.cost_usd`, NULL since V21.
+     *
+     * Unpriced views write NOTHING. That is the whole rule: a provider that reports no cost (openai,
+     * opencode, the stub, an older CLI) leaves the column NULL, and NULL means UNKNOWN. Summing an empty
+     * list to 0.0 and writing it would turn "we have no idea what this cost" into "this tick was free",
+     * which is the one wrong answer an operator watching spend must never be given. A no-op or failed
+     * tick reaches here not at all, so those rows stay unpriced too — correctly: their spend, if any, is
+     * unattributable to any settled node.
+     */
+    private fun recordRunCost(runId: Long, replies: List<ReplyView>) {
+        replies.mapNotNull { it.costUsd }.takeIf { it.isNotEmpty() }?.let { ambientRuns.addCost(runId, it.sum()) }
     }
 
     /** One eligible (thread, persona) pairing with its precomputed relevance, for the gate to rank. */
