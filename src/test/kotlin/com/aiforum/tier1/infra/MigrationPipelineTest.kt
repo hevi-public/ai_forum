@@ -151,7 +151,16 @@ class MigrationPipelineTest {
                     assertEquals(0, rs.getInt("n"), "V29 seeds no preference row — absence is the default view")
                 }
 
-                // flyway_schema_history records the full V1..V29 chain as applied (V20 thread.author_id +
+                // V30 is the same new-table shape, and reads the same way on an upgraded forum: empty. It
+                // is the tool-call trace (issue #15), so "empty" is also the honest account of every turn
+                // that ran BEFORE this migration existed — there is nothing to backfill, because the data
+                // was never captured. A seeded or inferred row here would be inventing history.
+                st.executeQuery("SELECT COUNT(*) AS n FROM generation_tool_call").use { rs ->
+                    rs.next()
+                    assertEquals(0, rs.getInt("n"), "V30 seeds nothing — pre-#15 turns genuinely have no trace")
+                }
+
+                // flyway_schema_history records the full V1..V30 chain as applied (V20 thread.author_id +
                 // V21 ambient_run landed with the ambient loop; V22 added ambient_run.action for S2's
                 // comment action; V23 added the article_seen dedupe registry for S5's feed source,
                 // plan_docs/ambient-slice-5.md; V24 added persona_stance, S3's qualitative relation graph,
@@ -170,12 +179,17 @@ class MigrationPipelineTest {
                 // the per-member consolidation watermark, plan_docs/persona-memory.md; V29 added owner_pref
                 // — S6's one-global-row persisted front-page view, seedless so that absence is the default
                 // — plus the two partial `state='POSTED'` comment indexes the feed's reads want, neither of
-                // which V17's (thread_id, depth, created_at) can serve, plan_docs/ambient-slice-6.md).
+                // which V17's (thread_id, depth, created_at) can serve, plan_docs/ambient-slice-6.md; V30
+                // added generation_tool_call — issue #15's audit trail for the tools a generation reached
+                // for, the sibling of the stance/interest/memory audit tables, deliberately FK-free on
+                // run_id so an UNSAVEABLE turn's trace survives with a NULL comment_id; a turn that died
+                // at the LLM seam records nothing at all, which V30's header now states rather than
+                // overclaims).
                 // Bump this with every migration — it is the check that a new migration actually RUNS
                 // against an old database rather than only a fresh one.
                 st.executeQuery("SELECT MAX(CAST(version AS INTEGER)) AS v FROM flyway_schema_history").use { rs ->
                     rs.next()
-                    assertEquals(29, rs.getInt("v"), "the latest migration (V29) should be recorded as applied")
+                    assertEquals(30, rs.getInt("v"), "the latest migration (V30) should be recorded as applied")
                 }
             }
         }

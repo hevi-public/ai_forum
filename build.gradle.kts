@@ -214,8 +214,10 @@ tasks.register<Test>("acceptance") {
         println("acceptance: $executed Cucumber scenarios executed")
         // Ratchet, not just a zero-check: ONLY catches "some scenarios silently stopped running" if it
         // tracks the real count. Bump to the actual executed count whenever a scenario is added (last
-        // bumped 286 by issue #18's "PR diff renders syntax-highlighted" scenario).
-        val floor = 286
+        // bumped 285 -> 286 by issue #18's diff scenario, -> 291 with issue #15's five
+        // generation_usage.feature scenarios on top — the two landed on parallel branches, so the
+        // merged floor is the sum of both additions, verified against this tree's own green run).
+        val floor = 291
         if (executed < floor && !discoveryMode)
             throw GradleException(
                 "acceptance executed only $executed of a floor of $floor Cucumber scenarios (green would lie) — " +

@@ -4,6 +4,7 @@ import com.aiforum.ambient.AmbientGate
 import com.aiforum.ambient.ArticleSource
 import com.aiforum.ambient.TickSource
 import com.aiforum.domain.budget.DepthBudget
+import com.aiforum.dto.ReplyView
 import com.aiforum.dto.ScopeMode
 import com.aiforum.persona.Dials
 import com.aiforum.repo.AmbientRunRepository
@@ -141,6 +142,20 @@ class AmbientTickService(
         val threadId = UUID.randomUUID().toString()
         // OP body is the article summary + its link (no LLM call of its own). authorId attributes the thread.
         threads.insert(threadId, article.title, "${article.summary}\n\n${article.url}", authorId = persona.id)
+        // The run row is written BEFORE the dispatch (issue #15), not after. The summon's post-settle hook
+        // needs a row to price, and it runs on a worker: recording afterwards is a race the tick loses
+        // whenever a fake — or a fast model — settles before this thread gets back here. Ordering it this
+        // way removes the race rather than papering it with a retry: `record` is a synchronous,
+        // autocommitted INSERT on THIS thread, so the row is committed before summonAsync is even called,
+        // and the hook cannot run before the dispatch that schedules it.
+        // Accepted pathological case: if the executor REJECTS the dispatch below, this row stands as a
+        // 'posted' run that produced nothing and the catch records a second, 'failed' one. Two rows
+        // describing one tick is a better failure than a settled reply whose cost had nowhere to go.
+        val runId = ambientRuns.record(
+            source, OUTCOME_POSTED, action = ACTION_POST,
+            articleTitle = article.title, articleUrl = article.url,
+            personaId = persona.id, threadId = threadId,
+        )
         // Summon the room exactly as ThreadController.newThread does (async "Whole Topic + Anyone").
         generation.summonAsync(
             threadId = threadId,
@@ -149,11 +164,10 @@ class AmbientTickService(
             text = "",
             scope = ScopeMode.WHOLE_THREAD,
             routingScope = ScopeMode.WHOLE_THREAD,
-        )
-        ambientRuns.record(
-            source, OUTCOME_POSTED, action = ACTION_POST,
-            articleTitle = article.title, articleUrl = article.url,
-            personaId = persona.id, threadId = threadId,
+            // The post action still grows nothing on settle (a fresh article thread's first round is born
+            // at budget 0 and must stall without owner engagement — depth_budget's ambient-stall scenario).
+            // The hook exists here ONLY to price the run.
+            onSettled = { settled -> recordRunCost(runId, settled) },
         )
         log.atInfo().setMessage("ambient tick posted \"{}\" authored by {}")
             .addArgument(article.title).addArgument(persona.id)
@@ -185,6 +199,11 @@ class AmbientTickService(
         // that the owner deliberately left un-grown never has its fuel spent by an ambient tick. Safe on
         // failure: autoGrow only grows POSTED leaves with budget > 0, so a FAILED comment (or a growth
         // error, swallowed by the hook's own catch) leaves the thread exactly as the dispatch made it.
+        // Recorded BEFORE the dispatch, for the reason spelled out in [tryPost].
+        val runId = ambientRuns.record(
+            source, OUTCOME_POSTED, action = ACTION_COMMENT,
+            personaId = pick.persona.id, threadId = pick.threadId,
+        )
         generation.summonAsync(
             threadId = pick.threadId,
             parentId = null,
@@ -193,19 +212,83 @@ class AmbientTickService(
             scope = ScopeMode.WHOLE_THREAD,
             routingScope = ScopeMode.WHOLE_THREAD,
             initialBudget = DepthBudget.AMBIENT_GRANT,
-            onSettled = { settledIds ->
-                settledIds.forEach { generation.autoGrow(pick.threadId, withinSubtreeOf = it) }
+            onSettled = { settled ->
+                // TWO-PHASE on purpose (issue #15). The comment's own spend is committed FIRST, before
+                // growth is attempted, so a growth round that throws still leaves the run priced for what
+                // it definitely cost. Charging once at the end would lose the whole figure to the one
+                // failure mode the hook's own catch already tolerates. Growth semantics are untouched:
+                // still one branch-scoped autoGrow per settled node, so an owner-granted branch elsewhere
+                // in the thread is never drained by an ambient settle.
+                //
+                // Each node's round is ISOLATED, and that is the second half of the same argument. A bare
+                // flatMap lets the first node to throw take phase two with it, so every OTHER node's
+                // growth replies — already generated, already persisted, already paid for — go unpriced.
+                // The per-node catch narrows the loss window to exactly the throwing node's own
+                // in-flight round: the replies it had not finished producing when it died, which were
+                // never persisted and so were never spend anyone can attribute. Everything a sibling
+                // branch actually grew is still charged below. (The hook-level catch in
+                // GenerationService.summonAsync still guards whatever else in here might throw; this
+                // catch exists to keep ONE node's failure from being ALL nodes' failure. Exception,
+                // never Throwable: an Error propagates, matching this file's other catches.)
+                recordRunCost(runId, settled)
+                val grown = settled.flatMap { node ->
+                    try {
+                        generation.autoGrow(pick.threadId, withinSubtreeOf = node.id)
+                    } catch (e: Exception) {
+                        log.atWarn().setMessage("ambient growth round failed for node {}: {}")
+                            .addArgument(node.id).addArgument(e.message)
+                            .addKeyValue("event", EV_GROWTH_FAILED).addKeyValue("node", node.id)
+                            .addKeyValue("thread", pick.threadId)
+                            .addKeyValue("reason", e.message ?: e.javaClass.simpleName).setCause(e).log()
+                        emptyList()
+                    }
+                }
+                recordRunCost(runId, grown)
             },
-        )
-        ambientRuns.record(
-            source, OUTCOME_POSTED, action = ACTION_COMMENT,
-            personaId = pick.persona.id, threadId = pick.threadId,
         )
         log.atInfo().setMessage("ambient tick commented as {} in thread {}")
             .addArgument(pick.persona.id).addArgument(pick.threadId)
             .addKeyValue("event", EV_COMMENTED).addKeyValue("source", source.name.lowercase())
             .addKeyValue("persona", pick.persona.id).addKeyValue("thread", pick.threadId).log()
         return true
+    }
+
+    /**
+     * Add what [replies] cost to run [runId] (issue #15) — the slice that finally puts a figure in
+     * `ambient_run.cost_usd`, NULL since V21.
+     *
+     * Unpriced views write NOTHING. That is the whole rule: a provider that reports no cost (openai,
+     * opencode, the stub, an older CLI) leaves the column NULL, and NULL means UNKNOWN. Summing an empty
+     * list to 0.0 and writing it would turn "we have no idea what this cost" into "this tick was free",
+     * which is the one wrong answer an operator watching spend must never be given. A no-op or failed
+     * tick reaches here not at all, so those rows stay unpriced too — correctly: their spend, if any, is
+     * unattributable to any settled node.
+     *
+     * KNOWN EXCLUSION, and it is a real one: the 'Anyone' dispatcher's ROUTING turn is dispatched by the
+     * post action and is never charged here. [PersonaRouter.pick] returns only the chosen personas — it
+     * discards the response, and with it the usage — and it settles no node, so nothing carrying that
+     * spend ever reaches this function. A post run's figure is therefore its REPLIES' cost, slightly under
+     * the tick's true spend by one small routing call. Issue #16's surfaces document it where the number
+     * is read; it is named here because this is where the number is summed.
+     *
+     * ACCOUNTING NEVER ABORTS THE PRODUCT. The write is wrapped for the same reason
+     * [GenerationService.recordTrace] is: this runs inside the post-settle hook, in FRONT of the growth
+     * round, and a locked `ambient_run` row must not be able to cancel a round that pre-#15 accounting
+     * could not touch at all. It WARNs rather than debugs — a run that silently stops being priced is
+     * exactly the drift an operator watching spend needs told about (see the bdd-tiered-testing skill on
+     * log levels as contract).
+     */
+    private fun recordRunCost(runId: Long, replies: List<ReplyView>) {
+        val priced = replies.mapNotNull { it.costUsd }
+        if (priced.isEmpty()) return
+        try {
+            ambientRuns.addCost(runId, priced.sum())
+        } catch (e: Exception) {
+            log.atWarn().setMessage("could not price ambient run {}: {}")
+                .addArgument(runId).addArgument(e.message)
+                .addKeyValue("event", EV_COST_FAILED).addKeyValue("run", runId)
+                .addKeyValue("reason", e.message ?: e.javaClass.simpleName).setCause(e).log()
+        }
     }
 
     /** One eligible (thread, persona) pairing with its precomputed relevance, for the gate to rank. */
@@ -240,5 +323,10 @@ class AmbientTickService(
         const val EV_COMMENTED = "ambient.commented"
         const val EV_NOOP = "ambient.noop"
         const val EV_FAILED = "ambient.failed"
+
+        // Best-effort faults inside the post-settle hook (issue #15). Both are WARN, not ERROR: the tick
+        // itself succeeded and the room is unaffected — what is lost is a figure and a follow-up round.
+        const val EV_COST_FAILED = "ambient.cost.failed"
+        const val EV_GROWTH_FAILED = "ambient.growth.failed"
     }
 }

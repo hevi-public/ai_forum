@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.time.Clock
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.FutureTask
@@ -86,6 +87,10 @@ open class ProcessLlmClient(
     // construct this directly keep compiling untouched.
     private val jail: JailProperties = JailProperties(),
     private val jailRuntime: JailRuntime? = null,
+    // Stamps the tool-call trace's started_at/ended_at (issue #15) — the seam discipline everywhere else
+    // in the app, so a Tier-1 test can pin the timestamps instead of asserting "some instant". Trailing
+    // default so the ~30 direct constructions keep compiling; Spring injects the app's Clock bean.
+    private val clock: Clock = Clock.systemUTC(),
 ) : LlmClient {
 
     // Explicit class (not javaClass) so the logger name is stable across the test subclasses that override
@@ -170,6 +175,13 @@ open class ProcessLlmClient(
      * terminal `result` line still goes through [LlmResponseParser], so the returned (and persisted)
      * [LlmResponse] is identical to the non-streaming path — the deltas are purely for liveness. Reuses the
      * SAME runaway-proof [awaitProcess] loop, so timeout/cancel/exit-code behaviour can't drift between modes.
+     *
+     * **The parity invariant, restated for issue #15.** The two paths are identical in `text`, in
+     * `reasoningLeak` AND in `usage` — all three come out of the same [LlmResponseParser] call on the same
+     * terminal envelope, which is exactly why cost lives there and not here. `toolCalls` is the ONE
+     * asymmetry, and it is structural rather than an omission: the plain-json envelope carries no content
+     * array, so the non-streaming path has no tool blocks to collect and returns an empty list. Saying so
+     * plainly is the point — an "asymmetry" nobody wrote down becomes a bug report later.
      */
     override fun generate(request: LlmRequest, cancellation: CancellationToken, sink: AguiEventSink): LlmResponse {
         sink.emit(AguiEvent.RunStarted(request.runId))
@@ -180,7 +192,7 @@ open class ProcessLlmClient(
             )
             writeStdin(process, request)
 
-            val parser = ClaudeStreamParser(request.runId)
+            val parser = ClaudeStreamParser(request.runId, clock)
             // Reading lines IS the drain here — the callback runs per line as it arrives, so deltas reach
             // the sink while the model is still typing.
             val stdout = drainLines(process.inputStream) { line -> parser.onLine(line).forEach(sink::emit) }
@@ -197,7 +209,9 @@ open class ProcessLlmClient(
                 Duration.ofSeconds(rateLimitRetryAfterSeconds),
             )
             sink.emit(AguiEvent.RunFinished(request.runId))
-            return response
+            // The trace the parser collected alongside the events (issue #15). Read AFTER the drain
+            // barrier above, so a tool_result that arrived on the stream's last line is in it.
+            return response.copy(toolCalls = parser.toolCalls())
         } catch (e: Throwable) {
             sink.emit(AguiEvent.RunError(request.runId, e.message ?: "generation failed"))
             throw e

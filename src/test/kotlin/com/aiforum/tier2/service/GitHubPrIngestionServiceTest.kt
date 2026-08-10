@@ -95,7 +95,8 @@ class GitHubPrIngestionServiceTest {
             postAsOwner: Boolean,
             routingScope: ScopeMode,
             initialBudget: Int?,
-            onSettled: ((List<String>) -> Unit)?,
+            // Settled VIEWS since issue #15 (each carries its generation's cost); this spy reads neither.
+            onSettled: ((List<com.aiforum.dto.ReplyView>) -> Unit)?,
         ) {
             summons += threadId
             events += "summon"

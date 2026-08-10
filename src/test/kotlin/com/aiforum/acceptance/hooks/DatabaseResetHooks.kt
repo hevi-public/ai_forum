@@ -70,7 +70,16 @@ class DatabaseResetHooks(
         // that ran after it — the exact leak shape a singleton preference row has, and one that shows up
         // as an unrelated feature failing only in certain run orders. Deleting the row restores the
         // default rather than some other stored value, which is why no seed row is re-inserted here.
-        listOf("routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "stance_change", "persona_stance", "interest_change", "persona_interest", "memory_change", "persona_memory", "persona", "owner_pref").forEach {
+        // generation_tool_call (V30) heads the list because it references comment(id) — but its position
+        // is the least of it. Its FK is ON DELETE CASCADE, so the comment-linked rows would go with the
+        // comment DELETE below; the rows that would NOT are exactly the ones with comment_id NULL — the
+        // traces of turns that GENERATED fine and then could not be saved (COULDNT_SAVE), which is the
+        // narrow case V30's header describes, not "any failed run": a turn that dies at the LLM seam
+        // leaves no row here to leak. Those NULL-comment rows cascade from nothing, and would be the only
+        // table in this reset surviving into the next scenario — where the very next "no tool calls were
+        // recorded" assertion would read a previous scenario's unsaveable turn. So here the explicit wipe
+        // is load-bearing, not just the house discipline the notes above describe.
+        listOf("generation_tool_call", "routing_event", "attachment", "vote", "comment_revision", "comment_quote", "event_log", "comment", "thread_read", "github_pr_thread", "ambient_run", "article_seen", "thread", "stance_change", "persona_stance", "interest_change", "persona_interest", "memory_change", "persona_memory", "persona", "owner_pref").forEach {
             jdbc.update("DELETE FROM $it")
         }
     }

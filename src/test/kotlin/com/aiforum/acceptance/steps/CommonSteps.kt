@@ -7,6 +7,9 @@ import com.aiforum.acceptance.support.Html
 import com.aiforum.acceptance.support.HttpClient
 import com.aiforum.acceptance.support.ScenarioWorld
 import com.aiforum.acceptance.support.TestData
+import com.aiforum.llm.LlmUsage
+import com.aiforum.llm.ToolCall
+import io.cucumber.datatable.DataTable
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.Then
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -83,6 +86,58 @@ class CommonSteps(
      */
     @Given("the LLM will respond with the answer:")
     fun llmWillRespondAnswer(answer: String) = llm.enqueue(Behavior.Respond(answer))
+
+    // --- issue #15: usage + tool-call scripting ---------------------------------------------------
+    //
+    // These live here, beside the other `the LLM will respond with …` variants, because this class is the
+    // scripting home for the seam. They program what the real parsers would have attached to a streaming
+    // turn (LlmResponseParser reads total_cost_usd; ClaudeStreamParser collects the tool calls) — the fake
+    // stands in for the parsers exactly as it already does for ReplySanitizer's `leak`.
+
+    /** A reply the provider PRICED. The plain `the LLM will respond with {string}` variant above stays
+     *  the unpriced shape — which is also the openai/opencode/stub shape, so both are exercised. */
+    @Given("the LLM will respond with {string} costing {double} USD")
+    fun llmWillRespondCosting(text: String, costUsd: Double) =
+        llm.enqueue(Behavior.Respond(text, usage = LlmUsage(costUsd = costUsd)))
+
+    /**
+     * A reply the model reached for tools to write. The table is one row per call, in the order the
+     * model made them (that order is what `seq` persists):
+     *
+     *     | tool | input | output | error |
+     *
+     * `error` is optional and defaults to false — a tool that failed is still part of the trace, and
+     * "which call blew up" is the first thing an operator wants from one.
+     */
+    @Given("the LLM will respond with {string} using tools:")
+    fun llmWillRespondUsingTools(text: String, table: DataTable) {
+        val calls = table.asMaps().mapIndexed { i, row ->
+            ToolCall(
+                id = row["id"] ?: "toolu_${i + 1}",
+                name = row["tool"] ?: error("the tools table needs a `tool` column"),
+                inputSummary = row["input"],
+                outputSummary = row["output"],
+                isError = row["error"]?.toBoolean() ?: false,
+            )
+        }
+        llm.enqueue(Behavior.Respond(text, toolCalls = calls))
+    }
+
+    /**
+     * A reply behind ONE tool call whose output is deliberately larger than the persistence cap, ending
+     * in a sentinel. The sentinel is what makes the truncation assertion honest: a stored summary that
+     * still contains it was never clipped, however short it happens to look.
+     */
+    @Given("the LLM will respond with {string} after a tool call whose output is {int} characters ending in {string}")
+    fun llmWillRespondAfterOversizedTool(text: String, length: Int, sentinel: String) {
+        val filler = "x".repeat((length - sentinel.length).coerceAtLeast(0))
+        llm.enqueue(
+            Behavior.Respond(
+                text,
+                toolCalls = listOf(ToolCall(id = "toolu_big", name = "Bash", outputSummary = filler + sentinel)),
+            ),
+        )
+    }
 
     @Given("the next save will fail")
     fun nextSaveWillFail() {

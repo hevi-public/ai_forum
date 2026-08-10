@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import java.net.URI
 import java.time.Clock
 import java.time.Instant
+import java.util.Locale
 
 /** One recorded tick as the /admin/ambient run list renders it — the row's data-* hooks live here. */
 data class AmbientRunView(
@@ -26,6 +27,13 @@ data class AmbientRunView(
     val articleUrl: String?,
     val personaId: String?,
     val threadId: String?,
+    // What this run's generations cost, preformatted to 4dp with Locale.ROOT (issue #15) — rendered as
+    // data-cost-usd on the row. A STRING because the formatting decision belongs to the view, not the
+    // template, and Locale.ROOT because a comma decimal separator would make the attribute unparseable
+    // on a machine whose default locale happens to be European. Null when the run is unpriced, which JTE
+    // renders as no attribute at all — absent means UNKNOWN, and that is deliberately distinguishable
+    // from a "0.0000" that would claim the tick was free.
+    val costUsd: String?,
 )
 
 /**
@@ -71,6 +79,7 @@ class AmbientController(
         articleUrl = articleUrl,
         personaId = personaId,
         threadId = threadId,
+        costUsd = costUsd?.let { String.format(Locale.ROOT, "%.4f", it) },
     )
 
     private companion object {

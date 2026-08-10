@@ -6,6 +6,7 @@ import com.aiforum.llm.LlmResponseParser
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import java.time.Duration
@@ -54,13 +55,66 @@ class LlmResponseParserTest {
     }
 
     @Test
-    fun `the real success envelope yields its result text`() {
+    fun `the real success envelope yields its result text and the usage it always carried`() {
+        // The fixture is the envelope captured from a real `claude -p --output-format json` run — and it
+        // has carried total_cost_usd/duration_ms since the day it was captured. Issue #15 is the slice
+        // that stops dropping them on the floor, so this long-standing case now asserts them too.
         val envelope = """
             {"type":"result","subtype":"success","is_error":false,"api_error_status":null,
              "duration_ms":3255,"num_turns":1,"result":"pong","stop_reason":"end_turn",
              "session_id":"abc","total_cost_usd":0.14}
         """.trimIndent()
-        assertEquals("pong", parse(0, envelope).text)
+        val resp = parse(0, envelope)
+        assertEquals("pong", resp.text)
+        assertEquals(0.14, resp.usage!!.costUsd)
+        assertEquals(3255L, resp.usage!!.durationMs)
+        assertNull(resp.usage!!.tokens, "this envelope carries no usage block")
+        assertTrue(resp.toolCalls.isEmpty(), "the plain-json envelope has no content array to collect from")
+    }
+
+    @Test
+    fun `a full envelope sums the input and output tokens and joins the model names, sorted`() {
+        // cache_creation_input_tokens / cache_read_input_tokens are present and deliberately EXCLUDED:
+        // they measure the provider's cache behaviour, not the size of this turn.
+        val envelope = """
+            {"subtype":"success","is_error":false,"result":"pong","stop_reason":"end_turn",
+             "duration_ms":1200,"total_cost_usd":0.02,
+             "usage":{"input_tokens":120,"output_tokens":30,"cache_creation_input_tokens":9000,
+                      "cache_read_input_tokens":4000},
+             "modelUsage":{"claude-sonnet-4":{"x":1},"claude-haiku-4":{"x":1}}}
+        """.trimIndent()
+        val usage = parse(0, envelope).usage!!
+        assertEquals(150L, usage.tokens, "input + output only")
+        assertEquals("claude-haiku-4,claude-sonnet-4", usage.model, "sorted, so the string is stable")
+        assertEquals(1200L, usage.durationMs)
+        assertEquals(0.02, usage.costUsd)
+    }
+
+    @Test
+    fun `an envelope reporting nothing at all yields a null usage, not an object of nulls`() {
+        // The distinction the whole nullable chain exists to keep: `usage != null` must mean "the provider
+        // said something", not "the envelope parsed". An openai/opencode-shaped reply reports nothing.
+        val envelope = """{"is_error":false,"subtype":"success","result":"pong","stop_reason":"end_turn"}"""
+        assertNull(parse(0, envelope).usage)
+    }
+
+    @Test
+    fun `a partial envelope still reports what it does know`() {
+        val envelope = """{"is_error":false,"subtype":"success","result":"pong","stop_reason":"end_turn","total_cost_usd":0.01}"""
+        val usage = parse(0, envelope).usage!!
+        assertEquals(0.01, usage.costUsd)
+        assertNull(usage.tokens)
+        assertNull(usage.model)
+    }
+
+    @Test
+    fun `a rate-limited error envelope carrying a cost still throws — no usage escapes a failure`() {
+        // Usage rides out on the SUCCESS branch only: every error branch throws, and the taxonomy
+        // exceptions are the failure contract. Bolting accounting onto them would give the two call
+        // sites two different ideas of what a failure is.
+        assertThrows(LlmException.RateLimited::class.java) {
+            parse(1, """{"is_error":true,"subtype":"error","api_error_status":429,"result":"usage limit reached","total_cost_usd":0.03}""")
+        }
     }
 
     @Test

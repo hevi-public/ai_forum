@@ -50,4 +50,11 @@ data class ReplyView(
     // Owner-attached images rendered as a gallery under the body. Trailing default so positional
     // constructions stay valid; populated on the full thread render (and the just-posted note node).
     val attachments: List<AttachmentView> = emptyList(),
+    // What THIS generation cost, carried from settle time out to the ambient tick's post-settle hook so
+    // the run row can be priced (issue #15). NO TEMPLATE RENDERS IT: it is a settle-time carrier on the
+    // view the hook already receives, not a display field — a per-reply price tag on a node is exactly
+    // the member-attached magnitude the V24→V28 guardrail refuses. Null => the provider reported no
+    // cost, which stays UNKNOWN and never becomes a claimed $0. Final trailing default so every
+    // positional ReplyView construction (and copy) in the app compiles untouched.
+    val costUsd: Double? = null,
 )

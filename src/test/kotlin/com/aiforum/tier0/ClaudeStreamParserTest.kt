@@ -2,10 +2,15 @@ package com.aiforum.tier0
 
 import com.aiforum.agui.AguiEvent
 import com.aiforum.llm.ClaudeStreamParser
+import com.aiforum.llm.ToolSummaries
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 
 /**
  * Tier-0: the pure NDJSON → [AguiEvent] normalisation for `claude -p --output-format stream-json`. Canned
@@ -66,5 +71,175 @@ class ClaudeStreamParserTest {
         val p = ClaudeStreamParser("n")
         assertEquals(emptyList<AguiEvent>(), p.onLine("not json at all"))
         assertEquals(emptyList<AguiEvent>(), p.onLine("   "))
+    }
+
+    // --- issue #15: the tool-call trace collected alongside (and silently beside) the event stream ----
+    //
+    // Everything above is the regression pin: collecting a trace must not move a single emitted event.
+
+    private val fixedClock: Clock = Clock.fixed(Instant.parse("2026-01-01T12:00:00Z"), ZoneOffset.UTC)
+
+    private fun parser() = ClaudeStreamParser("n", fixedClock)
+
+    private fun assistantToolUse(id: String, name: String, input: String) =
+        """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"$id","name":"$name","input":$input}]}}"""
+
+    private fun toolResult(id: String, content: String, isError: Boolean = false) =
+        """{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"$id","content":$content,"is_error":$isError}]}}"""
+
+    @Test
+    fun `a complete assistant tool_use collects the call with its input as compact JSON`() {
+        val p = parser()
+        assertEquals(
+            emptyList<AguiEvent>(),
+            p.onLine(assistantToolUse("toolu_1", "Read", """{"file_path":"/wal.c"}""")),
+            "a tool-only assistant message has no text, so it emits nothing",
+        )
+
+        val call = p.toolCalls().single()
+        assertEquals("toolu_1", call.id)
+        assertEquals("Read", call.name)
+        assertEquals("""{"file_path":"/wal.c"}""", call.inputSummary)
+        assertEquals(fixedClock.instant(), call.startedAt)
+        assertNull(call.outputSummary, "no result has arrived yet")
+    }
+
+    @Test
+    fun `a tool_result pairs to its call by id, carrying output, error flag and end time`() {
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Bash", """{"cmd":"ls"}"""))
+        assertEquals(emptyList<AguiEvent>(), p.onLine(toolResult("toolu_1", "\"no such file\"", isError = true)))
+
+        val call = p.toolCalls().single()
+        assertEquals("no such file", call.outputSummary)
+        assertTrue(call.isError, "a failed tool is still part of the trace, flagged")
+        assertEquals(fixedClock.instant(), call.endedAt)
+    }
+
+    @Test
+    fun `an array-shaped tool_result contributes the text of its text parts`() {
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Read", "{}"))
+        p.onLine(toolResult("toolu_1", """[{"type":"text","text":"line one"},{"type":"text","text":"line two"}]"""))
+
+        assertEquals("line one\nline two", p.toolCalls().single().outputSummary)
+    }
+
+    @Test
+    fun `an array-shaped tool_result with no text parts stringifies rather than storing a blank`() {
+        // The stringify-don't-drop contract applies to the ARRAY branch too. A screenshot tool answers with
+        // an image part and no text at all; storing "" would tell an operator the tool returned nothing,
+        // when in fact it returned something this parser has no text to show for. The array's own compact
+        // JSON is the honest account.
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Screenshot", "{}"))
+        val image = """[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBOR"}}]"""
+        p.onLine(toolResult("toolu_1", image))
+
+        assertEquals(image, p.toolCalls().single().outputSummary)
+    }
+
+    @Test
+    fun `text parts win over the fallback when the array has any`() {
+        // The fallback is for an array that yielded NOTHING — a mixed array still reports its text, which
+        // is what an operator reads, not the JSON around it.
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Read", "{}"))
+        p.onLine(toolResult("toolu_1", """[{"type":"image","source":{"data":"iVBOR"}},{"type":"text","text":"caption"}]"""))
+
+        assertEquals("caption", p.toolCalls().single().outputSummary)
+    }
+
+    @Test
+    fun `an EMPTY array stays empty — there genuinely was nothing to stringify`() {
+        // The one case the fallback must not fire on: "[]" carries no evidence, and echoing the two
+        // brackets back would be noise dressed as a summary.
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Read", "{}"))
+        p.onLine(toolResult("toolu_1", "[]"))
+
+        assertEquals("", p.toolCalls().single().outputSummary)
+    }
+
+    @Test
+    fun `two interleaved tools keep arrival order and pair by id, not by position`() {
+        // The results come back in the OPPOSITE order to the calls — which is exactly why the pairing key
+        // is the tool_use_id. Arrival order is still what the trace reports, because that is what `seq`
+        // persists: the order the model made the calls in.
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_a", "Read", "{}"))
+        p.onLine(assistantToolUse("toolu_b", "WebFetch", "{}"))
+        p.onLine(toolResult("toolu_b", "\"fetched\""))
+        p.onLine(toolResult("toolu_a", "\"read\""))
+
+        assertEquals(listOf("toolu_a", "toolu_b"), p.toolCalls().map { it.id })
+        assertEquals(listOf("read", "fetched"), p.toolCalls().map { it.outputSummary })
+    }
+
+    @Test
+    fun `a tool_result for an id we never saw open is ignored, never invented`() {
+        val p = parser()
+        p.onLine(toolResult("toolu_ghost", "\"from a stream we joined late\""))
+
+        assertTrue(p.toolCalls().isEmpty(), "a half-observed stream must not fabricate a nameless call")
+    }
+
+    @Test
+    fun `a user line emits no events at all`() {
+        // Tool results are trace, not liveness: the AG-UI stream already said the tool ended, and a tool's
+        // raw output is not something a forum reader should watch scroll past.
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Bash", "{}"))
+        assertEquals(emptyList<AguiEvent>(), p.onLine(toolResult("toolu_1", "\"output\"")))
+    }
+
+    @Test
+    fun `a streamed tool start collects the call too, and the later complete message fills its input`() {
+        // Partial mode surfaces the same call twice. The FIRST sighting dates it (it is the one that
+        // actually happened); the complete message is what carries the input.
+        val p = parser()
+        assertEquals(listOf(AguiEvent.ToolCallStart("n", "toolu_1", "WebFetch")), p.onLine(toolStart))
+        p.onLine(assistantToolUse("toolu_1", "WebFetch", """{"url":"https://x"}"""))
+
+        val call = p.toolCalls().single()
+        assertEquals("WebFetch", call.name)
+        assertEquals("""{"url":"https://x"}""", call.inputSummary)
+        assertEquals(fixedClock.instant(), call.startedAt)
+    }
+
+    @Test
+    fun `non-partial mode collects the trace from assistant messages alone`() {
+        // Without --include-partial-messages there are no stream_event lines at all, so the complete
+        // assistant message is the ONLY source — this is why the collector never parses input_json_deltas.
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Read", """{"file_path":"/a"}"""))
+        p.onLine(toolResult("toolu_1", "\"contents\""))
+        p.onLine(assistant("Here is what I found"))
+
+        val call = p.toolCalls().single()
+        assertEquals("Read", call.name)
+        assertEquals("contents", call.outputSummary)
+    }
+
+    @Test
+    fun `oversized input and output are clipped at their caps, marker-terminated`() {
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Bash", """{"cmd":"${"a".repeat(5_000)}"}"""))
+        p.onLine(toolResult("toolu_1", "\"${"b".repeat(9_000)}\""))
+
+        val call = p.toolCalls().single()
+        assertEquals(ToolSummaries.INPUT_CAP, call.inputSummary!!.length)
+        assertEquals(ToolSummaries.OUTPUT_CAP, call.outputSummary!!.length)
+        assertTrue(call.inputSummary!!.endsWith(ToolSummaries.MARKER))
+        assertTrue(call.outputSummary!!.endsWith(ToolSummaries.MARKER))
+    }
+
+    @Test
+    fun `a stream with no tools at all yields an empty trace`() {
+        val p = parser()
+        p.onLine(delta("Indexes"))
+        p.onLine(result("Indexes help"))
+
+        assertTrue(p.toolCalls().isEmpty(), "empty is the correct account of a turn that used no tools")
     }
 }

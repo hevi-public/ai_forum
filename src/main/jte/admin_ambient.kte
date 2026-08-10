@@ -21,7 +21,11 @@
                          convention, like data-outcome/data-action). JTE OMITS an attribute whose ${}
                          value is null, so the hook is present iff run.detail is — the honest RED/absent
                          case the acceptance probe (Html.latestAmbientRunAttr) distinguishes. --%>
-                    <li class="admin-list__item" data-ambient-run="${run.id}" data-outcome="${run.outcome}" data-action="${run.action}" data-detail="${run.detail}">
+                    <%-- data-cost-usd is the same absent-vs-empty idiom one attribute over (issue #15):
+                         a run whose generations reported no cost renders NO attribute, because NULL there
+                         means UNKNOWN and a "0.0000" would claim the tick was free. Attribute-only for
+                         now — the operator-facing readout of spend is issue #16. --%>
+                    <li class="admin-list__item" data-ambient-run="${run.id}" data-outcome="${run.outcome}" data-action="${run.action}" data-detail="${run.detail}" data-cost-usd="${run.costUsd}">
                         <span class="admin-list__meta">
                             <span class="admin-list__badge">${run.outcome}</span>
                             <span class="admin-list__sep">·</span>

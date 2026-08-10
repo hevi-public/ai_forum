@@ -13,6 +13,7 @@ import com.aiforum.dto.ScopeMode
 import com.aiforum.llm.CancellationToken
 import com.aiforum.llm.LlmClient
 import com.aiforum.llm.LlmRequest
+import com.aiforum.llm.LlmResponse
 import com.aiforum.llm.PersonaRef
 import com.aiforum.llm.PromptContext
 import com.aiforum.persona.InterestProse
@@ -21,6 +22,7 @@ import com.aiforum.persona.MemoryRecall
 import com.aiforum.persona.StanceProse
 import com.aiforum.repo.AttachmentRepository
 import com.aiforum.repo.CommentRepository
+import com.aiforum.repo.GenerationToolCallRepository
 import com.aiforum.repo.PersonaInterestRepository
 import com.aiforum.repo.PersonaMemoryRepository
 import com.aiforum.repo.PersonaRepository
@@ -89,6 +91,11 @@ class GenerationService(
     // [GenPlan.contextOf] at settle time, so recall is live per reply: a record written or deleted
     // between two replies of one fan-out is honored by the second (never a plan-mint snapshot).
     private val memories: PersonaMemoryRepository? = null,
+    // The tool-call audit trail (issue #15), written at settle. Nullable-defaulted like every repository
+    // above it, for the identical reason: every positional Tier-2 construction keeps compiling, and when
+    // it isn't wired the settle path is byte-identical to the pre-#15 one (no trace, no behaviour
+    // change). Spring injects the real bean. Deliberately write-only from here — the readers are #16's.
+    private val toolCalls: GenerationToolCallRepository? = null,
 ) {
     private val timeout = Duration.ofSeconds(120)
     private val log = LoggerFactory.getLogger(GenerationService::class.java)
@@ -193,11 +200,16 @@ class GenerationService(
         initialBudget: Int? = null,
         // Optional post-settle hook, run on the SAME worker after every persona in this summon has settled
         // (§2: "the ambient comment's settle triggers the same growth round the owner-grant paths get"),
-        // handed the ids of the nodes this summon just settled. The ambient comment action hands a
-        // BRANCH-SCOPED autoGrow in here — keyed on those ids — so its AMBIENT_GRANT is consumed without
-        // owner attention while owner-granted branches elsewhere in the thread stay untouched; every other
-        // call site passes nothing and behaves exactly as before.
-        onSettled: ((settledIds: List<String>) -> Unit)? = null,
+        // handed the SETTLED VIEWS of the nodes this summon just produced. The ambient comment action hands
+        // a BRANCH-SCOPED autoGrow in here — keyed on those nodes' ids — so its AMBIENT_GRANT is consumed
+        // without owner attention while owner-granted branches elsewhere in the thread stay untouched;
+        // every other call site passes nothing and behaves exactly as before.
+        //
+        // Views rather than bare ids since issue #15: each view carries what its generation COST, so the
+        // tick can price its own run without this service knowing a run exists. Handing back ids and
+        // making the caller re-read would be both a second query and a lie — cost is not stored on the
+        // comment, so there would be nothing to read.
+        onSettled: ((settled: List<ReplyView>) -> Unit)? = null,
     ) {
         inFlight.beginSummon(threadId)
         inFlight.submit {
@@ -217,7 +229,7 @@ class GenerationService(
                 // showing "summoning" and swaps them in.
                 inFlight.endSummon(threadId)
             }
-            started.forEach { (plan, token) ->
+            val settled = started.map { (plan, token) ->
                 try {
                     settleOne(plan, token)
                 } finally {
@@ -225,14 +237,14 @@ class GenerationService(
                 }
             }
             // Everything in this summon has settled (or nothing was planned) — run the post-settle hook on
-            // this same worker, handed the settled node ids so the caller can scope follow-up work to
+            // this same worker, handed the settled nodes so the caller can scope follow-up work to
             // exactly the nodes this summon produced. Isolated in its own catch: a growth failure must
             // neither propagate (killing the worker task) nor retro-mark the already-settled nodes failed —
             // the nodes are persisted and the follow-up discussion is best-effort (the owner's /auto-grow
             // button still exists).
             onSettled?.let { hook ->
                 try {
-                    hook(started.map { (plan, _) -> plan.id })
+                    hook(settled)
                 } catch (e: Exception) {
                     log.warn("post-settle hook for thread {} failed", threadId, e)
                 }
@@ -332,6 +344,15 @@ class GenerationService(
         return created
     }
 
+    /**
+     * Re-run a dead-end draft in place.
+     *
+     * NO tool-call trace and NO cost capture here (issue #15), and both omissions are structural rather
+     * than deferred work. This path calls the 2-arg NON-STREAMING seam, whose envelope carries no content
+     * array, so `toolCalls` is empty by construction — there is nothing to record. And a retry is an owner
+     * action with no ambient run behind it, so there is no row to attribute the spend to; inventing one
+     * would put owner-initiated spend into the ambient loop's accounting. Same for [regenerate].
+     */
     fun retry(replyId: String): ReplyView {
         val existing = comments.findById(replyId) ?: error("no reply $replyId")
         val persona = personas.find(existing.authorId) ?: error("unknown persona ${existing.authorId}")
@@ -674,15 +695,50 @@ class GenerationService(
         // synchronous generate/autoGrow paths, which register no holder). runId == the node id so the SSE
         // endpoint /replies/{id}/stream and the channel route to the right drafting node.
         val sink = AguiEventSink { inFlight.publish(plan.id, it) }
+        // Held outside the try so the trace + cost survive into the write below. Null on any failure —
+        // and the exception branch deliberately records NOTHING (issue #15): tool calls a timed-out turn
+        // made before it died are lost, because the only place they exist is inside a parser owned by
+        // the seam that just threw. Smuggling parser state out through the exception would put audit
+        // plumbing into the failure taxonomy, which is a contract the whole app reads. Documented
+        // limitation, not an oversight.
+        var resp: LlmResponse? = null
         val comment = try {
-            val resp = llm.generate(LlmRequest(plan.contextOf(), PersonaRef(plan.persona.id, plan.persona.name, plan.persona.model), timeout, runId = plan.id), token, sink)
-            resp.reasoningLeak?.let { log.warn("reasoning leak ({}) in reply {} by persona {}", it, plan.id, plan.persona.id) }
-            Comment(plan.id, plan.threadId, plan.parentId, plan.persona.id, resp.text, GenerationState.POSTED, null, plan.depth, depthBudget = plan.budget, reasoningLeak = resp.reasoningLeak)
+            val r = llm.generate(LlmRequest(plan.contextOf(), PersonaRef(plan.persona.id, plan.persona.name, plan.persona.model), timeout, runId = plan.id), token, sink)
+            resp = r
+            r.reasoningLeak?.let { log.warn("reasoning leak ({}) in reply {} by persona {}", it, plan.id, plan.persona.id) }
+            Comment(plan.id, plan.threadId, plan.parentId, plan.persona.id, r.text, GenerationState.POSTED, null, plan.depth, depthBudget = plan.budget, reasoningLeak = r.reasoningLeak)
         } catch (e: Throwable) {
             val o = GenerationStateMachine.classify(e)
             Comment(plan.id, plan.threadId, plan.parentId, plan.persona.id, "", o.state, o.failureCategory, plan.depth, o.reason, o.retryAfterSeconds, depthBudget = plan.budget)
         }
-        return persist(comment)
+        val view = persist(comment)
+        recordTrace(plan.id, view, resp)
+        // The cost rides out on the view so the ambient tick's post-settle hook can price its run without
+        // this service knowing anything about ticks. No template renders it (see ReplyView.costUsd).
+        return view.copy(costUsd = resp?.usage?.costUsd)
+    }
+
+    /**
+     * Persist the tool calls [resp] reported, keyed by the generation id and linked to the reply when it
+     * POSTED (issue #15). A COULDNT_SAVE node records with a NULL comment_id: the trace of a generation
+     * that RAN and then couldn't be stored is exactly the one an operator needs. That is the only NULL
+     * case reachable from here — a node that failed AT the seam arrives with `resp == null` and no calls
+     * to record (see [settleOne]'s note), which is why V30's header claims the unsaveable turn rather
+     * than "a failed run".
+     *
+     * Wrapped so a trace failure can NEVER fail a settle. The reply is the product; the audit row is
+     * commentary on it, and losing a persona's answer because an INSERT into an accounting table tripped
+     * would be the tail wagging the dog. It warns rather than debugs: a trace that stopped being written
+     * is operator-actionable (see the bdd-tiered-testing skill on log levels as contract).
+     */
+    private fun recordTrace(runId: String, view: ReplyView, resp: LlmResponse?) {
+        val calls = resp?.toolCalls.orEmpty()
+        if (calls.isEmpty()) return
+        try {
+            toolCalls?.record(runId, view.id.takeIf { view.state == GenerationState.POSTED }, calls)
+        } catch (e: Exception) {
+            log.warn("could not record the tool-call trace for generation {}; the reply is unaffected", runId, e)
+        }
     }
 
     /**

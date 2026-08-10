@@ -1,9 +1,11 @@
 package com.aiforum.tier2.service
 
+import ch.qos.logback.classic.Level
 import com.aiforum.ambient.Article
 import com.aiforum.ambient.ArticleSource
 import com.aiforum.ambient.TickSource
 import com.aiforum.domain.budget.DepthBudget
+import com.aiforum.dto.GenerationState
 import com.aiforum.dto.ReplyView
 import com.aiforum.dto.ScopeMode
 import com.aiforum.llm.CancellationToken
@@ -16,6 +18,7 @@ import com.aiforum.repo.PersonaRepository
 import com.aiforum.repo.ThreadRepository
 import com.aiforum.service.AmbientTickService
 import com.aiforum.service.GenerationService
+import com.aiforum.testsupport.LogCapture
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -75,8 +78,17 @@ class AmbientTickServiceTest {
         override fun postedAuthors(threadId: String) = posted[threadId] ?: emptySet()
     }
 
+    /**
+     * The run log in memory. [record] mirrors the real repository's `INSERT … RETURNING id` by handing
+     * back the 1-based row id (issue #15) — that id is what the tick passes to its post-settle hook, so a
+     * fake that returned nothing would make the cost path untestable. [added] captures every [addCost].
+     */
     private class RecordingRuns : AmbientRunRepository(JdbcTemplate(), Clock.systemUTC()) {
         val runs = mutableListOf<AmbientRun>()
+        val added = mutableListOf<Pair<Long, Double>>()
+
+        /** When set, every [addCost] throws — a locked accounting UPDATE (SQLITE_BUSY) in one flag. */
+        var costThrows = false
         override fun count() = runs.size
         override fun record(
             source: TickSource,
@@ -88,11 +100,18 @@ class AmbientTickServiceTest {
             personaId: String?,
             threadId: String?,
             costUsd: Double?,
-        ) {
+        ): Long {
+            val id = runs.size + 1L
             runs += AmbientRun(
-                runs.size + 1L, "t", source.name.lowercase(), outcome, action, detail,
+                id, "t", source.name.lowercase(), outcome, action, detail,
                 articleTitle, articleUrl, personaId, threadId, costUsd,
             )
+            return id
+        }
+
+        override fun addCost(runId: Long, deltaUsd: Double) {
+            if (costThrows) throw RuntimeException("accounting UPDATE is locked")
+            added += runId to deltaUsd
         }
     }
 
@@ -109,10 +128,21 @@ class AmbientTickServiceTest {
         val summons = mutableListOf<SummonCall>()
 
         /** The post-settle hook each summon carried (null when none) — index-aligned with [summons]. */
-        val settleHooks = mutableListOf<((List<String>) -> Unit)?>()
+        val settleHooks = mutableListOf<((List<ReplyView>) -> Unit)?>()
 
         /** Every autoGrow invocation as (threadId, withinSubtreeOf) — populated only via a captured hook. */
         val grown = mutableListOf<Pair<String, String?>>()
+
+        /** What a captured hook's autoGrow should hand back — the growth round's own settled views, so
+         *  the two-phase cost write (issue #15) can be driven without a real generation. */
+        var growthReplies: List<ReplyView> = emptyList()
+
+        /** Subtree roots whose growth round explodes — one node failing while its siblings do not. */
+        var growthThrowsFor: Set<String> = emptySet()
+
+        /** How many runs had been recorded by the time each summon was dispatched — the record-BEFORE-
+         *  dispatch proof (issue #15). Populated by the test's own probe, index-aligned with [summons]. */
+        var onSummon: () -> Unit = {}
 
         override fun summonAsync(
             threadId: String,
@@ -124,17 +154,27 @@ class AmbientTickServiceTest {
             postAsOwner: Boolean,
             routingScope: ScopeMode,
             initialBudget: Int?,
-            onSettled: ((List<String>) -> Unit)?,
+            onSettled: ((List<ReplyView>) -> Unit)?,
         ) {
+            onSummon()
             summons += SummonCall(threadId, personaIds, initialBudget)
             settleHooks += onSettled
         }
 
         override fun autoGrow(threadId: String, withinSubtreeOf: String?): List<ReplyView> {
+            // Recorded BEFORE the throw, so a test can prove the attempt happened as well as that it failed.
             grown += threadId to withinSubtreeOf
-            return emptyList()
+            if (withinSubtreeOf in growthThrowsFor) throw RuntimeException("growth round exploded for $withinSubtreeOf")
+            return growthReplies
         }
     }
+
+    /** A settled node as the post-settle hook sees it — only id and cost are read there. */
+    private fun settledView(id: String, costUsd: Double? = null) = ReplyView(
+        id = id, authorId = "sol", body = "b", state = GenerationState.POSTED, failureCategory = null,
+        reason = null, retryable = false, retryAfterSeconds = null, voteCount = 0, depth = 0,
+        costUsd = costUsd,
+    )
 
     private fun persona(id: String, abilities: List<String> = emptyList(), talkativeness: Int? = null) =
         PersonaRepository.Persona(
@@ -342,26 +382,166 @@ class AmbientTickServiceTest {
         val hook = gen.settleHooks.single()
         assertTrue(hook != null, "the comment summon must carry a post-settle growth hook")
         assertTrue(gen.grown.isEmpty(), "growth must not run at dispatch time — only after the settle")
-        // The hook receives the ids the summon settled and must grow ONLY those subtrees — an owner-granted
-        // branch elsewhere in the thread (deliberately left un-grown) must never be drained by an ambient
-        // settle, so a thread-wide autoGrow(threadId) here would be wrong.
-        hook!!.invoke(listOf("ambient-node-1"))
+        // The hook receives the nodes the summon settled and must grow ONLY those subtrees — an
+        // owner-granted branch elsewhere in the thread (deliberately left un-grown) must never be drained
+        // by an ambient settle, so a thread-wide autoGrow(threadId) here would be wrong.
+        hook!!.invoke(listOf(settledView("ambient-node-1")))
         assertEquals(
             listOf("T1" to "ambient-node-1"), gen.grown,
             "the settle hook grows the commented thread scoped to the settled comment's own subtree",
         )
 
-        // The POST action carries NO hook: an article thread's first summoned round is born at budget 0
-        // and must stall without owner engagement (depth_budget's ambient-stall scenario) — hooking growth
-        // there would be a silent re-grant. (count is now 1 → comment preferred, but the fresh
-        // RecordingThreads has no active threads, so it falls back to posting the article.)
+        // The POST action GROWS NOTHING: an article thread's first summoned round is born at budget 0 and
+        // must stall without owner engagement (depth_budget's ambient-stall scenario) — growing there
+        // would be a silent re-grant. It does carry a hook since issue #15, but that hook's only job is
+        // pricing the run, which is why the assertion below is about `grown`, not about the hook's
+        // existence. (count is now 1 → comment preferred, but the fresh RecordingThreads has no active
+        // threads, so it falls back to posting the article.)
         val svc2 = service(FakeSource(listOf(article("A"))), personas, RecordingThreads(), runs, gen)
         svc2.tick(TickSource.MANUAL)
 
         assertEquals("post", runs.runs.last().action)
-        assertNull(gen.settleHooks.last(), "the post action passes no settle hook")
-        assertEquals(listOf("T1" to "ambient-node-1"), gen.grown, "no further growth call from the post tick")
+        gen.settleHooks.last()?.invoke(listOf(settledView("post-node-1")))
+        assertEquals(
+            listOf("T1" to "ambient-node-1"), gen.grown,
+            "the post tick's settle must grow nothing, even once its hook has run",
+        )
     }
+
+    // --- issue #15: the run row is priced by the settle, and exists before the dispatch ---------------
+
+    @Test
+    fun `the run row is recorded BEFORE the summon is dispatched`() {
+        // The race the ordering kills: the post-settle hook prices a run by id, and it runs on a worker.
+        // Recording after summonAsync leaves a window in which a fast settle has nothing to price. The
+        // probe fires INSIDE the fake's summonAsync, so it observes the world exactly at dispatch time.
+        val threads = RecordingThreads()
+        val runs = RecordingRuns()
+        val gen = SpyGeneration()
+        var runsAtDispatch = -1
+        gen.onSummon = { runsAtDispatch = runs.runs.size }
+        val svc = service(FakeSource(listOf(article("A"))), RosterPersonas(listOf(persona("sol"))), threads, runs, gen)
+
+        svc.tick(TickSource.MANUAL)
+
+        assertEquals(1, runsAtDispatch, "the run row must already be committed when the summon is dispatched")
+    }
+
+    @Test
+    fun `the post path charges the run with what its replies cost`() {
+        val runs = RecordingRuns()
+        val gen = SpyGeneration()
+        val svc = service(FakeSource(listOf(article("A"))), RosterPersonas(listOf(persona("sol"))), RecordingThreads(), runs, gen)
+
+        svc.tick(TickSource.MANUAL)
+        gen.settleHooks.single()!!.invoke(listOf(settledView("n1", 0.07), settledView("n2", 0.05)))
+
+        assertEquals(listOf(1L to 0.12), runs.added.map { it.first to round4(it.second) })
+    }
+
+    @Test
+    fun `the comment path charges the fan-out first, then the growth it triggered`() {
+        // Two writes, in that order, is the point (issue #15): the comment's own spend is committed before
+        // growth is attempted, so a growth round that throws still leaves the run priced for what it
+        // definitely cost. One write at the end would lose the whole figure to that failure.
+        val threads = RecordingThreads(listOf(thread("T1", "Scaling SQLite")))
+        val runs = RecordingRuns()
+        val gen = SpyGeneration()
+        gen.growthReplies = listOf(settledView("g1", 0.03), settledView("g2", 0.03))
+        val personas = RosterPersonas(listOf(persona("sol", abilities = listOf("sqlite"), talkativeness = 8)))
+        val svc = service(FakeSource(emptyList()), personas, threads, runs, gen)
+
+        svc.tick(TickSource.MANUAL)
+        gen.settleHooks.single()!!.invoke(listOf(settledView("c1", 0.05)))
+
+        assertEquals(
+            listOf(1L to 0.05, 1L to 0.06), runs.added.map { it.first to round4(it.second) },
+            "phase one is the comment's own cost, phase two the growth round's",
+        )
+    }
+
+    @Test
+    fun `unpriced replies write no cost at all, and neither does an empty settle`() {
+        // NULL means UNKNOWN. A provider that reports no cost (openai/opencode/stub, an older CLI) must
+        // leave the column untouched — writing a summed 0.0 would claim the tick was free, which is the
+        // one wrong answer for an operator watching spend.
+        val runs = RecordingRuns()
+        val gen = SpyGeneration()
+        val svc = service(FakeSource(listOf(article("A"))), RosterPersonas(listOf(persona("sol"))), RecordingThreads(), runs, gen)
+
+        svc.tick(TickSource.MANUAL)
+        val hook = gen.settleHooks.single()!!
+        hook.invoke(listOf(settledView("n1"), settledView("n2")))
+        hook.invoke(emptyList())
+
+        assertTrue(runs.added.isEmpty(), "no priced reply means no UPDATE — never a claimed zero")
+    }
+
+    @Test
+    fun `a failing cost write never aborts the growth round that follows it`() {
+        // Accounting must never be able to abort product behaviour. Before issue #15 the growth round could
+        // not be blocked by accounting because there WAS no accounting write in this hook; the phase-one
+        // cost UPDATE put one in front of it, and an unguarded throw there (a locked row, a closed pool)
+        // would take the whole round down with it. The reply is the product; the figure is commentary.
+        val threads = RecordingThreads(listOf(thread("T1", "Scaling SQLite")))
+        val runs = RecordingRuns().apply { costThrows = true }
+        val gen = SpyGeneration()
+        val personas = RosterPersonas(listOf(persona("sol", abilities = listOf("sqlite"), talkativeness = 8)))
+        val svc = service(FakeSource(emptyList()), personas, threads, runs, gen)
+
+        svc.tick(TickSource.MANUAL)
+        LogCapture.on(AmbientTickService::class.java).use { logs ->
+            gen.settleHooks.single()!!.invoke(listOf(settledView("c1", 0.05)))
+
+            // The lost figure is operator-actionable — a run that silently stops being priced is exactly
+            // the drift an operator watching spend needs told about — so it WARNs, under a stable id.
+            val e = logs.withEvent("ambient.cost.failed").single()
+            assertEquals(Level.WARN, e.level)
+            assertEquals("accounting UPDATE is locked", logs.keyValue(e, "reason"))
+        }
+
+        assertEquals(
+            listOf("T1" to "c1"), gen.grown,
+            "the growth round runs even though its cost write threw — accounting never blocks the product",
+        )
+        assertTrue(runs.added.isEmpty(), "nothing was priced, and nothing pretended to be")
+    }
+
+    @Test
+    fun `one node's growth failure does not lose a sibling node's growth cost`() {
+        // Per-node isolation. autoGrow used to be flat-mapped bare, so the FIRST node to throw took the
+        // whole phase-two write with it — and the already-persisted growth replies of every other node
+        // went unpriced, spend that really happened and would never be charged. Each node's round is now
+        // its own attempt; the loss window is the throwing node's own in-flight round and nothing else.
+        val threads = RecordingThreads(listOf(thread("T1", "Scaling SQLite")))
+        val runs = RecordingRuns()
+        val gen = SpyGeneration()
+        gen.growthThrowsFor = setOf("c1")
+        gen.growthReplies = listOf(settledView("g1", 0.04))
+        val personas = RosterPersonas(listOf(persona("sol", abilities = listOf("sqlite"), talkativeness = 8)))
+        val svc = service(FakeSource(emptyList()), personas, threads, runs, gen)
+
+        svc.tick(TickSource.MANUAL)
+        LogCapture.on(AmbientTickService::class.java).use { logs ->
+            gen.settleHooks.single()!!.invoke(listOf(settledView("c1", 0.05), settledView("c2", 0.05)))
+
+            val e = logs.withEvent("ambient.growth.failed").single()
+            assertEquals(Level.WARN, e.level, "a swallowed growth round must not be silent")
+            assertEquals("c1", logs.keyValue(e, "node"))
+        }
+
+        assertEquals(
+            listOf("T1" to "c1", "T1" to "c2"), gen.grown,
+            "c1's failure must not stop c2's branch from growing",
+        )
+        assertEquals(
+            listOf(1L to 0.10, 1L to 0.04), runs.added.map { it.first to round4(it.second) },
+            "phase two still charges the growth that DID happen — c2's round",
+        )
+    }
+
+    /** Double addition is inexact; the run row is read at 4dp, so compare at the precision that ships. */
+    private fun round4(v: Double) = Math.round(v * 10_000) / 10_000.0
 
     @Test
     fun `a comment-branch fault records a failed run attributed to the comment action`() {

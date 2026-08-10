@@ -4,6 +4,7 @@ import com.aiforum.agui.AguiEvent
 import com.aiforum.agui.AguiEventSink
 import com.aiforum.dto.ReasoningLeak
 import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -50,10 +51,59 @@ data class LlmRequest(
     val runId: String = "",
 )
 
+/**
+ * What one finished turn COST and how long it took, as the provider reported it (issue #15). Every
+ * field is nullable because "the provider didn't say" and "it was zero" are different facts and only
+ * one of them may ever be rendered as a number: an absent cost is UNKNOWN, never a claimed $0. A
+ * provider that reports nothing yields a null [LlmUsage] outright rather than an object of nulls.
+ *
+ * Deliberately NOT a member-attached magnitude (the V24→V28 no-numbers guardrail): this is operator
+ * accounting about an invocation, it never re-enters a prompt and it ranks no persona.
+ */
+data class LlmUsage(
+    val costUsd: Double? = null,
+    // input + output only. The cache_creation_/cache_read_ counts are deliberately EXCLUDED: they
+    // measure the provider's cache behaviour, not the size of this turn, and summing them would make
+    // a cached re-read look like a bigger turn than a cold one.
+    val tokens: Long? = null,
+    val durationMs: Long? = null,
+    // The model(s) actually used, from the envelope's modelUsage keys — sorted then comma-joined so the
+    // string is stable across runs. Null when the envelope names none.
+    val model: String? = null,
+)
+
+/**
+ * One observed tool invocation inside a generation (issue #15). Collected by [ClaudeStreamParser] from
+ * the streaming CLI's NDJSON; the plain-json envelope carries no content array, so the non-streaming
+ * path structurally has none (an honest asymmetry, not a gap to paper over).
+ *
+ * The summaries are already clipped to [ToolSummaries.INPUT_CAP]/[ToolSummaries.OUTPUT_CAP] at the
+ * parser — unbounded bash/diff/fetch output must never travel as a megabyte string — and clipped
+ * again at the repository, so no writer can smuggle an unclipped value past the door.
+ */
+data class ToolCall(
+    val id: String,
+    val name: String,
+    val inputSummary: String? = null,
+    val outputSummary: String? = null,
+    val isError: Boolean = false,
+    val startedAt: Instant? = null,
+    val endedAt: Instant? = null,
+)
+
 // `reasoningLeak` tags a reply whose model leaked chain-of-thought (set by ReplySanitizer in the
 // parsers). The body is already cleaned; this only drives the UI badge + a log line. Null => clean.
 // Trailing default so the scriptable test double and other LlmResponse("text") call sites stay terse.
-data class LlmResponse(val text: String, val reasoningLeak: ReasoningLeak? = null)
+//
+// [usage] and [toolCalls] (issue #15) are ADDITIVE with defaults for the same reason: OpenAiLlmClient,
+// OpenCodeLlmClient, StubLlmClient and the acceptance fake compile untouched, and a provider that
+// reports neither is indistinguishable from the pre-#15 behaviour.
+data class LlmResponse(
+    val text: String,
+    val reasoningLeak: ReasoningLeak? = null,
+    val usage: LlmUsage? = null,
+    val toolCalls: List<ToolCall> = emptyList(),
+)
 
 // `model` pins the LLM this persona generates with; blank => the ProcessLlmClient's default-model
 // fallback. Default "" so test fixtures that don't care about model selection stay terse.

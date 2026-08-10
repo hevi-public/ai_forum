@@ -624,6 +624,93 @@ tilde, 5-backtick, closed-passthrough — +1 `MarkdownRendererTest` end-to-end);
   not jailed, nor are the openai/opencode providers, nor the app itself. No live jailed generation has been
   run yet — that needs the owner's one-time `claude setup-token` (runbook in the README and §10).
 
+**2026-08-09 (issue #15, structured turn result):** `LlmResponse` grew two ADDITIVE defaulted fields —
+`usage: LlmUsage?` (cost / tokens / durationMs / model) and `toolCalls: List<ToolCall>` — so
+`OpenAiLlmClient`, `OpenCodeLlmClient`, `StubLlmClient` and the acceptance fake compile untouched. Both
+facts were already in `claude -p`'s stream-json and were being dropped on the floor. Three things worth
+carrying forward:
+
+- **Usage belongs in `LlmResponseParser`, not the stream parser.** The streaming path re-parses its
+  captured terminal `result` line through the SAME object, so putting cost there reaches both paths for
+  free and makes the parity invariant "identical in text, leak AND usage". `toolCalls` is the one
+  asymmetry and it is structural: the plain-json envelope carries no content array, so the non-streaming
+  path has none — pinned by a tier-1 test that asserts the empty list on purpose. `usageOf` returns
+  **null when every derived field is null**, so `usage != null` means "the provider said something", not
+  "the envelope parsed". `cache_creation_/cache_read_` tokens are excluded (they measure the provider's
+  cache, not this turn) and `modelUsage` keys are sorted before joining so the string is run-stable.
+- **`ClaudeStreamParser` collects tool calls from COMPLETE assistant messages, never by accumulating
+  `input_json_delta`** — the deltas are partial JSON only valid once the block closes, while the complete
+  message carries the whole input already structured. It also reads `user` lines (where `tool_result`s
+  live) and emits NOTHING for them: the emitted `AguiEvent` stream is byte-identical, which is what lets
+  the six pre-existing tier-0 cases stand as the regression pin. Pairing is by `tool_use_id` (results
+  interleave), arrival order is preserved (that ordering is what `seq` persists), and an unknown id is
+  ignored rather than fabricated into a nameless call.
+- **`ambient_run.cost_usd` needed a RACE fix, not just a value.** `ambientRuns.record` moved to BEFORE
+  `summonAsync` in both tick actions and now returns the row id via `INSERT … RETURNING id` (verified on
+  xerial 3.53.2, tier-1 — never `last_insert_rowid()`, which is per-connection state and wrong under a
+  pool). The post-settle hook's payload changed `List<String>` → `List<ReplyView>` so each settled node
+  carries its own cost out; the comment action writes **two-phase** (fan-out cost committed, then growth,
+  then growth cost) so a growth round that throws still leaves the run priced for what it definitely
+  cost. **Unpriced views write NOTHING** — NULL is UNKNOWN, and a summed `0.0` would claim a tick was
+  free. Accepted pathological case, commented at the reorder site: a rejected dispatch leaves a 'posted'
+  row plus a 'failed' one.
+
+V30 `generation_tool_call` is the trace table (one row per observed tool invocation, written at settle,
+streaming-CLI only — empty is the correct account of an openai/opencode/stub turn, not a gap). `run_id`
+is TEXT with **no FK**: it is the GENERATION's id, and one tick fans out N generations plus a growth
+round while an owner summon has no tick at all. `comment_id` is nullable + ON DELETE CASCADE —
+**contrast V21's SET NULL**, and the contrast is the rule: spend outlives the thread it opened,
+explanation does not. Truncation caps live in `ToolSummaries` (2000/4000, marker INSIDE the budget so
+`length <= cap` holds by construction) and are applied at the parser AND again at the repository; a
+SQLite `CHECK` would be decorative while the repo is the only door. `DatabaseResetHooks` wipes the table
+explicitly and **here that is load-bearing rather than discipline** — the CASCADE only reaches
+comment-linked rows, so NULL-comment traces cascade from nothing and would be the one table
+leaking into the next scenario. Documented limitation: a settle that THROWS records no trace (the calls
+exist only inside the parser owned by the seam that threw, and smuggling them out through the exception
+would put audit plumbing into the failure taxonomy). Acceptance floor 285 → **290**
+(`generation_usage.feature`, five scenarios), adopting issue #18's named-`val` ratchet style — both
+branches touch that line, so expect a conflict there at merge.
+
+**Review addendum (same branch, before merge).** Six fixes, one of them a doc claim that had to land
+while it still could:
+
+- **The V30 header was overclaiming, and a migration header is frozen by its first application.** It
+  said a run that FAILED still leaves its trace, "precisely when an operator most wants to see what the
+  model was doing before it died" — but a generation that dies AT THE SEAM (timeout, rate limit, process
+  death, malformed envelope) records *nothing at all*: that is the documented limitation two sentences
+  up. What the FK-free `run_id` actually buys is the **unsaveable** turn — the model call SUCCEEDED and
+  the reply could not be persisted (COULDNT_SAVE), so the trace hangs on `run_id` with a NULL
+  `comment_id`. Reworded, along with its four echoes (`GenerationToolCallRepository.record`,
+  `GenerationService.recordTrace`, `MigrationPipelineTest`'s V30 note, `DatabaseResetHooks`, plus the
+  tier-1 test name and the `UsageSteps` KDoc). **The general lesson: a migration header's *claims* are as
+  unfixable as its DDL once Flyway has checksummed the file** — proofread the prose on the same pass as
+  the SQL, because the only later remedies are a repair or a contradicting comment in another file.
+- **`ToolSummaries.clip` was cutting UTF-16 mid-surrogate.** The text being clipped is a model's and a
+  tool's, so it has emoji, and `take(keep)` can keep a lone high surrogate — which round-trips through
+  UTF-8 as U+FFFD, storing a glyph the tool never printed. A trailing unpaired high surrogate is now
+  dropped, so the contract is **`length <= cap`, not `== cap`**: one unit of budget buys back a whole
+  character. (The tier-0 emoji case needs a parity-shifting prefix — `keep` for the 4000 cap is even, so
+  a bare run of two-unit emoji lands on a pair boundary and would pass whatever `clip` does.)
+- **`ClaudeStreamParser.extractText`'s array branch contradicted its own stringify-don't-drop rule.** An
+  array of parts with no string `text` (a screenshot's `image` part) joined to `""` — "the tool answered
+  nothing" — so a non-empty array yielding no text now falls back to its own compact JSON. `[]` stays
+  `""`, and text parts still win in a mixed array.
+- **Accounting could abort the product.** `recordRunCost` runs inside the post-settle hook, in FRONT of
+  the growth round, so an unguarded `addCost` throw cancelled a round that pre-#15 accounting could not
+  touch at all. Wrapped try/catch-WARN, mirroring `GenerationService.recordTrace`.
+- **Partial growth lost its cost.** `settled.flatMap { autoGrow(...) }` let the first node to throw take
+  phase two with it, so every *other* node's already-persisted growth replies went unpriced. Each node's
+  round is now its own `runCatching`; the loss window is the throwing node's own in-flight round.
+- **The 'Anyone' dispatcher's routing turn is uncharged** — `PersonaRouter.pick` returns only the chosen
+  personas (it discards the response, and with it the usage) and settles no node, so a post run's figure
+  is its REPLIES' cost, slightly under the tick's true spend. Named in `recordRunCost`'s KDoc, where the
+  money is summed; issue #16's plan doc documents it where the number is read.
+
+Two new WARN event ids on `AmbientTickService`: `ambient.cost.failed`, `ambient.growth.failed` (both
+best-effort faults inside the hook — the tick itself succeeded; what is lost is a figure and a follow-up
+round). Full `verifyAll` green after the fixes: tier0 **486**, tier1 295, tier2 **179**, acceptance 290
+(the floor is unchanged — every fix landed at tier 0/2).
+
 ## Open threads / near-term
 
 - **What's next, from the record rather than invention** (re-read 2026-07-30). S6 landed 2026-07-27
