@@ -52,6 +52,15 @@ aiforum:
     # repo root) is Spring-resolved, like ${user.home} elsewhere, so node gets an absolute path to the
     # server (its relative `import` resolves from the module file). Each tool takes an OWNER/REPO arg, so no
     # clone/cwd is needed. Needs `gh` authed + `node` on PATH. ⚠ SECURITY: PR content is untrusted input
-    # (prompt injection) and the Docker jail (§12) isn't built — same risk class as web-fetch above.
+    # (prompt injection) — same risk class as web-fetch above.
     github-tools-enabled: true
     github-mcp-config: '{"mcpServers":{"gh-readonly":{"command":"node","args":["${user.dir}/mcp/gh-readonly/server.mjs"]}}}'
+    # The Docker jail (§12, plan_docs/llm-sandbox.md) now EXISTS, and is off by default here too — dev is
+    # where you'd try it first. To enable: build the image, run `claude setup-token` and export
+    # CLAUDE_CODE_OAUTH_TOKEN in this shell, then flip the flag below (full block: application.yml;
+    # step-by-step runbook: README "Sandboxing the persona subprocess").
+    # ⚠ With the jail ON, deny-by-default egress applies: a WebFetch or article host must ALSO be listed in
+    # aiforum.llm.jail.egress-allowlist, or the fetch is denied. Dev's blank web-fetch allowlist above means
+    # "any host" to the tool — but the container will only reach what the jail allowlist names.
+    jail:
+      enabled: false

@@ -2,6 +2,7 @@ package com.aiforum.llm
 
 import com.aiforum.agui.AguiEvent
 import com.aiforum.agui.AguiEventSink
+import com.aiforum.config.JailProperties
 import com.aiforum.observability.event
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -14,6 +15,7 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.time.Duration
+import java.util.UUID
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 
@@ -24,7 +26,13 @@ import java.util.concurrent.TimeUnit
  * everything here is the genuinely un-fakeable part: spawning, stdin/stdout plumbing, the deadline.
  *
  * Under the `test` profile a @Primary ScriptableLlmClient replaces this, so the acceptance suite never
- * shells out. The Docker jail (§10–§12) and tool-sandboxing are deferred — M1 wraps the CLI directly.
+ * shells out.
+ *
+ * The subprocess can optionally run inside a Docker jail (§12, `plan_docs/llm-sandbox.md`): with
+ * `aiforum.llm.jail.enabled` on, [launchClaude] hands the argv to [JailLauncher] and spawns
+ * `docker run` instead. That switch is **off by default**, and with it off the spawned argv is
+ * byte-identical to the un-jailed one — pinned by a Tier-1 test, because "no behaviour change when
+ * disabled" is the property that makes enabling reversible.
  *
  * `open` so the Tier-1 test can substitute [spawn] with a controlled subprocess and exercise the
  * timeout/cancel/exit-code plumbing without invoking the real `claude` binary or spending quota.
@@ -72,6 +80,12 @@ open class ProcessLlmClient(
     // doesn't support the flag — the stream then degrades to whole-message granularity, which
     // [ClaudeStreamParser] still handles. The non-streaming generate() path ignores this.
     @Value("\${aiforum.llm.stream-partial-messages:true}") private val streamPartialMessages: Boolean = true,
+    // The Docker jail (§12). JailProperties is a bean under every profile (JailConfig isn't
+    // profile-scoped), so Spring always injects the real config; JailRuntime only exists when the jail is
+    // switched ON and we're not under `test`, hence nullable. Both defaulted so the ~30 tier-1 tests that
+    // construct this directly keep compiling untouched.
+    private val jail: JailProperties = JailProperties(),
+    private val jailRuntime: JailRuntime? = null,
 ) : LlmClient {
 
     // Explicit class (not javaClass) so the logger name is stable across the test subclasses that override
@@ -90,6 +104,12 @@ open class ProcessLlmClient(
         const val EV_TIMEOUT = "llm.timeout"
         const val EV_CANCELLED = "llm.cancelled"
         const val EV_GH_TOOLS = "llm.github.tools"
+        // The jail (§12). Added beside the others, never renamed — an event id is a consumer contract.
+        const val EV_JAIL_DOCKER_UNAVAILABLE = "llm.jail.docker_unavailable"
+        const val EV_JAIL_RUN_FAILED = "llm.jail.run_failed"
+
+        /** How much of a failed jailed run's stderr reaches the log — enough to name the cause, not a dump. */
+        const val JAIL_STDERR_TAIL = 500
 
         // Appended to the system prompt when the gh-readonly tools are mounted (withGitHubToolGuidance), so a
         // persona pulls the full PR instead of reviewing the truncated diff the opening post carries. The
@@ -121,7 +141,9 @@ open class ProcessLlmClient(
 
     override fun generate(request: LlmRequest, cancellation: CancellationToken): LlmResponse {
         logSpawn(request)
-        val process = spawn(buildArgs(withGitHubToolGuidance(request.context.personaSystemPrompt), request.persona.model, stream = false))
+        val (process, container) = launchClaude(
+            buildArgs(withGitHubToolGuidance(request.context.personaSystemPrompt), request.persona.model, stream = false)
+        )
         writeStdin(process, request)
 
         // Drain both pipes on daemon threads so a chatty subprocess can't deadlock on a full OS buffer
@@ -129,9 +151,12 @@ open class ProcessLlmClient(
         val stdout = drain(process.inputStream)
         val stderr = drain(process.errorStream)
 
-        awaitProcess(process, request.timeout, cancellation, request.persona.name)
+        awaitProcess(process, request.timeout, cancellation, request.persona.name, container)
 
-        await(stderr) // let the reader finish so the pipe closes cleanly; stderr isn't part of the mapping
+        // Let the reader finish so the pipe closes cleanly; stderr isn't part of the mapping, but it is
+        // where `docker run` reports a jail that never got as far as running claude.
+        val err = await(stderr)
+        warnIfJailFailed(process.exitValue(), err, container)
         return LlmResponseParser.parse(
             process.exitValue(),
             await(stdout),
@@ -150,7 +175,9 @@ open class ProcessLlmClient(
         sink.emit(AguiEvent.RunStarted(request.runId))
         try {
             logSpawn(request)
-            val process = spawn(buildArgs(withGitHubToolGuidance(request.context.personaSystemPrompt), request.persona.model, stream = true))
+            val (process, container) = launchClaude(
+                buildArgs(withGitHubToolGuidance(request.context.personaSystemPrompt), request.persona.model, stream = true)
+            )
             writeStdin(process, request)
 
             val parser = ClaudeStreamParser(request.runId)
@@ -159,9 +186,10 @@ open class ProcessLlmClient(
             val stdout = drainLines(process.inputStream) { line -> parser.onLine(line).forEach(sink::emit) }
             val stderr = drain(process.errorStream)
 
-            awaitProcess(process, request.timeout, cancellation, request.persona.name)
-            await(stderr)
+            awaitProcess(process, request.timeout, cancellation, request.persona.name, container)
+            val err = await(stderr)
             awaitDrain(stdout) // barrier: ensure the tail (incl. the result line) is read before we classify
+            warnIfJailFailed(process.exitValue(), err, container)
 
             val response = LlmResponseParser.parse(
                 process.exitValue(),
@@ -206,14 +234,20 @@ open class ProcessLlmClient(
      * wraparound-safe; the poll interval floors at 1ms so a misconfigured 0 can't busy-spin). Shared by
      * the streaming and non-streaming generate paths so their lifecycle behaviour stays identical.
      */
-    private fun awaitProcess(process: Process, timeout: Duration, cancellation: CancellationToken, personaName: String) {
+    private fun awaitProcess(
+        process: Process,
+        timeout: Duration,
+        cancellation: CancellationToken,
+        personaName: String,
+        container: String? = null,
+    ) {
         val pollMs = pollMillis.coerceAtLeast(1)
         val timeoutNanos = timeout.toNanos().coerceAtLeast(0)
         val start = System.nanoTime()
         try {
             while (true) {
                 if (cancellation.isCancelled) {
-                    kill(process)
+                    kill(process, container)
                     log.atInfo().setMessage("generation for {} cancelled by owner").addArgument(personaName)
                         .event(EV_CANCELLED).addKeyValue("persona", personaName)
                         .log()
@@ -221,7 +255,7 @@ open class ProcessLlmClient(
                 }
                 if (process.waitFor(pollMs, TimeUnit.MILLISECONDS)) break
                 if (System.nanoTime() - start >= timeoutNanos) {
-                    kill(process)
+                    kill(process, container)
                     val timeoutMs = timeout.toMillis()
                     log.atWarn().setMessage("generation for {} timed out after {}ms")
                         .addArgument(personaName).addArgument(timeoutMs)
@@ -231,10 +265,56 @@ open class ProcessLlmClient(
                 }
             }
         } catch (_: InterruptedException) {
-            kill(process)
+            kill(process, container)
             Thread.currentThread().interrupt()
             throw LlmException.Cancelled()
         }
+    }
+
+    /**
+     * Spawn the CLI — directly, or wrapped in a jail container when `aiforum.llm.jail.enabled` is on.
+     * Returns the process paired with the container name to kill on cancel/timeout (null when un-jailed).
+     *
+     * Note what this does NOT do: fall back to an un-jailed spawn. If the jail was asked for and can't be
+     * had, the generation fails. Failing open would mean an operator who switched containment on quietly
+     * gets the persona running on the host instead — the one outcome the feature exists to prevent.
+     */
+    private fun launchClaude(argv: List<String>): Pair<Process, String?> {
+        if (!jail.enabled) return spawn(argv) to null
+        val runtime = jailRuntime ?: return jailUnavailable("jail enabled but no JailRuntime bean is wired")
+        val invocationId = UUID.randomUUID().toString()
+        val wrapped = JailLauncher.wrap(argv, jail, invocationId, runtime.invocation(), githubMcpServerName)
+        val process = try {
+            spawn(wrapped)
+        } catch (e: IOException) {
+            return jailUnavailable("cannot spawn docker: ${e.message}")
+        }
+        return process to JailLauncher.containerName(invocationId)
+    }
+
+    private fun jailUnavailable(reason: String): Nothing {
+        log.atError().setMessage("LLM jail is enabled but unusable ({}) — refusing to run the persona on the host")
+            .addArgument(reason)
+            .event(EV_JAIL_DOCKER_UNAVAILABLE).addKeyValue("reason", reason)
+            .log()
+        // 127 = "command not found", the shell's own code for exactly this; ProcessError is retryable, so
+        // an operator who fixes Docker can retry the failed generation rather than re-summon it.
+        throw LlmException.ProcessError(127)
+    }
+
+    /**
+     * A jailed run that exited non-zero may have failed before claude ever started (image missing, egress
+     * denied, a cap too tight), in which case the parser's exit-code mapping is honest but uninformative.
+     * The container's stderr is where docker says what actually went wrong, so surface a tail of it.
+     */
+    private fun warnIfJailFailed(exitCode: Int, stderr: String, container: String?) {
+        if (container == null || exitCode == 0 || stderr.isBlank()) return
+        val tail = stderr.takeLast(JAIL_STDERR_TAIL).trim()
+        log.atWarn().setMessage("jailed generation in {} exited {}: {}")
+            .addArgument(container).addArgument(exitCode).addArgument(tail)
+            .event(EV_JAIL_RUN_FAILED)
+            .addKeyValue("container", container).addKeyValue("exitCode", exitCode).addKeyValue("stderr", tail)
+            .log()
     }
 
     private fun buildArgs(systemPrompt: String, personaModel: String, stream: Boolean): List<String> = buildList {
@@ -306,8 +386,15 @@ open class ProcessLlmClient(
         return ProcessBuilder(argv).directory(File(dir)).start()
     }
 
-    /** Force-kill and best-effort reap within a short grace, so a runaway child can't outlive the call. */
-    private fun kill(process: Process) {
+    /**
+     * Force-kill and best-effort reap within a short grace, so a runaway child can't outlive the call.
+     *
+     * The container goes FIRST when there is one: `docker run` is a client, and killing it does not stop
+     * the container the daemon owns — destroying only the local process would leave a jailed persona
+     * running, holding its memory and CPU reservation, invisible to every subsequent timeout.
+     */
+    private fun kill(process: Process, container: String? = null) {
+        container?.let { jailRuntime?.killContainer(it) }
         process.destroyForcibly()
         runCatching { process.waitFor(KILL_GRACE_MILLIS, TimeUnit.MILLISECONDS) }
     }

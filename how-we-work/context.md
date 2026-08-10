@@ -56,7 +56,8 @@ The cross-cutting ones a newcomer still needs:
   required and now declared (`.nvmrc` pins 22; the `jsTest` Gradle task preflights it).
 - **Headless `claude -p` silently denies permission-gated tools** (WebFetch etc.) — pre-authorise
   with `--allowedTools`; wired behind `aiforum.llm.web-fetch-enabled`. ⚠ Web fetch is enabled in
-  dev+prod ahead of the deferred Docker jail (§12) — personas fetch the open web from the host.
+  dev+prod, and the Docker jail (§12, built 2026-08-09) is **off by default** — so unless it is
+  switched on, personas still fetch the open web from the host.
 - **Local models via LM Studio:** avoid Gemma (leaks inline reasoning into replies); use
   **Qwen3.5 9B with thinking off**. Strip/flag pipeline + debug profile documented in
   `plan_docs/local-model-reasoning-leak.md`.
@@ -568,6 +569,61 @@ tilde, 5-backtick, closed-passthrough — +1 `MarkdownRendererTest` end-to-end);
     fixture is sensitive to whether the registry read causally precedes the tree-feeding DB read, not to
     call count.
 
+- **The LLM jail** ✅ built 2026-08-09 (issue #14, `plan_docs/llm-sandbox.md`). `claude -p` can now run in a
+  per-invocation Docker container — read-only rootfs, `--cap-drop ALL`, tmpfs home/work/tmp, the credential
+  the only bind mount — behind `aiforum.llm.jail.enabled`, **off by default**, with byte-identical argv when
+  off (pinned by a tier-1 test, mutation-verified). The pure argv/squid-config construction is
+  `JailLauncher` (tier0, 22 cases, the `LlmResponseParser` pattern); the host IO is `JailRuntime` behind a
+  one-method `CommandRunner` port. The opt-in `./gradlew jailContract` proves the Docker half against a real
+  daemon and is deliberately **not** in `verifyAll`.
+
+  Three things worth carrying forward:
+
+  - **Egress is topology, not cooperation.** The container joins a `docker network create --internal`
+    network, which has no gateway and therefore no route off the host; the only way out is a squid sidecar
+    that is dual-homed (started on the default bridge, then `network connect`-ed in). A process that ignores
+    `HTTP_PROXY` doesn't get unfiltered access — it gets nothing, and a direct-IP dial is dead by
+    construction. In-container iptables was rejected (needs `CAP_NET_ADMIN`, contradicts `--cap-drop ALL`),
+    DNS filtering was rejected (a direct IP walks past it), and a host-loopback proxy was rejected
+    (unreachable from an internal network, so it would force the network non-internal and degrade the whole
+    thing to cooperative-only).
+  - **The credential is protected by the ALLOWLIST, not by the mount mode.** claude must authenticate inside
+    the container, and a prompt-injected agent can read the credential however it got there — ro-mount,
+    copy, and env var are all equally readable from inside. What actually contains a leak is that
+    deny-by-default egress means it can only be *spent* against `api.anthropic.com`/`api.github.com`, never
+    posted to an attacker's collector. Corollary for this host: **there is no `~/.claude/.credentials.json`
+    on macOS** (auth lives in the Keychain), so the jail runs in token mode — `claude setup-token`, then
+    `CLAUDE_CODE_OAUTH_TOKEN` exported where the app launches, forwarded via a 0600 `--env-file` and never
+    in argv, which `ps` shows.
+  - **`access_log stdio:/dev/stdout` kills squid.** Measured on `ubuntu/squid:6.13`: it drops to the
+    unprivileged `proxy` user and then *reopens* that path, and the container's stdout pipe is root-owned —
+    so it exits FATAL at boot and the container restart-loops (which then looks like a DNS failure, because
+    a dead container isn't in docker's embedded DNS). The log goes to `/var/log/squid/access.log`; read it
+    with `docker exec aiforum-jail-proxy tail -f …`. Pinned by a tier-0 assertion so it can't be tidied back.
+
+  Review addenda (2026-08-10), all three the same shape — a guarantee that looked held but wasn't:
+
+  - **Reusing a network by NAME is not reusing the guarantee.** The boot inspect is
+    `docker network inspect -f {{.Internal}}`; a pre-existing network of that name without `--internal` has
+    a gateway, so reusing it would give every jailed container a direct route out and make the proxy
+    optional. `false` is fatal (`llm.jail.startup_failed`, before any proxy work) and names
+    `docker network rm` — no auto-recreate, since `rm` fails while containers are attached.
+  - **The egress policy exists in TWO copies and only one was tripwired.** `jailContract` case 2 watches
+    `JailProperties()`' Kotlin defaults; the list a running app binds is the explicit
+    `egress-allowlist:` in `application.yml` (an explicit yml list replaces the default, it doesn't merge).
+    Widening the yml — the natural way to widen policy — left the tripwire green.
+    `tier2/config/JailYmlContractTest` now pins the bound yml block to `JailProperties()`, and says in its
+    failure message to re-scope the contract suite when you widen on purpose.
+  - **A `docker kill` can arrive before the container exists** (cancel racing creation): it reports failure,
+    is swallowed, and the container then materialises and runs unattended. The kill is now retried (3
+    attempts, ~1s) and always followed by best-effort `docker rm -f`, which also removes the `Created` husk
+    `--rm` never cleans up. Relatedly, `GH_TOKEN` is fetched only when the gh tools are *actually* mounted —
+    `githubToolsEnabled && githubMcpConfig.isNotBlank()`, the same conjunction `ProcessLlmClient` uses.
+
+  Not covered, and the docs say so in four places: **feed/article fetching runs in-JVM on the host** and is
+  not jailed, nor are the openai/opencode providers, nor the app itself. No live jailed generation has been
+  run yet — that needs the owner's one-time `claude setup-token` (runbook in the README and §10).
+
 ## Open threads / near-term
 
 - **What's next, from the record rather than invention** (re-read 2026-07-30). S6 landed 2026-07-27
@@ -781,8 +837,10 @@ tilde, 5-backtick, closed-passthrough — +1 `MarkdownRendererTest` end-to-end);
 - **Feed-fetch socket timeouts** (Assay follow-up on PR #4): `FeedArticleSource`'s RestClient has
   no connect/read timeout — the tick thread is deadline-protected, but a truly hung socket parks
   the daemon worker until OS TCP timeout. Add client-level timeouts when next touching the file.
-- Docker jail for persona tool use (§10–§12) — still deferred, but **urgency raised**: ambient
-  web fetching is scheduled + unattended (direction doc §8); web-fetch note above applies.
+- Docker jail for persona tool use (§10–§12) — **built 2026-08-09, opt-in** (`llm-sandbox.md`). What's
+  left: nobody has run a live jailed generation (needs the owner's one-time `claude setup-token`), and
+  the ambient path is only half-covered — the persona is jailed, the **feed fetch is not** (in-JVM, on
+  the host), so direction doc §8's untrusted-input concern is unchanged.
 - Composer branch-context controls (`plan_docs/composer-branch-context-controls.md`) — designed,
   not built: surface the context-scope control + include-siblings toggle; settle sibling semantics.
 - Quote backlinks / selector-cone (deferred from V18).

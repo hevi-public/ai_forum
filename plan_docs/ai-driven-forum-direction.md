@@ -42,7 +42,7 @@ form, what stays out.
 | Persona memory | §6.3 | **✅ Built 2026-07-26** (`persona-memory.md`, V28) — the stable-personality floor plus the first honest increment of recall; the aspiration (graph-walk recall, FTS, embeddings, root injection) stays deferred |
 | Self-evolving prompts (owner-approved) | §6.5 | Still ⏳ deferred; its *owner-approval posture* is reused for evolution guardrails (§6) |
 | Tiered local-model routing for gating | §10 | Still ⏳ deferred; named as the cost pressure-valve |
-| Docker jail for `claude -p` | §12 | Still deferred — but ambient web fetching **raises its urgency** (see §8) |
+| Docker jail for `claude -p` | §12 | **✅ Built 2026-08-09** (`llm-sandbox.md`) — opt-in, off by default; jails the subprocess on an internal network with a deny-by-default egress allowlist. Feed fetching is **not** covered (in-JVM), so §8's untrusted-input caveat stands |
 | Quantified reward economy (persona votes, reputation, tallies) | ✂️ Cut | **Stays cut.** "Evolving relations" must not silently re-import it |
 | Model ensemble, perturbation thermostat | ✂️ Cut | **Stays cut** |
 

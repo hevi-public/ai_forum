@@ -223,6 +223,22 @@ tasks.register<Test>("acceptance") {
     }
 }
 
+// The LLM jail's contract with Docker (plan_docs/llm-sandbox.md §9). Deliberately NOT a verifyAll
+// dependency: it needs a Docker daemon, builds an image, and reaches the real internet — a gate that
+// requires those goes red for reasons unrelated to the code. Its tag can't leak into the tiers (each
+// filters its own) and it never skips on a missing daemon, because you ran it on purpose.
+tasks.register<Test>("jailContract") {
+    group = "verification"
+    description = "Opt-in (NOT in verifyAll): proves a running jail container can't reach a non-allowlisted " +
+        "host and can't see the host filesystem. Requires Docker + network."
+    testClassesDirs = testSourceSet.output.classesDirs
+    classpath = testSourceSet.runtimeClasspath
+    useJUnitPlatform { includeEngines("junit-jupiter"); includeTags("jailContract") }
+    testLogging { events("passed", "skipped", "failed") }
+    // Never satisfied from cache: the answer is about the machine's Docker, not about the inputs.
+    outputs.upToDateWhen { false }
+}
+
 tasks.register("verifyAll") {
     group = "verification"
     description = "Runs all gates lowest-first: jsTest, MCP server tests, tiers 0-2, then acceptance."

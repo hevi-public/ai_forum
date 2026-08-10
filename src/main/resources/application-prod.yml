@@ -36,18 +36,29 @@ aiforum:
     keep: 7
   llm:
     # Personas reach the network in prod too.
-    # ⚠ SECURITY: the Docker jail (requirements §12) is NOT built yet, so prod personas fetch from the
-    # HOST directly with no isolation, and a blank allowlist below = ANY host. Web content is untrusted
-    # (prompt-injection risk). Until the jail lands, scope web-fetch-allowed-domains to trusted hosts,
-    # e.g. "news.ycombinator.com,github.com". See requirements §12 (status note) for the full caveat.
+    # ⚠ SECURITY: the Docker jail (requirements §12, plan_docs/llm-sandbox.md) now EXISTS but is OFF by
+    # default — see the jail: block below. While it is off, prod personas fetch from the HOST directly with
+    # no isolation, and a blank allowlist here = ANY host. Web content is untrusted (prompt-injection risk).
+    # Until the jail is switched on, scope web-fetch-allowed-domains to trusted hosts, e.g.
+    # "news.ycombinator.com,github.com". See requirements §12 (status note) for the full caveat.
     web-fetch-enabled: true
     web-fetch-allowed-domains: ""   # ← blank = any host; tighten this in prod
     # Read-only GitHub tools for personas (Option B): the in-repo gh-readonly MCP so a persona reviewing a
     # PR thread can pull the FULL pull request + diff (the opening post embeds only a truncated excerpt).
     # Inline MCP config so it's path-portable (${user.dir}=launch cwd, Spring-resolved like ${user.home}).
-    # Needs `gh` authed + `node` on PATH. ⚠ SECURITY: same untrusted-input / no-Docker-jail caveat as
-    # web-fetch above — the gh tools can reach any repo; tighten or disable if that surface matters.
+    # Needs `gh` authed + `node` on PATH. ⚠ SECURITY: same untrusted-input caveat as web-fetch above — the
+    # gh tools can reach any repo; tighten or disable if that surface matters.
     github-tools-enabled: true
     github-mcp-config: '{"mcpServers":{"gh-readonly":{"command":"node","args":["${user.dir}/mcp/gh-readonly/server.mjs"]}}}'
+    # The Docker jail (§12, plan_docs/llm-sandbox.md) — the isolation the two caveats above kept deferring
+    # to. Built, opt-in, off by default. Enabling it in prod is the recommended posture once the image is
+    # built and `./gradlew jailContract` is green on the host; steps in the README ("Sandboxing the persona
+    # subprocess") and plan_docs/llm-sandbox.md §10. On a Keychain-based macOS host it needs
+    # `claude setup-token` + CLAUDE_CODE_OAUTH_TOKEN exported in the app's environment.
+    # ⚠ With the jail ON, deny-by-default egress applies: every WebFetch host and every article/feed host a
+    # persona should reach must ALSO be in aiforum.llm.jail.egress-allowlist, or the fetch is denied. (Feed
+    # COLLECTION itself is unaffected — it runs in-JVM on the host and is not jailed.)
+    jail:
+      enabled: false
   github:
     enabled: true
