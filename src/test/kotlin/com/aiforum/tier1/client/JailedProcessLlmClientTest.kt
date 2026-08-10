@@ -81,7 +81,7 @@ class JailedProcessLlmClientTest {
     )
 
     private fun runtime(home: File, runner: CommandRunner, p: JailProperties) =
-        JailRuntime(p, false, runner, home.absolutePath) { null }
+        JailRuntime(p, false, "", runner, home.absolutePath) { null }
 
     private fun value(argv: List<String>, flag: String): String? =
         argv.indexOf(flag).takeIf { it >= 0 }?.let { argv.getOrNull(it + 1) }
@@ -117,8 +117,13 @@ class JailedProcessLlmClientTest {
 
         // The container the run STARTED is the container the cancel KILLS — destroying the local
         // `docker run` client would leave the jailed persona running with its whole memory reservation.
+        // The trailing `rm -f` is the catch for a cancel that beat the daemon to creating it (JailRuntime
+        // .killContainer); here the kill succeeds first time, so there is no retry to see.
         val started = value(client.argv, "--name")
-        assertEquals(listOf(listOf("docker", "kill", started)), runner.calls)
+        assertEquals(
+            listOf(listOf("docker", "kill", started), listOf("docker", "rm", "-f", started)),
+            runner.calls,
+        )
     }
 
     @Test

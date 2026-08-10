@@ -109,7 +109,10 @@ class GenerationToolCallRepositoryTest {
     }
 
     @Test
-    fun `a NULL comment_id is accepted — a failed run still leaves a trace`() {
+    fun `a NULL comment_id is accepted — an unsaveable turn still leaves a trace`() {
+        // The narrow case V30's header describes: the model call SUCCEEDED and the reply could not be
+        // persisted (COULDNT_SAVE), so there is no comment row to link to. A turn that died at the LLM
+        // seam never reaches this repository at all — its calls were never returned.
         repo.record("run-1", null, listOf(ToolCall("t", "Read")))
 
         assertNull(rows().single().commentId)

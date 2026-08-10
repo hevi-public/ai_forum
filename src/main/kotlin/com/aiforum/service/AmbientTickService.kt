@@ -219,8 +219,30 @@ class AmbientTickService(
                 // failure mode the hook's own catch already tolerates. Growth semantics are untouched:
                 // still one branch-scoped autoGrow per settled node, so an owner-granted branch elsewhere
                 // in the thread is never drained by an ambient settle.
+                //
+                // Each node's round is ISOLATED, and that is the second half of the same argument. A bare
+                // flatMap lets the first node to throw take phase two with it, so every OTHER node's
+                // growth replies — already generated, already persisted, already paid for — go unpriced.
+                // The per-node catch narrows the loss window to exactly the throwing node's own
+                // in-flight round: the replies it had not finished producing when it died, which were
+                // never persisted and so were never spend anyone can attribute. Everything a sibling
+                // branch actually grew is still charged below. (The hook-level catch in
+                // GenerationService.summonAsync still guards whatever else in here might throw; this
+                // catch exists to keep ONE node's failure from being ALL nodes' failure. Exception,
+                // never Throwable: an Error propagates, matching this file's other catches.)
                 recordRunCost(runId, settled)
-                val grown = settled.flatMap { generation.autoGrow(pick.threadId, withinSubtreeOf = it.id) }
+                val grown = settled.flatMap { node ->
+                    try {
+                        generation.autoGrow(pick.threadId, withinSubtreeOf = node.id)
+                    } catch (e: Exception) {
+                        log.atWarn().setMessage("ambient growth round failed for node {}: {}")
+                            .addArgument(node.id).addArgument(e.message)
+                            .addKeyValue("event", EV_GROWTH_FAILED).addKeyValue("node", node.id)
+                            .addKeyValue("thread", pick.threadId)
+                            .addKeyValue("reason", e.message ?: e.javaClass.simpleName).setCause(e).log()
+                        emptyList()
+                    }
+                }
                 recordRunCost(runId, grown)
             },
         )
@@ -241,9 +263,32 @@ class AmbientTickService(
      * which is the one wrong answer an operator watching spend must never be given. A no-op or failed
      * tick reaches here not at all, so those rows stay unpriced too — correctly: their spend, if any, is
      * unattributable to any settled node.
+     *
+     * KNOWN EXCLUSION, and it is a real one: the 'Anyone' dispatcher's ROUTING turn is dispatched by the
+     * post action and is never charged here. [PersonaRouter.pick] returns only the chosen personas — it
+     * discards the response, and with it the usage — and it settles no node, so nothing carrying that
+     * spend ever reaches this function. A post run's figure is therefore its REPLIES' cost, slightly under
+     * the tick's true spend by one small routing call. Issue #16's surfaces document it where the number
+     * is read; it is named here because this is where the number is summed.
+     *
+     * ACCOUNTING NEVER ABORTS THE PRODUCT. The write is wrapped for the same reason
+     * [GenerationService.recordTrace] is: this runs inside the post-settle hook, in FRONT of the growth
+     * round, and a locked `ambient_run` row must not be able to cancel a round that pre-#15 accounting
+     * could not touch at all. It WARNs rather than debugs — a run that silently stops being priced is
+     * exactly the drift an operator watching spend needs told about (see the bdd-tiered-testing skill on
+     * log levels as contract).
      */
     private fun recordRunCost(runId: Long, replies: List<ReplyView>) {
-        replies.mapNotNull { it.costUsd }.takeIf { it.isNotEmpty() }?.let { ambientRuns.addCost(runId, it.sum()) }
+        val priced = replies.mapNotNull { it.costUsd }
+        if (priced.isEmpty()) return
+        try {
+            ambientRuns.addCost(runId, priced.sum())
+        } catch (e: Exception) {
+            log.atWarn().setMessage("could not price ambient run {}: {}")
+                .addArgument(runId).addArgument(e.message)
+                .addKeyValue("event", EV_COST_FAILED).addKeyValue("run", runId)
+                .addKeyValue("reason", e.message ?: e.javaClass.simpleName).setCause(e).log()
+        }
     }
 
     /** One eligible (thread, persona) pairing with its precomputed relevance, for the gate to rank. */
@@ -278,5 +323,10 @@ class AmbientTickService(
         const val EV_COMMENTED = "ambient.commented"
         const val EV_NOOP = "ambient.noop"
         const val EV_FAILED = "ambient.failed"
+
+        // Best-effort faults inside the post-settle hook (issue #15). Both are WARN, not ERROR: the tick
+        // itself succeeded and the room is unaffected — what is lost is a figure and a follow-up round.
+        const val EV_COST_FAILED = "ambient.cost.failed"
+        const val EV_GROWTH_FAILED = "ambient.growth.failed"
     }
 }
