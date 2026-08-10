@@ -1,5 +1,6 @@
 package com.aiforum.tier2.service
 
+import ch.qos.logback.classic.Level
 import com.aiforum.ambient.Article
 import com.aiforum.ambient.ArticleSource
 import com.aiforum.ambient.TickSource
@@ -17,6 +18,7 @@ import com.aiforum.repo.PersonaRepository
 import com.aiforum.repo.ThreadRepository
 import com.aiforum.service.AmbientTickService
 import com.aiforum.service.GenerationService
+import com.aiforum.testsupport.LogCapture
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -84,6 +86,9 @@ class AmbientTickServiceTest {
     private class RecordingRuns : AmbientRunRepository(JdbcTemplate(), Clock.systemUTC()) {
         val runs = mutableListOf<AmbientRun>()
         val added = mutableListOf<Pair<Long, Double>>()
+
+        /** When set, every [addCost] throws — a locked accounting UPDATE (SQLITE_BUSY) in one flag. */
+        var costThrows = false
         override fun count() = runs.size
         override fun record(
             source: TickSource,
@@ -105,6 +110,7 @@ class AmbientTickServiceTest {
         }
 
         override fun addCost(runId: Long, deltaUsd: Double) {
+            if (costThrows) throw RuntimeException("accounting UPDATE is locked")
             added += runId to deltaUsd
         }
     }
@@ -131,6 +137,9 @@ class AmbientTickServiceTest {
          *  the two-phase cost write (issue #15) can be driven without a real generation. */
         var growthReplies: List<ReplyView> = emptyList()
 
+        /** Subtree roots whose growth round explodes — one node failing while its siblings do not. */
+        var growthThrowsFor: Set<String> = emptySet()
+
         /** How many runs had been recorded by the time each summon was dispatched — the record-BEFORE-
          *  dispatch proof (issue #15). Populated by the test's own probe, index-aligned with [summons]. */
         var onSummon: () -> Unit = {}
@@ -153,7 +162,9 @@ class AmbientTickServiceTest {
         }
 
         override fun autoGrow(threadId: String, withinSubtreeOf: String?): List<ReplyView> {
+            // Recorded BEFORE the throw, so a test can prove the attempt happened as well as that it failed.
             grown += threadId to withinSubtreeOf
+            if (withinSubtreeOf in growthThrowsFor) throw RuntimeException("growth round exploded for $withinSubtreeOf")
             return growthReplies
         }
     }
@@ -464,6 +475,69 @@ class AmbientTickServiceTest {
         hook.invoke(emptyList())
 
         assertTrue(runs.added.isEmpty(), "no priced reply means no UPDATE — never a claimed zero")
+    }
+
+    @Test
+    fun `a failing cost write never aborts the growth round that follows it`() {
+        // Accounting must never be able to abort product behaviour. Before issue #15 the growth round could
+        // not be blocked by accounting because there WAS no accounting write in this hook; the phase-one
+        // cost UPDATE put one in front of it, and an unguarded throw there (a locked row, a closed pool)
+        // would take the whole round down with it. The reply is the product; the figure is commentary.
+        val threads = RecordingThreads(listOf(thread("T1", "Scaling SQLite")))
+        val runs = RecordingRuns().apply { costThrows = true }
+        val gen = SpyGeneration()
+        val personas = RosterPersonas(listOf(persona("sol", abilities = listOf("sqlite"), talkativeness = 8)))
+        val svc = service(FakeSource(emptyList()), personas, threads, runs, gen)
+
+        svc.tick(TickSource.MANUAL)
+        LogCapture.on(AmbientTickService::class.java).use { logs ->
+            gen.settleHooks.single()!!.invoke(listOf(settledView("c1", 0.05)))
+
+            // The lost figure is operator-actionable — a run that silently stops being priced is exactly
+            // the drift an operator watching spend needs told about — so it WARNs, under a stable id.
+            val e = logs.withEvent("ambient.cost.failed").single()
+            assertEquals(Level.WARN, e.level)
+            assertEquals("accounting UPDATE is locked", logs.keyValue(e, "reason"))
+        }
+
+        assertEquals(
+            listOf("T1" to "c1"), gen.grown,
+            "the growth round runs even though its cost write threw — accounting never blocks the product",
+        )
+        assertTrue(runs.added.isEmpty(), "nothing was priced, and nothing pretended to be")
+    }
+
+    @Test
+    fun `one node's growth failure does not lose a sibling node's growth cost`() {
+        // Per-node isolation. autoGrow used to be flat-mapped bare, so the FIRST node to throw took the
+        // whole phase-two write with it — and the already-persisted growth replies of every other node
+        // went unpriced, spend that really happened and would never be charged. Each node's round is now
+        // its own attempt; the loss window is the throwing node's own in-flight round and nothing else.
+        val threads = RecordingThreads(listOf(thread("T1", "Scaling SQLite")))
+        val runs = RecordingRuns()
+        val gen = SpyGeneration()
+        gen.growthThrowsFor = setOf("c1")
+        gen.growthReplies = listOf(settledView("g1", 0.04))
+        val personas = RosterPersonas(listOf(persona("sol", abilities = listOf("sqlite"), talkativeness = 8)))
+        val svc = service(FakeSource(emptyList()), personas, threads, runs, gen)
+
+        svc.tick(TickSource.MANUAL)
+        LogCapture.on(AmbientTickService::class.java).use { logs ->
+            gen.settleHooks.single()!!.invoke(listOf(settledView("c1", 0.05), settledView("c2", 0.05)))
+
+            val e = logs.withEvent("ambient.growth.failed").single()
+            assertEquals(Level.WARN, e.level, "a swallowed growth round must not be silent")
+            assertEquals("c1", logs.keyValue(e, "node"))
+        }
+
+        assertEquals(
+            listOf("T1" to "c1", "T1" to "c2"), gen.grown,
+            "c1's failure must not stop c2's branch from growing",
+        )
+        assertEquals(
+            listOf(1L to 0.10, 1L to 0.04), runs.added.map { it.first to round4(it.second) },
+            "phase two still charges the growth that DID happen — c2's round",
+        )
     }
 
     /** Double addition is inexact; the run row is read at 4dp, so compare at the precision that ships. */

@@ -126,6 +126,42 @@ class ClaudeStreamParserTest {
     }
 
     @Test
+    fun `an array-shaped tool_result with no text parts stringifies rather than storing a blank`() {
+        // The stringify-don't-drop contract applies to the ARRAY branch too. A screenshot tool answers with
+        // an image part and no text at all; storing "" would tell an operator the tool returned nothing,
+        // when in fact it returned something this parser has no text to show for. The array's own compact
+        // JSON is the honest account.
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Screenshot", "{}"))
+        val image = """[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBOR"}}]"""
+        p.onLine(toolResult("toolu_1", image))
+
+        assertEquals(image, p.toolCalls().single().outputSummary)
+    }
+
+    @Test
+    fun `text parts win over the fallback when the array has any`() {
+        // The fallback is for an array that yielded NOTHING — a mixed array still reports its text, which
+        // is what an operator reads, not the JSON around it.
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Read", "{}"))
+        p.onLine(toolResult("toolu_1", """[{"type":"image","source":{"data":"iVBOR"}},{"type":"text","text":"caption"}]"""))
+
+        assertEquals("caption", p.toolCalls().single().outputSummary)
+    }
+
+    @Test
+    fun `an EMPTY array stays empty — there genuinely was nothing to stringify`() {
+        // The one case the fallback must not fire on: "[]" carries no evidence, and echoing the two
+        // brackets back would be noise dressed as a summary.
+        val p = parser()
+        p.onLine(assistantToolUse("toolu_1", "Read", "{}"))
+        p.onLine(toolResult("toolu_1", "[]"))
+
+        assertEquals("", p.toolCalls().single().outputSummary)
+    }
+
+    @Test
     fun `two interleaved tools keep arrival order and pair by id, not by position`() {
         // The results come back in the OPPOSITE order to the calls — which is exactly why the pairing key
         // is the tool_use_id. Arrival order is still what the trace reports, because that is what `seq`

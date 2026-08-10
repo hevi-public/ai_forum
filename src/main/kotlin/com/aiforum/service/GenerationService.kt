@@ -720,8 +720,11 @@ class GenerationService(
 
     /**
      * Persist the tool calls [resp] reported, keyed by the generation id and linked to the reply when it
-     * POSTED (issue #15). A COULDN'T_SAVE / failed node records with a NULL comment_id: the trace of a
-     * generation that couldn't be stored is exactly the one an operator needs.
+     * POSTED (issue #15). A COULDNT_SAVE node records with a NULL comment_id: the trace of a generation
+     * that RAN and then couldn't be stored is exactly the one an operator needs. That is the only NULL
+     * case reachable from here — a node that failed AT the seam arrives with `resp == null` and no calls
+     * to record (see [settleOne]'s note), which is why V30's header claims the unsaveable turn rather
+     * than "a failed run".
      *
      * Wrapped so a trace failure can NEVER fail a settle. The reply is the product; the audit row is
      * commentary on it, and losing a persona's answer because an INSERT into an accounting table tripped

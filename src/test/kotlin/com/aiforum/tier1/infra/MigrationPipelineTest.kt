@@ -182,7 +182,9 @@ class MigrationPipelineTest {
                 // which V17's (thread_id, depth, created_at) can serve, plan_docs/ambient-slice-6.md; V30
                 // added generation_tool_call — issue #15's audit trail for the tools a generation reached
                 // for, the sibling of the stance/interest/memory audit tables, deliberately FK-free on
-                // run_id so a failed run's trace survives).
+                // run_id so an UNSAVEABLE turn's trace survives with a NULL comment_id; a turn that died
+                // at the LLM seam records nothing at all, which V30's header now states rather than
+                // overclaims).
                 // Bump this with every migration — it is the check that a new migration actually RUNS
                 // against an old database rather than only a fresh one.
                 st.executeQuery("SELECT MAX(CAST(version AS INTEGER)) AS v FROM flyway_schema_history").use { rs ->

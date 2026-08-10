@@ -145,17 +145,27 @@ class ClaudeStreamParser(private val runId: String, private val clock: Clock = C
 
     /**
      * The text of a `tool_result`'s `content`, which the CLI writes in whichever of three shapes suits
-     * the tool: a bare string, an array of content parts (take the `text` of each text part), or some
-     * other node. Anything unrecognised is stringified rather than dropped — an odd-shaped result is
-     * still evidence of what the tool answered, and an operator reading a trace would rather see JSON
+     * the tool: a bare string, an array of content parts (the `text` of each text part, newline-joined),
+     * or some other node. Anything unrecognised is stringified rather than dropped — an odd-shaped result
+     * is still evidence of what the tool answered, and an operator reading a trace would rather see JSON
      * than a blank.
+     *
+     * STRINGIFY-DON'T-DROP APPLIES INSIDE THE ARRAY BRANCH TOO. An array of parts none of which carries a
+     * string `text` — a screenshot's `image` part, a resource reference — used to join to `""`, which is
+     * the branch quietly contradicting the rule the other two branches follow: `""` reads as "the tool
+     * answered nothing" when the tool in fact answered something this parser has no text for. So a
+     * NON-EMPTY array that yielded no text falls back to its own compact JSON. A GENUINELY EMPTY array
+     * (`[]`) stays `""` — there is nothing to stringify, and echoing two brackets back would be noise
+     * dressed as evidence. Text parts still win whenever there are any: a mixed array reports its text,
+     * not the JSON around it, because the text is what an operator reads.
      */
     private fun extractText(content: JsonNode?): String? = when {
         content == null || content.isNull -> null
         content.isString -> content.stringValue()
-        content.isArray -> content.mapNotNull { part ->
-            part.get("text")?.takeIf { it.isString }?.stringValue()
-        }.joinToString("\n")
+        content.isArray -> {
+            val texts = content.mapNotNull { part -> part.get("text")?.takeIf { it.isString }?.stringValue() }
+            if (texts.isEmpty() && content.size() > 0) content.toString() else texts.joinToString("\n")
+        }
         else -> content.toString()
     }
 

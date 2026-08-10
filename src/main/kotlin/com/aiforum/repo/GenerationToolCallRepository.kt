@@ -24,8 +24,12 @@ class GenerationToolCallRepository(
     /**
      * Append [toolCalls] as the trace of generation [runId], numbered from 1 in the order observed.
      *
-     * [commentId] is the settled reply when it POSTED and null otherwise — a failed run still leaves its
-     * trace, which is when an operator most wants one (V30's header).
+     * [commentId] is the settled reply when it POSTED and null otherwise. "Otherwise" is narrower than it
+     * sounds and V30's header spells it out: the null case is the turn whose model call SUCCEEDED but
+     * whose reply could not be persisted (COULDNT_SAVE), which is exactly the trace an operator would
+     * otherwise have nowhere to read. A turn that died AT THE SEAM never reaches this method at all — its
+     * calls were never returned — so this is not "a failed run still leaves its trace"; it is "a
+     * generation that finished and could not be stored still leaves its trace".
      *
      * Two deliberate defences, both cheap:
      *  - **The summaries are re-clipped here.** The parser already clipped them; this door clips again so

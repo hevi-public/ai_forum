@@ -20,20 +20,30 @@
 -- comment's id — because that is the identity the AG-UI stream, the in-flight registry and the settled
 -- row already share. One tick fans out N generations plus, on the comment action, a whole growth round;
 -- an owner summon has no tick behind it at all. So a FK to ambient_run would be wrong for most rows and
--- impossible for the rest. There is deliberately NO foreign key here in either direction: a run that
--- FAILED still leaves its trace, which is precisely when an operator most wants to see what the model
--- was doing before it died.
+-- impossible for the rest. There is deliberately NO foreign key here in either direction, and the row
+-- that freedom buys is the UNSAVEABLE one: a turn whose model call SUCCEEDED but whose reply could not
+-- be persisted (COULDNT_SAVE, UX state E) still leaves its trace, hanging on run_id alone with a NULL
+-- comment_id — there being no comment row for a foreign key to point at.
+--
+-- WHAT THAT DOES NOT COVER — spelled out because the opposite is the natural thing to assume, and a
+-- header is the worst place to leave an assumption uncorrected. A turn that dies AT THE SEAM (timeout,
+-- rate limit, process death, a malformed envelope) records NOTHING AT ALL. The response never returns,
+-- so the calls that turn made exist only inside a parser owned by the seam that threw, and smuggling
+-- them out through the exception would put audit plumbing into the failure taxonomy the whole app reads.
+-- That is issue #15's one documented limitation rather than an oversight — but it means "a failed run
+-- still leaves its trace" is an OVERCLAIM: what survives is specifically the generation that FINISHED
+-- and could not be stored, never the generation that never finished.
 --
 -- WHY comment_id IS NULLABLE, AND WHY IT CASCADES. It is linked when the reply POSTED, and left NULL
--- otherwise, so a failed or unsaveable generation still leaves a trace nobody has to go looking for in
--- a log. ON DELETE CASCADE because a deleted reply's trace has nothing left to explain — the reply it
--- described is gone, and an orphan row about invisible text is noise. CONTRAST V21's ambient_run
--- thread_id, which is ON DELETE SET NULL for the opposite reason: the SPEND happened either way, so
--- cost history must outlive the thread it opened. Spend survives; explanation does not. Note that
--- DatabaseResetHooks still wipes this table EXPLICITLY per house discipline, and here that is
+-- otherwise — which, per the paragraph above, means the unsaveable turn: its trace is the one nobody has
+-- to go looking for in a log. ON DELETE CASCADE because a deleted reply's trace has nothing left to
+-- explain — the reply it described is gone, and an orphan row about invisible text is noise. CONTRAST
+-- V21's ambient_run thread_id, which is ON DELETE SET NULL for the opposite reason: the SPEND happened
+-- either way, so cost history must outlive the thread it opened. Spend survives; explanation does not.
+-- Note that DatabaseResetHooks still wipes this table EXPLICITLY per house discipline, and here that is
 -- load-bearing rather than merely tidy: the CASCADE only reaches comment-linked rows, so the
--- NULL-comment traces — the failed runs, the ones that matter most — cascade from nothing and would
--- survive into the next scenario.
+-- NULL-comment traces — the unsaveable turns — cascade from nothing and would survive into the next
+-- scenario.
 --
 -- TRUNCATION CAPS ARE ENFORCED IN KOTLIN, NOT HERE. A tool input is a JSON blob a model wrote and an
 -- output is whatever the tool printed — a bash run, a diff, a fetched page — all unbounded, and an audit
@@ -61,7 +71,7 @@ CREATE TABLE generation_tool_call (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     -- The generation's id: the in-flight node id == the settled comment's id. No FK, deliberately.
     run_id         TEXT    NOT NULL,
-    -- Linked when the reply POSTED; NULL keeps a failed run's trace. CASCADE: see the header.
+    -- Linked when the reply POSTED; NULL keeps an unsaveable turn's trace. CASCADE: see the header.
     comment_id     TEXT    REFERENCES comment(id) ON DELETE CASCADE,
     -- 1-based call order within the generation, as observed. Ordering, not a magnitude.
     seq            INTEGER NOT NULL,

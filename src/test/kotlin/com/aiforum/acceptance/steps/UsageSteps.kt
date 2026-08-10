@@ -70,8 +70,9 @@ class UsageSteps(
      *     | seq | tool | linked |
      *
      * `linked` is yes/no for "comment_id points at the posted reply", which is the column that makes a
-     * row explainable — the run id is the settled comment's id, so a POSTED reply links and a failed run
-     * leaves the trace with a NULL comment_id rather than no trace at all.
+     * row explainable — the run id is the settled comment's id, so a POSTED reply links, while a turn
+     * that generated fine and then could not be SAVED leaves the trace with a NULL comment_id rather than
+     * no trace at all. (A turn that died at the LLM seam leaves no rows here at all; V30's header says so.)
      */
     @Then("the generation's tool calls are recorded:")
     fun toolCallsAreRecorded(table: DataTable) {
