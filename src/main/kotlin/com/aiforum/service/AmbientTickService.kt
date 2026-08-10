@@ -223,23 +223,25 @@ class AmbientTickService(
                 // Each node's round is ISOLATED, and that is the second half of the same argument. A bare
                 // flatMap lets the first node to throw take phase two with it, so every OTHER node's
                 // growth replies — already generated, already persisted, already paid for — go unpriced.
-                // Per-node runCatching narrows the loss window to exactly the throwing node's own
+                // The per-node catch narrows the loss window to exactly the throwing node's own
                 // in-flight round: the replies it had not finished producing when it died, which were
                 // never persisted and so were never spend anyone can attribute. Everything a sibling
                 // branch actually grew is still charged below. (The hook-level catch in
                 // GenerationService.summonAsync still guards whatever else in here might throw; this
-                // catch exists to keep ONE node's failure from being ALL nodes' failure.)
+                // catch exists to keep ONE node's failure from being ALL nodes' failure. Exception,
+                // never Throwable: an Error propagates, matching this file's other catches.)
                 recordRunCost(runId, settled)
                 val grown = settled.flatMap { node ->
-                    runCatching { generation.autoGrow(pick.threadId, withinSubtreeOf = node.id) }
-                        .onFailure { e ->
-                            log.atWarn().setMessage("ambient growth round failed for node {}: {}")
-                                .addArgument(node.id).addArgument(e.message)
-                                .addKeyValue("event", EV_GROWTH_FAILED).addKeyValue("node", node.id)
-                                .addKeyValue("thread", pick.threadId)
-                                .addKeyValue("reason", e.message ?: e.javaClass.simpleName).setCause(e).log()
-                        }
-                        .getOrElse { emptyList() }
+                    try {
+                        generation.autoGrow(pick.threadId, withinSubtreeOf = node.id)
+                    } catch (e: Exception) {
+                        log.atWarn().setMessage("ambient growth round failed for node {}: {}")
+                            .addArgument(node.id).addArgument(e.message)
+                            .addKeyValue("event", EV_GROWTH_FAILED).addKeyValue("node", node.id)
+                            .addKeyValue("thread", pick.threadId)
+                            .addKeyValue("reason", e.message ?: e.javaClass.simpleName).setCause(e).log()
+                        emptyList()
+                    }
                 }
                 recordRunCost(runId, grown)
             },
