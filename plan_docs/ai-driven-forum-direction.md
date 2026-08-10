@@ -169,9 +169,17 @@ roomful cap. Spend is visible per-run in `ambient_run` (see §3).
   provider abstraction is the pressure valve (LM Studio local model for cheap gating per §10,
   or an API-key provider if ambient ever outgrows the subscription).
 
-**Prompt-caching posture (researched 2026-07-18):** caching is automatic in `claude -p` (reads
-~0.1× input price, writes at a 1.25×/2× premium) but the TTL is 5 minutes (1 hour max) — so it
-pays **within** a tick, never **across** ticks hours apart. Consequences:
+**Prompt-caching posture (researched 2026-07-18; TTL corrected 2026-08-09):** caching is automatic
+in `claude -p` (reads ~0.1× input price, writes at a 1.25×/2× premium), so it pays **within** a
+tick, never **across** ticks hours apart. ⚠ **The premise under this paragraph changed; the
+conclusion did not.** It was written against a TTL of 5 minutes (1 hour max). Current docs put the
+cache lifetime at **one hour on a subscription**, dropping to five minutes only once a run draws on
+**usage credits** — and five minutes by default on an API key or cloud provider, with
+`ENABLE_PROMPT_CACHING_1H=1` buying the hour back on credits (code.claude.com/docs/en/costs).
+**Re-affirmed 2026-08-09 for ambient:** at 2–4 ticks/day the gap between ticks is hours, so even the
+hour never spans two of them and every consequence below stands unchanged. What the corrected number
+*does* move is Fork C, whose turns are minutes apart — inside the hour: `work-fork-direction.md` §3.5
+re-derives the sessions decision there rather than inheriting it. Consequences:
 
 - Batch a tick's calls close together in time: the dispatcher + persona generations share
   Claude Code's stable tool-definitions prefix; same-persona calls share more
@@ -181,7 +189,9 @@ pays **within** a tick, never **across** ticks hours apart. Consequences:
   hours later re-sends the whole grown transcript at full price after cache expiry, so
   per-tick cost would grow monotonically. Stateless per-run invocations with the compact
   per-branch-scoped prompt the app already assembles are strictly cheaper — **the DB is the
-  memory**, sessions are not.
+  memory**, sessions are not. *(This is an **ambient-cadence** conclusion, and holds on the
+  corrected one-hour TTL above for exactly that reason. A Fork C work session's turns are minutes
+  apart and must re-derive it — `work-fork-direction.md` §3.5.)*
 - `--bare` mode (smaller prompts) is unavailable on subscription auth (it skips OAuth and
   needs an API key) — not a lever here.
 
@@ -398,3 +408,4 @@ Rewordings are recorded here now but applied only in the slice PR that actually 
 | 2026-07-26 | **The §6.3 root ships NOW as storage** (`kind='root'`, owner-only via DDL CHECK) **and is injected NEVER this slice** — the recorded owner call | A CHECK is free at table birth and only *conditional* afterwards — retrofitting one validates every existing row and aborts on the first violator (and costs a full table rebuild on an engine without the `ALTER … ADD CHECK` syntax), so a deferred root would be betting the unenforced rule had never been broken; the row ships when the table is born. *(The original rationale here said SQLite cannot add a CHECK by ALTER at all — overstated, corrected at the persona-memory review close-out; the decision is unchanged.)* Injecting now would put two identity sources in one prompt with undecided precedence; prompt identity stays solely the composed `system_prompt`, and a later slice wires injection with its own steer and truncation decisions |
 | 2026-07-26 | **Digits are allowed in memory prose; the no-numbers guardrail binds on rating SHAPES at parse** — no body-level GLOB, deliberately unlike V27's CHECK | This forum's own subject matter is digit-saturated ("we argued about WAL mode in V27"), and a body GLOB plus rejected-never-stamps re-buys the same judgment weekly (the V26/PR#6 cost shape, judged fatal in design C). The Stays-Cut line is a number that is model-written AND machine-read into selection as a magnitude — and word-overlap matching never parses a number out of a body |
 | 2026-07-26 | **Revert deletes the scribe's row but does NOT roll the watermark back** — an argued departure from the S4a/S4b revert-reopens-the-window precedent | There, rollback makes lost *prior state* re-derivable from future evidence; here revert is pure deletion — there is no prior state — and rollback would *guarantee* the next run re-reads the same evidence and re-manufactures the row the owner just killed: an owner-fight loop. Trade-off named: a genuinely new memory inside the consumed window is also lost, acceptable at ≤1 memory per member per week |
+| 2026-08-09 | **The prompt-cache TTL premise is corrected — one hour on a subscription**, five minutes only when drawing on usage credits (§8). The 2026-07-18 "stateless per-run `claude -p` invocations" row above is **re-affirmed for ambient, not rewritten** | The number that row reasoned from was wrong; its conclusion was not. At 2–4 ticks/day the gap between ticks is hours, so an hour-long cache still never spans two ticks and stateless per-run calls stay strictly cheaper. Appended as a new row because this log is append-only — and because the correction is not inert: **Fork C**, whose turns are minutes apart, sits *inside* the corrected hour and must re-derive the sessions decision instead of inheriting it (`work-fork-direction.md` §3.5) |

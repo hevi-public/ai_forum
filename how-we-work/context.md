@@ -125,6 +125,12 @@ time; the owner participates as a peer. Direction doc: `plan_docs/ai-driven-foru
 (success criteria, ambient-loop architecture, `ArticleSource` as the fifth IO port, slice map
 S1–S6, acceptance-spec delta over the 45 features, subscription-terms/cost/caching envelope —
 ambient runs headless `claude -p` on the subscription, few ticks/day, stateless per-run calls).
+*(Caching envelope corrected 2026-08-09: it was written against a 5-minute prompt-cache TTL. The
+lifetime is **one hour on a subscription**, and drops to five minutes only when a run draws on usage
+credits — `ENABLE_PROMPT_CACHING_1H=1` buys the hour back. The stateless-per-run conclusion survives
+for **ambient**, since ticks hours apart outrun even the hour, but it is an ambient-cadence
+conclusion: **Fork C**, whose turns are minutes apart, must re-derive it rather than inherit it —
+`plan_docs/work-fork-direction.md` §3.5.)*
 Spec bumped to v1.16 (Fork B decision-log rows + pointer; header version re-synced). Dev port
 moved **8081 → 8020** (`application-dev.yml` + `.claude/launch.json`; prod stays 8080).
 
@@ -415,6 +421,154 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
     id change. `TestData` gained per-call defaulted `agoSeconds`; a **global monotonic stagger was
     refused** because it moves the unread boundary under every scenario that seeds a comment then reads.
 
+**2026-08-09 (Fork C direction — paper only, no code, no migration, no `verifyAll` impact):**
+`plan_docs/work-fork-direction.md` written, so the **Work** fork finally has what Fork B has had
+since 2026-07-18 — its own success criterion, a §2 anti-scope-drift table, and its own decision log
+(§12). The criterion is **"a finished session's record is worth reading, and worth replying into"**
+— read / branch / re-enter — and is deliberately *not* Fork B's "worth opening between sessions",
+which no coding slice can satisfy; a Fork C slice may leave the forum quieter and still be right.
+Four findings recorded in its §3 so nobody re-derives them:
+- **The Claude Agent SDK is not usable on a Claude subscription.** Third-party products may not
+  offer claude.ai login or rate limits (the SDK included) and are directed to API keys; SDK use
+  falls under the Commercial Terms. The SDK is Python/TS only, and the documented cross-language
+  path is running the CLI as a subprocess — which `ProcessLlmClient` already is. Nothing to change.
+- **A subagent trace IS a nested comment tree.** In `--output-format stream-json` a subagent
+  message's `parent_tool_use_id` is the spawning tool call's id; main-conversation messages carry
+  null — `comment.parent_id`'s shape exactly. That is the argument for building Fork C on this
+  codebase rather than clean. ⚠ **Subagent text is not in the default stream**: only `tool_use` /
+  `tool_result` blocks are, unless `--forward-subagent-text` is passed (Claude Code ≥ v2.1.211;
+  nested depths ≥ v2.1.219). The tree is free, the bodies are a flag with a version floor.
+- **Voice has no API** — Anthropic's own surfaces only, transcription of recorded audio aside. Web
+  Speech + a self-built TTS is the only web-UI path. Deferred, not designed.
+- **The 5-hour / weekly plan bars are not scriptable** — `/usage` computes from local session
+  history on that machine, and OTel export has no plan windows. Per-run `total_cost_usd` off the
+  stream is the honest ceiling (#15 stores it, #16 renders it).
+Also corrected in three places, because the number was load-bearing: **the prompt-cache TTL is one
+hour on a subscription**, five minutes only when drawing on usage credits. The direction doc's
+"stateless per-run, the DB is the memory" conclusion is **re-affirmed for ambient, not rewritten**
+(ticks hours apart outrun even the hour) — §8 amended, and a new superseding row appended to its
+§12 rather than editing the 2026-07-18 one. Fork C, whose turns are minutes apart, sits *inside* the
+corrected hour and must re-derive `--resume` instead of inheriting the ruling.
+
+**2026-08-09 (issue #18, diff hardening):** the PR-diff code fence in `PrThreadFormat.body` is now
+DYNAMIC (`codeFence`, private) — length `max(3, longest interior backtick run + 1)`, always strictly
+longer than any backtick run inside the (already line-budget-capped) diff text. The fixed ```` ``` ````
+opener it replaces was a markdown-injection hole, not the raw-HTML XSS the two-half firewall already
+covers: a unified-diff CONTEXT line carries a single-space prefix, and commonmark accepts a CLOSING
+fence indented up to 3 spaces, so a diff whose context happens to echo a markdown file's own unchanged
+` ``` ` line (fully attacker-controlled — anyone can open a PR against a public repo) legally closes the
+block early. Proven red-first: on the unfixed code a crafted PR diff rendered a LIVE
+`<img src="https://evil.example/…">` once the fence broke — a markdown-SYNTAX image, which escapeHtml
+doesn't touch since it's synthesized output rather than raw HTML the author typed — while a
+`javascript:` link and a raw `<img>` tag in the SAME hostile diff stayed neutralized by the two existing
+firewall halves. Containment, not scheme-sanitization, was the actual gap; PR #92's firewall
+(`MarkdownRenderer`) needed no change. highlight.js's `diff` language (the vendored webjar) and
+`.hljs-addition`/`.hljs-deletion` (already themed both modes, `hljs-theme.css`) needed no change either
+— confirmed by a new end-to-end Tier-0 pin rendering real +/- diff lines, so `CodeHighlighter` stayed
+untouched too. Acceptance floor (`build.gradle.kts`) converted from a bare zero-check into a real ratchet
+(286, replacing the placeholder `1`) alongside one new thin scenario (`github_pr_thread.feature`: "The
+PR's diff renders syntax-highlighted in the opening post") — 286 is `verifyAll`'s printed executed count
+this run, +1 scenario from this slice. Tier0 +6 (`PrThreadFormatTest`, `MarkdownRendererTest`); full
+`verifyAll` green (tier0/1/2 443/265/165, acceptance 286, jsTest 100).
+
+**2026-08-10 (issue #18 follow-up, description-fence hardening):** the dynamic diff fence above only
+protects the DIFF's own opener — it couldn't help against a dangling fence left open in the PR
+**description** (`pull.body`, raw attacker markdown sitting ABOVE the machine-generated sections):
+commonmark treats everything below an unclosed fence as that fence's content until some LATER line
+closes it, and a diff's own space-prefixed ` ``` ` context line is exactly such a closer, spilling the
+REST of the diff into live markdown once it fires. Fixed with `PrThreadFormat.closeDanglingFence`
+(private, pure): tracks fence state line-by-line per commonmark (opens on up to-3-space-indented
+```` ``` ```` +/`~~~`+ with an optional info string; closes on a later same-character run at least as
+long, up to 3 leading spaces, nothing else but trailing spaces) and appends a matching closer when the
+description ends still open; an already-closed description passes through byte-identical. Applied where
+the description is appended into `body()`, with the invariant now stated in the code comment there.
+Proven red-first: the unfixed `MarkdownRendererTest` case rendered a LIVE
+`<img src="https://evil.example/pwned.png">` from a description ending in a dangling ` ``` ` combined
+with the same hostile diff shape as the 08-09 fix. Tier0 +5 (4 `PrThreadFormatTest` — triple-backtick,
+tilde, 5-backtick, closed-passthrough — +1 `MarkdownRendererTest` end-to-end); `verifyAll` green
+(tier0/1/2 448/265/165, acceptance 286 — floor unchanged, no new scenarios — jsTest 100).
+
+- **Issue #17 — room-poll read-order re-verification + `<pre>` scroll containment** ✅ 2026-08-09. Two
+  independent, unrelated fixes filed under one issue number:
+  - **Part 1 (verification, no production code change).** The read-skew flake this context.md file
+    already recorded as fixed (the struck-through entry in Open threads / near-term, below) genuinely
+    was fixed — but mutation-checking it (temporarily flip the two reads in `ThreadReplies.read`, run
+    `RoomPollTest`) showed the existing pins are order-INSENSITIVE: green whether the order is right or
+    wrong, because their fixtures are static snapshots with nothing changing between the two reads. See
+    the dated addendum on that entry for the full mutation-check record. Closed by adding a
+    controlled-interleaving test to `ThreadRepliesTest` — no new production code.
+  - **Part 2 (`static/app.css`).** `.reply .body pre`, `.thread__body pre`, and `.attachment__caption
+    pre` had no `max-height`, so a long body stretched the page — about to become routine once issue
+    #15's tool-output persistence lands. Added `max-height: 60vh` and made `pre` the single scroll
+    container (both axes) across all three sites, neutralizing hljs-theme.css's own `overflow-x:auto`
+    on `code.hljs` so a highlighted block doesn't double-scroll (an inner bar plus an outer one). Closed
+    a second, previously-unnoticed gap in the same rules: an UNHIGHLIGHTED fence (no language, or a
+    language `highlight.js` doesn't recognise — see `MarkdownRenderer.kt`'s `HighlightedCodeBlockRenderer`)
+    never carries the `.hljs` class, so none of hljs-theme.css's rules reached it at all — no padding,
+    and a long line was silently clipped by the old `overflow: hidden` rather than scrollable. Verified
+    `overflow: auto` (not `hidden`) still clips descendants to the border-radius (an element's own
+    overflow always clips to its own border-box, whatever the value) both by reasoning and visually.
+  - **Visual verification without touching the dev DB.** The Browser-pane MCP tool (`preview_start`)
+    timed out twice (600s combined) in this environment. Fallback: a hand-assembled static harness
+    (structurally real — read verbatim off `replyNode.kte`/`threadOp.kte`/`MarkdownRenderer.kt`'s actual
+    output shape, not executed) linking the real `app.css`/`hljs-theme.css`, driven headlessly over CDP
+    via a cached Playwright Chromium binary and Node 22's built-in `WebSocket` (no npm install) — full-
+    page screenshots plus `getBoundingClientRect`/`getComputedStyle`/`scrollHeight` assertions per case,
+    both `data-theme` values. A scrolled-state capture (`scrollTop`/`scrollLeft` set before the shot)
+    confirmed the clip is a genuine scroll, not a hard truncation that merely looks similar.
+  - **No new acceptance scenario.** A CSS-only change adds no new markup, class, or `data-*` hook for an
+    HTTP-level probe to assert against — "the class is present" would be a test that cannot fail. Floor
+    left untouched (S4b lens: what implementation would make this assertion red? none).
+  - **Addendum, 2026-08-10 — the "across all three sites" neutralization claim above was wrong for two of
+    them.** Measured, not assumed: hljs-theme.css's rule is `[data-theme="x"] pre code.hljs` — an
+    attribute selector counts as a class, so its specificity is (0,2,2). `.reply .body pre code.hljs` is
+    (0,3,2) (three classes: `.reply`, `.body`, `.hljs`) and wins outright, any link order.
+    `.thread__body pre code.hljs` and `.attachment__caption pre code.hljs` are each only (0,2,2) — an
+    exact TIE, and hljs-theme.css links AFTER app.css (`layout.kte`), so it wins ties: the neutralization
+    was DEAD on those two sites, `overflow-x` stayed `auto`, and a highlighted block double-scrolled there
+    (an inner bar on `code.hljs` plus the outer one on `pre`) exactly as issue #17 was meant to prevent.
+    The gap shipped unnoticed because the verification harness only ever probed
+    `.reply .body pre code.hljs`'s `overflow-x` (`shoot.mjs`'s old `codeHljsOverflowX` field) — never the
+    other two sites — and neither the thread-body nor the caption fixture in the harness had a case wide
+    enough to overflow horizontally at all, so the tie had nothing to visibly fail against even by eye.
+    Fixed by raising the two tied selectors' specificity with an always-true `[data-theme]` prefix (the
+    same attribute hljs-theme.css itself keys off, so it can only ever be at least as specific, no made-up
+    class to keep in sync) — `.reply .body pre code.hljs` deliberately left unprefixed, verified not to
+    need it. Verified by reverting just the prefix and re-running the harness probe: `thread_hljsSeam`/
+    `caption_hljsSeam` `overflowX` regressed from `visible` to `auto` on both `data-theme` values,
+    confirming the tie is real and the fix closes it; reply's stayed `visible` either way. Also closed a
+    second, related gap while fixing the first: even where the neutralization did apply, `code.hljs`/
+    `code:not(.hljs)` sat at the `pre`'s client width while its content could be wider — once
+    `overflow-x` is `visible`, a long line's glyphs painted past the right edge of the element's own
+    background/padding box, a bare-text seam past where the theme's highlight fill stopped. Fixed with
+    `width: max-content; min-width: 100%; box-sizing: border-box` on all six neutralized rules (`.hljs`
+    and `:not(.hljs)`, all three sites) — the box now grows to the content's real width instead of sitting
+    pinned. Verified numerically (a `Range` over each element's text vs. its own
+    `getBoundingClientRect`, not eyeballed) at all three sites, both `.hljs` and plain variants, both
+    themes: zero bare-text overhang. Screenshot proof:
+    `build/issue-17-harness/screenshots/dark-2c-thread-longline-SCROLLED-seam-proof.png` (thread-OP long
+    single-line case, scrolled to the far right, dark theme) — the background box runs edge-to-edge with
+    the text, no seam. The harness (regenerated; `build/` is gitignored so it isn't tracked) gained the
+    horizontal-overflow fixtures the thread/caption sites never had (2c/2d, 3c/3d) — without them this
+    exact regression could ship again unmeasured, the same way it shipped the first time.
+  - **Addendum, 2026-08-10 — Part 1's pin was itself re-verified and reworked.** The "share a call
+    counter" mechanism described above (`ThreadRepliesTest`'s controlled-interleaving test) only pins the
+    read order for an implementation making EXACTLY two collaborator calls: a shared ordinal counter with
+    a `> 1` cutoff can't tell WHICH accessor ran first, only how-manyth the call was — one extra
+    stubbed-accessor call ahead of the real DB read absorbs the "first read" slot and can rescue a
+    DB-first implementation into a false green. Reworked to key on CAUSALITY instead of a raw count: the
+    registry accessor (`inFlightViews`) always returns the pre-settle draft but records that it ran; the
+    DB accessor (`threadComments`) returns the persisted row only if that flag is already set when it's
+    called, else the pre-settle empty list — robust to how many times either is called. RED-FIRST
+    verified: temporarily swapped the two reads in `ThreadReplies.read`, reran — red 3/3
+    (`AssertionFailedError: ... expected: <POSTED> but was: <DRAFTING>`, at a state assertion the
+    id-only check alone would have missed, since a settled node under the DB-first order still shows up
+    as a stale draft rather than vanishing from `replies.all` entirely) — reverted (`git checkout`,
+    verified zero diff against the pre-swap file), reran green. Class KDoc updated to match; the
+    "order-SENSITIVE by construction" sentence softened to state the pinned invariant precisely: the
+    fixture is sensitive to whether the registry read causally precedes the tree-feeding DB read, not to
+    call count.
+
 - **The LLM jail** ✅ built 2026-08-09 (issue #14, `plan_docs/llm-sandbox.md`). `claude -p` can now run in a
   per-invocation Docker container — read-only rootfs, `--cap-drop ALL`, tmpfs home/work/tmp, the credential
   the only bind mount — behind `aiforum.llm.jail.enabled`, **off by default**, with byte-identical argv when
@@ -562,6 +716,22 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
     thread that starts non-empty — a Discuss thread posts the PR discussion synchronously, so the
     first poll returns that comment and the helper waits for nothing; `GitHubPrThreadSteps` moved to
     `awaitThreadSettled`. Widening a read widens every caller's definition of "has something landed".
+  - **Issue #17 re-verification, 2026-08-09 — the fix holds, but the race itself was unpinned.**
+    Filed against the pre-PR-#10 state, so re-checked against current `main` first: mutation-tested by
+    temporarily flipping `ThreadReplies.read`'s two reads (DB first, registry second — the buggy order).
+    `RoomPollTest` stayed green 3/3 **genuine** re-executions (Gradle's task-level UP-TO-DATE cache
+    silently no-ops a rerun with unchanged inputs — `--rerun-tasks` was needed to force real
+    re-execution each time; the first attempt at runs 2–3 caught nothing but its own cache hit). Green
+    under the buggy order isn't a pass — it means the pin can't see the order at all: `RoomPollTest`'s
+    and `ThreadRepliesTest`'s fixtures are static snapshots, nothing changes *between* the two reads, so
+    no implementation order could redden them. That was already known and stated, not hidden —
+    `ThreadRepliesTest`'s own class doc said "no test at any tier can observe the instant it protects."
+    Closed the gap instead of re-affirming it: `ThreadRepliesTest` gained a controlled-interleaving
+    test — the two accessors `ThreadReplies.read` calls share a call counter, so whichever one `read`
+    invokes FIRST sees the pre-settle world (draft registered, no row yet) and whichever it invokes
+    SECOND sees post-settle (row persisted, draft evicted), reproducing the worker's persist-then-evict
+    gap without racing a real thread or waiting on timing. Verified red against the flipped order,
+    green against the shipped one.
 - **A summon parked between `beginSummon` and `register` escapes the between-scenario reset**
   (found by the PR #10 review under an artificial worker delay, 2026-07-31; **pre-existing, not fixed**).
   `InFlightGenerations.reset()` cancels and joins registered *holders*, and routing registers none — so a
