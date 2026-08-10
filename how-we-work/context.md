@@ -435,6 +435,23 @@ PR's diff renders syntax-highlighted in the opening post") — 286 is `verifyAll
 this run, +1 scenario from this slice. Tier0 +6 (`PrThreadFormatTest`, `MarkdownRendererTest`); full
 `verifyAll` green (tier0/1/2 443/265/165, acceptance 286, jsTest 100).
 
+**2026-08-10 (issue #18 follow-up, description-fence hardening):** the dynamic diff fence above only
+protects the DIFF's own opener — it couldn't help against a dangling fence left open in the PR
+**description** (`pull.body`, raw attacker markdown sitting ABOVE the machine-generated sections):
+commonmark treats everything below an unclosed fence as that fence's content until some LATER line
+closes it, and a diff's own space-prefixed ` ``` ` context line is exactly such a closer, spilling the
+REST of the diff into live markdown once it fires. Fixed with `PrThreadFormat.closeDanglingFence`
+(private, pure): tracks fence state line-by-line per commonmark (opens on up to-3-space-indented
+```` ``` ```` +/`~~~`+ with an optional info string; closes on a later same-character run at least as
+long, up to 3 leading spaces, nothing else but trailing spaces) and appends a matching closer when the
+description ends still open; an already-closed description passes through byte-identical. Applied where
+the description is appended into `body()`, with the invariant now stated in the code comment there.
+Proven red-first: the unfixed `MarkdownRendererTest` case rendered a LIVE
+`<img src="https://evil.example/pwned.png">` from a description ending in a dangling ` ``` ` combined
+with the same hostile diff shape as the 08-09 fix. Tier0 +5 (4 `PrThreadFormatTest` — triple-backtick,
+tilde, 5-backtick, closed-passthrough — +1 `MarkdownRendererTest` end-to-end); `verifyAll` green
+(tier0/1/2 448/265/165, acceptance 286 — floor unchanged, no new scenarios — jsTest 100).
+
 ## Open threads / near-term
 
 - **What's next, from the record rather than invention** (re-read 2026-07-30). S6 landed 2026-07-27

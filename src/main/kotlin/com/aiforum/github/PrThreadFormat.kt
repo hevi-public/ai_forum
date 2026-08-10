@@ -44,9 +44,15 @@ object PrThreadFormat {
     fun body(pull: PullDetail): String {
         val sb = StringBuilder()
 
-        // Lead with the PR description (the author's own words), when there is one.
+        // Lead with the PR description (the author's own words), when there is one. INVARIANT: the
+        // description is attacker-authored raw markdown sitting ABOVE the machine-generated sections
+        // below, so any fence it leaves DANGLING (open, never closed) must be closed here, before those
+        // sections are appended — [closeDanglingFence] — otherwise commonmark would treat everything
+        // below as that fence's own content until some LATER line closes it, and a diff's own
+        // space-prefixed context line (see [codeFence]'s note) is exactly such a closer: it would close
+        // the description's fence early and spill the rest of the diff into live markdown.
         val description = pull.body.trim()
-        if (description.isNotEmpty()) sb.append(description).append("\n\n")
+        if (description.isNotEmpty()) sb.append(closeDanglingFence(description)).append("\n\n")
 
         // A one-line provenance line: link to the PR, author, branch direction, state.
         val draft = if (pull.isDraft) " · draft" else ""
@@ -95,5 +101,47 @@ object PrThreadFormat {
     private fun codeFence(text: String): String {
         val longestBacktickRun = Regex("`+").findAll(text).maxOfOrNull { it.value.length } ?: 0
         return "`".repeat(maxOf(3, longestBacktickRun + 1))
+    }
+
+    /** A line that (up to 3 leading spaces) opens a backtick or tilde fence — a run of 3+ of the same
+     *  character, optionally followed by an info string. */
+    private val FENCE_OPEN = Regex("^ {0,3}(`{3,}|~{3,}).*$")
+
+    /** A line that (up to 3 leading spaces) is ONLY a run of backticks, nothing else but trailing spaces. */
+    private val CLOSE_BACKTICK_RUN = Regex("^ {0,3}(`+)[ \t]*$")
+
+    /** A line that (up to 3 leading spaces) is ONLY a run of tildes, nothing else but trailing spaces. */
+    private val CLOSE_TILDE_RUN = Regex("^ {0,3}(~+)[ \t]*$")
+
+    /**
+     * If [description] ends with a commonmark fenced code block still OPEN — a ``` or ~~~ opener with no
+     * later line that validly closes it — returns it with a matching closing fence line appended, so the
+     * fence can never capture whatever is appended after [description] returns. Otherwise returns
+     * [description] byte-identical (already-closed fences are left untouched).
+     *
+     * Tracks fence state line-by-line, per commonmark: a fence OPENS on a line with up to 3 leading
+     * spaces then a run of 3+ backticks or tildes (optionally followed by an info string); it CLOSES on
+     * a LATER line of the SAME character, a run at least as LONG as the opener, up to 3 leading spaces,
+     * and nothing else but trailing spaces. Only one fence is open at a time — while inside one, every
+     * other line (including one that merely looks like a fence opener) is just the fence's content.
+     */
+    private fun closeDanglingFence(description: String): String {
+        var openChar: Char? = null
+        var openLen = 0
+        for (line in description.lines()) {
+            if (openChar == null) {
+                val opener = FENCE_OPEN.matchEntire(line) ?: continue
+                val marker = opener.groupValues[1]
+                openChar = marker[0]
+                openLen = marker.length
+            } else {
+                val closer = if (openChar == '`') CLOSE_BACKTICK_RUN.matchEntire(line) else CLOSE_TILDE_RUN.matchEntire(line)
+                if (closer != null && closer.groupValues[1].length >= openLen) {
+                    openChar = null
+                    openLen = 0
+                }
+            }
+        }
+        return if (openChar == null) description else description + "\n" + openChar.toString().repeat(openLen)
     }
 }

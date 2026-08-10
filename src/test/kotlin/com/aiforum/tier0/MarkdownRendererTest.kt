@@ -201,6 +201,51 @@ class MarkdownRendererTest {
     }
 
     @Test
+    fun `a dangling fence left open by the PR description is closed, so the diff's own context-line fence can't spill it live`() {
+        // The DESCRIPTION is attacker-authored too (it's the PR's own body). Left with an unclosed ```
+        // fence, commonmark would treat everything below it — the meta line, "## Changed files", "##
+        // Diff", and the diff's own opening fence — as that fence's literal content, UNTIL some later
+        // line validly closes it. The diff's own " ```" context line (one leading space, three
+        // backticks, nothing else) is exactly such a closer: it would close the DESCRIPTION's fence
+        // early, spilling the rest of the diff — the hostile image/link/raw-HTML lines — into the real
+        // markdown parser. Mirrors the fence-escape case above, but the dangling fence is in the
+        // description, not the diff.
+        val description = "Check this fix:\n```"
+        val diff = listOf(
+            "diff --git a/README.md b/README.md",
+            "index 1111111..2222222 100644",
+            "--- a/README.md",
+            "+++ b/README.md",
+            "@@ -10,5 +10,5 @@",
+            " ```",
+            " ![pwned](https://evil.example/pwned.png)",
+            " [click me](javascript:alert(1))",
+            " <img src=x onerror=alert(1)>",
+            " ```",
+            "-old line",
+            "+new line",
+        ).joinToString("\n")
+        val pull = PullDetail(
+            number = 8, title = "Hostile description", author = "octocat",
+            url = "https://github.com/o/r/pull/8", state = "OPEN", isDraft = false,
+            body = description, baseRef = "main", headRef = "feature", headSha = "deadbeef",
+            changedFiles = listOf(ChangedFile("README.md", 2, 2)), diff = diff,
+        )
+        val body = PrThreadFormat.body(pull)
+        val html = MarkdownRenderer.render(body)
+
+        assertEquals(
+            1, Regex("language-diff").findAll(html).count(),
+            "expected exactly one highlighted diff block, no accidental second fence reopening:\n$html",
+        )
+        assertFalse(html.contains("<img"), "the attacker's markdown image must stay inert diff text, never a live <img>:\n$html")
+        assertFalse(html.contains("src=\"https://evil.example"), "the attacker's image src must never go live:\n$html")
+        assertFalse(html.contains("href=\"javascript:", ignoreCase = true), "a script-scheme href must never survive, even via a description-fence escape:\n$html")
+        assertTrue(html.contains("language-diff"), "the diff should still render highlighted:\n$html")
+        assertTrue(html.contains("evil.example"), "the attacker's URL text should still be visible, just as inert code — not dropped, not live:\n$html")
+    }
+
+    @Test
     fun `a fenced diff block highlights with hljs-addition and hljs-deletion spans for + and - lines`() {
         // End-to-end proof the highlight.js bundle's "diff" language is wired up (the issue's "check
         // before building" — see plan_docs and PrThreadFormat's DIFF fence): a real +/- diff renders both
