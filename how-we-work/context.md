@@ -783,6 +783,56 @@ tests and docs — both empirically confirmed red before being fixed, not just p
 Acceptance floor 295 → **296** (the owner-summon population-claim scenario). Full `verifyAll` green
 (tier0 480, tier1 304, tier2 177, acceptance 296; jsTest + both MCP test tasks unaffected).
 
+**2026-08-10 (orchestration retrospective — issues #13–#18 as six parallel agent slices, PRs
+#19–#24):** the per-issue blocks above carry each slice's own lessons; this block records what only
+the orchestrator seat could see, so the next multi-slice batch starts from it instead of re-deriving.
+
+- **The shape that worked: one worktree per issue, explicit bases, exclusive file ownership.**
+  Issues sharing a file get STACKED branches, not parallelism (#15 branched from #14's branch because
+  both edit `ProcessLlmClient.kt`; #16 from #15's for the data dependency) — the conflict never
+  existed instead of being resolved. Under worktree isolation each agent safely runs its own
+  `verifyAll --no-build-cache` gate, which supersedes the older shared-tree rule of "agents never
+  build". Caveats that cost real time: four concurrent worktree gates OOM the Kotlin daemon on the
+  24 GB host (`-Dkotlin.daemon.jvmargs=-Xmx2g` on the command line fixes it without touching shared
+  files), and editing a migration already applied to `build/aiforum-test.db` needs the db + `-wal`/
+  `-shm` deleted first or Flyway fails the checksum validate.
+- **Issue text is a snapshot, not truth — reconnaissance before briefing paid for itself twice.**
+  #17's "port the fix" half was already on main (PR #10 landed the same day the issue was filed) and
+  #18's "render diffs" half had shipped in June; checking every issue premise against the repo before
+  briefing turned both into verify-then-harden slices and surfaced the real bug (#18's fence escape)
+  the stale premise was hiding. The "283 scenario floor" the issues told agents to bump never existed
+  in the build at all — the gate's floor was a placeholder `1` until this batch made it a real
+  ratchet (285 → 286 → 291 → 297 across three parallel branches; the merged floor is the SUM of
+  parallel additions, and each step was verified by running the merged tree's gate before merging,
+  never by arithmetic alone).
+- **Demanded-in-brief proof is the enforcement mechanism.** Every brief required verbatim RED-first
+  output in the final report, and it worked: agents caught their own vacuous tests (three Tier-0
+  cases green against an empty stub; a cut-parity case that could not fail without a one-character
+  prefix) because the demand made vacuity visible. Mutation checks are the honest way to verify an
+  existing pin — flip the invariant, run three times, and remember `--rerun-tasks`, because Gradle's
+  UP-TO-DATE cache silently replays a green result for an unchanged build and turns "3/3 red" into
+  cache theatre.
+- **A careful single reviewer is not a review.** The adversarial panel over the six finished,
+  already-QA'd PRs (independent lenses per PR, one refuter per finding, a cross-PR completeness
+  critic) confirmed 20 real findings including two security majors in the jail (a non-`--internal`
+  network of the right name silently forfeiting the topology guarantee; the contract tripwire
+  watching the Kotlin defaults while yml is what ships) and two vacuous-probe majors. The critic's
+  distinct value was CROSS-PR sight no per-PR reviewer had: the three-way floor collision, the same
+  doctrine written in two plan docs, and a new uncontained-output surface landing in the same batch
+  as the fix for that class. Findings survive or die by refutation, not by reviewer confidence — one
+  finding was killed, and what survived was worth the whole panel.
+- **Fixes need the same skepticism as the code they fix.** Two review fixes carried their own
+  defects: the description-fence closer's opener regex accepted ```` ```foo``` ```` (commonmark
+  doesn't — backtick info strings may not contain backticks), which would have let the appended
+  closer REOPEN a fence and re-create the very capture being fixed; and a `runCatching` swallowed
+  `Throwable` where the file deliberately narrows to `Exception`. Review the fix as if a stranger
+  wrote it, against the same spec the finding cited.
+- **Merge-train mechanics, recorded so the next train is boring:** same-anchor Feature-state appends
+  conflict on every merge after the first (resolution: keep both blocks, main's first); stacked PRs
+  do NOT auto-retarget when the base branch is kept alive — `gh pr edit N --base main` explicitly
+  after the base PR merges; GitHub's mergeable state lags after each merge, so re-query before
+  trusting it; branches stay un-deleted because local worktrees hold them.
+
 ## Open threads / near-term
 
 - **What's next, from the record rather than invention** (re-read 2026-07-30). S6 landed 2026-07-27
