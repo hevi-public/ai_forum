@@ -51,3 +51,13 @@ Feature: Discuss a GitHub PR in the forum
     When the owner clicks Discuss on pull request #7
     And the owner clicks Discuss on pull request #7 again
     Then both discussions opened the same thread
+
+  Scenario: The PR's diff renders syntax-highlighted in the opening post
+    Given an in-depth pull request #55 "Tidy formatting" by "octocat" described as "Cleans up a stray blank line." changing "src/Foo.kt" with diff:
+      """
+      diff --git a/src/Foo.kt b/src/Foo.kt
+      +    fun foo() = 1
+      -    fun foo() = 0
+      """
+    When the owner clicks Discuss on pull request #55
+    Then the thread shows the opening post "hljs language-diff"
