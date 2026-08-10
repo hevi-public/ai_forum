@@ -291,7 +291,13 @@ class JailLauncherTest {
     @Test
     fun `the network create argv makes the named network internal`() {
         assertEquals(listOf("docker", "network", "create", "--internal", "aiforum-jail-net"), JailLauncher.networkCreateArgv(props))
-        assertEquals(listOf("docker", "network", "inspect", "aiforum-jail-net"), JailLauncher.networkInspectArgv(props))
+        // The inspect asks whether the network is INTERNAL, not merely whether the name is taken: a network
+        // of this name created without --internal has a gateway, so reusing it would give every jailed
+        // container a route off the host and reduce the proxy to a step it could just decline to take.
+        assertEquals(
+            listOf("docker", "network", "inspect", "-f", "{{.Internal}}", "aiforum-jail-net"),
+            JailLauncher.networkInspectArgv(props),
+        )
     }
 
     @Test
@@ -317,6 +323,19 @@ class JailLauncherTest {
         assertEquals(
             listOf("docker", "kill", value(argv, "--name")),
             JailLauncher.killContainerArgv(JailLauncher.containerName(invocationId)),
+        )
+    }
+
+    @Test
+    fun `the rm argv names that same container, for the kill that arrived too early`() {
+        // A kill can land before the daemon has created the container (it reports "No such container" and
+        // stops nothing, and the container then runs unattended), and a container killed before it started
+        // stays behind as a `Created` husk that --rm never cleans up. `rm -f` closes both, so it has to
+        // name exactly what the run started.
+        val argv = wrap()
+        assertEquals(
+            listOf("docker", "rm", "-f", value(argv, "--name")),
+            JailLauncher.rmContainerArgv(JailLauncher.containerName(invocationId)),
         )
     }
 }

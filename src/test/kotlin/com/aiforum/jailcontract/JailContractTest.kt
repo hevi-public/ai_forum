@@ -32,6 +32,11 @@ import java.util.UUID
  * which is what makes its green mean "policy holds" rather than "curl happened to fail". Case 3 runs the
  * identical probe through a deliberately wider proxy and expects success, so a broken image or a dead
  * network can't masquerade as a working deny.
+ *
+ * Which copy is tripwired, precisely: the **Kotlin defaults** ([shipped] is a literal `JailProperties()`),
+ * NOT the explicit `aiforum.llm.jail.egress-allowlist` list in `application.yml` that a running app
+ * actually binds. `tier2/config/JailYmlContractTest` pins the two copies to each other, so widening the yml
+ * — the natural way to widen policy — can't move the real perimeter while this suite watches the other one.
  */
 @Tag("jailContract")
 class JailContractTest {

@@ -419,7 +419,7 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
   per-invocation Docker container — read-only rootfs, `--cap-drop ALL`, tmpfs home/work/tmp, the credential
   the only bind mount — behind `aiforum.llm.jail.enabled`, **off by default**, with byte-identical argv when
   off (pinned by a tier-1 test, mutation-verified). The pure argv/squid-config construction is
-  `JailLauncher` (tier0, 21 cases, the `LlmResponseParser` pattern); the host IO is `JailRuntime` behind a
+  `JailLauncher` (tier0, 22 cases, the `LlmResponseParser` pattern); the host IO is `JailRuntime` behind a
   one-method `CommandRunner` port. The opt-in `./gradlew jailContract` proves the Docker half against a real
   daemon and is deliberately **not** in `verifyAll`.
 
@@ -446,6 +446,25 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
     so it exits FATAL at boot and the container restart-loops (which then looks like a DNS failure, because
     a dead container isn't in docker's embedded DNS). The log goes to `/var/log/squid/access.log`; read it
     with `docker exec aiforum-jail-proxy tail -f …`. Pinned by a tier-0 assertion so it can't be tidied back.
+
+  Review addenda (2026-08-10), all three the same shape — a guarantee that looked held but wasn't:
+
+  - **Reusing a network by NAME is not reusing the guarantee.** The boot inspect is
+    `docker network inspect -f {{.Internal}}`; a pre-existing network of that name without `--internal` has
+    a gateway, so reusing it would give every jailed container a direct route out and make the proxy
+    optional. `false` is fatal (`llm.jail.startup_failed`, before any proxy work) and names
+    `docker network rm` — no auto-recreate, since `rm` fails while containers are attached.
+  - **The egress policy exists in TWO copies and only one was tripwired.** `jailContract` case 2 watches
+    `JailProperties()`' Kotlin defaults; the list a running app binds is the explicit
+    `egress-allowlist:` in `application.yml` (an explicit yml list replaces the default, it doesn't merge).
+    Widening the yml — the natural way to widen policy — left the tripwire green.
+    `tier2/config/JailYmlContractTest` now pins the bound yml block to `JailProperties()`, and says in its
+    failure message to re-scope the contract suite when you widen on purpose.
+  - **A `docker kill` can arrive before the container exists** (cancel racing creation): it reports failure,
+    is swallowed, and the container then materialises and runs unattended. The kill is now retried (3
+    attempts, ~1s) and always followed by best-effort `docker rm -f`, which also removes the `Created` husk
+    `--rm` never cleans up. Relatedly, `GH_TOKEN` is fetched only when the gh tools are *actually* mounted —
+    `githubToolsEnabled && githubMcpConfig.isNotBlank()`, the same conjunction `ProcessLlmClient` uses.
 
   Not covered, and the docs say so in four places: **feed/article fetching runs in-JVM on the host** and is
   not jailed, nor are the openai/opencode providers, nor the app itself. No live jailed generation has been
