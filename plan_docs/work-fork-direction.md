@@ -59,7 +59,7 @@ revived in scoped form, and what stays out even though it exists and works next 
 | Per-branch **context scoping** | §5 (the differentiator) | **Carried over unchanged** — it is precisely what makes one subagent's branch readable and re-enterable in isolation (§1) |
 | **Artifacts**, rendered sandboxed | §3 (🟢 Phase 1.5); §12 | ⏳ deferred — and *gated*: the spec names poisoned file → malicious artifact in the owner's browser as the acute chain, so artifacts cannot precede the sandbox in this fork |
 | Full **audit** via the event log | §13; Fork C stance | **Revived in scoped form** — `event_log` (V1) is still dead code with zero readers; the shipped audit pattern is a per-feature table (`stance_change`, `interest_change`, `memory_change`), and Fork C's is issue #15's `generation_tool_call` |
-| Per-run **cost observability** | §11 open q. 1; `ai-driven-forum-direction.md` §3 | **Carried over** — the ceiling is per-run `total_cost_usd` off the stream (§3.4). #15 stores it, #16 renders it |
+| Per-run **cost observability** | `ai-driven-forum-direction.md` §11 q. 1 + §3 | **Carried over** — the ceiling is per-run `total_cost_usd` off the stream (§3.4). #15 stores it, #16 renders it |
 | Multi-turn sessions (`--continue` / `--resume`) | `ai-driven-forum-direction.md` §8 + §12 (ruled out for ambient) | **Revived as an open question** — the ruling rested on a 5-minute cache TTL that is actually an hour (§3.5). Fork C re-derives it; #15 hands multi-turn here by name |
 | **Scheduler / ambient posting**; talkativeness × relevance gating | §9, §6.4 (Fork B's core) | ✂️ **Cut here.** Who speaks in Fork C is decided by *the run*, not by a gate on a timer. A work deployment that posts on a schedule is Fork B wearing a work costume |
 | Evolving **relations / interests / memory** (V24–V28, built) | §6.2–6.4; Fork B §5–§6 | **Carried over as substrate, not as a goal** — the machinery ships in the codebase and a Fork C deployment inherits it with all three evolution schedulers **off by default**. Whether a persona should remember *the project* is §11's question 5, not a plan |
@@ -170,8 +170,9 @@ claude -p --output-format stream-json --verbose          ProcessLlmClient — al
 NDJSON: system/init · assistant · user · result
       │      each carrying parent_tool_use_id: null (main) | toolu_… (subagent)   ← §3.2
       ▼
-ClaudeStreamParser  ── exists; today it emits ToolCallStart/End to the AG-UI wire
-      │                and discards the rest. #15 is what stops discarding.
+ClaudeStreamParser  ── exists; today it emits TextDelta + ToolCallStart/End to the AG-UI wire
+      │                and discards the rest (usage/cost, tool inputs/results,
+      │                parent_tool_use_id). #15 is what stops discarding.
       ▼
 one thread per run · one comment per message · parent_tool_use_id → comment.parent_id
       │
@@ -261,9 +262,9 @@ and automation*, no 24/7 continuous background use, and the subprocess path is t
   budget (per-run cost, runs per day, a hard stop), and it is not designed. §11 question 6.
 - **Caching cuts the other way** (§3.5): an hour-long lifetime sits *inside* a work session's turn
   spacing, so resumed sessions are a live cost question here rather than a settled loss.
-- **Cost must be visible before it is capped.** `ai-forum-requirements.md` §11's first open question
-  is cost/cadence caps, and a cap you cannot measure against is a guess: #15 then #16, in that
-  order, before any Fork C budget is chosen.
+- **Cost must be visible before it is capped.** `ai-driven-forum-direction.md` §11's first open
+  question is cost/cadence caps, and a cap you cannot measure against is a guess: #15 then #16, in
+  that order, before any Fork C budget is chosen.
 - **Prompt injection is blocking, not residual.** Fork B tolerates untrusted feed text as a
   documented residual until the jail lands, because a feed item reaches a prompt as a title and a
   short excerpt. Fork C is categorically different: the content is read *by file tools*, in a
