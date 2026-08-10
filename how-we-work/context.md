@@ -124,6 +124,12 @@ time; the owner participates as a peer. Direction doc: `plan_docs/ai-driven-foru
 (success criteria, ambient-loop architecture, `ArticleSource` as the fifth IO port, slice map
 S1–S6, acceptance-spec delta over the 45 features, subscription-terms/cost/caching envelope —
 ambient runs headless `claude -p` on the subscription, few ticks/day, stateless per-run calls).
+*(Caching envelope corrected 2026-08-09: it was written against a 5-minute prompt-cache TTL. The
+lifetime is **one hour on a subscription**, and drops to five minutes only when a run draws on usage
+credits — `ENABLE_PROMPT_CACHING_1H=1` buys the hour back. The stateless-per-run conclusion survives
+for **ambient**, since ticks hours apart outrun even the hour, but it is an ambient-cadence
+conclusion: **Fork C**, whose turns are minutes apart, must re-derive it rather than inherit it —
+`plan_docs/work-fork-direction.md` §3.5.)*
 Spec bumped to v1.16 (Fork B decision-log rows + pointer; header version re-synced). Dev port
 moved **8081 → 8020** (`application-dev.yml` + `.claude/launch.json`; prod stays 8080).
 
@@ -413,6 +419,35 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
     written naively passes while asserting an arbitrary UUID order, then breaks later on an unrelated
     id change. `TestData` gained per-call defaulted `agoSeconds`; a **global monotonic stagger was
     refused** because it moves the unread boundary under every scenario that seeds a comment then reads.
+
+**2026-08-09 (Fork C direction — paper only, no code, no migration, no `verifyAll` impact):**
+`plan_docs/work-fork-direction.md` written, so the **Work** fork finally has what Fork B has had
+since 2026-07-18 — its own success criterion, a §2 anti-scope-drift table, and its own decision log
+(§12). The criterion is **"a finished session's record is worth reading, and worth replying into"**
+— read / branch / re-enter — and is deliberately *not* Fork B's "worth opening between sessions",
+which no coding slice can satisfy; a Fork C slice may leave the forum quieter and still be right.
+Four findings recorded in its §3 so nobody re-derives them:
+- **The Claude Agent SDK is not usable on a Claude subscription.** Third-party products may not
+  offer claude.ai login or rate limits (the SDK included) and are directed to API keys; SDK use
+  falls under the Commercial Terms. The SDK is Python/TS only, and the documented cross-language
+  path is running the CLI as a subprocess — which `ProcessLlmClient` already is. Nothing to change.
+- **A subagent trace IS a nested comment tree.** In `--output-format stream-json` a subagent
+  message's `parent_tool_use_id` is the spawning tool call's id; main-conversation messages carry
+  null — `comment.parent_id`'s shape exactly. That is the argument for building Fork C on this
+  codebase rather than clean. ⚠ **Subagent text is not in the default stream**: only `tool_use` /
+  `tool_result` blocks are, unless `--forward-subagent-text` is passed (Claude Code ≥ v2.1.211;
+  nested depths ≥ v2.1.219). The tree is free, the bodies are a flag with a version floor.
+- **Voice has no API** — Anthropic's own surfaces only, transcription of recorded audio aside. Web
+  Speech + a self-built TTS is the only web-UI path. Deferred, not designed.
+- **The 5-hour / weekly plan bars are not scriptable** — `/usage` computes from local session
+  history on that machine, and OTel export has no plan windows. Per-run `total_cost_usd` off the
+  stream is the honest ceiling (#15 stores it, #16 renders it).
+Also corrected in three places, because the number was load-bearing: **the prompt-cache TTL is one
+hour on a subscription**, five minutes only when drawing on usage credits. The direction doc's
+"stateless per-run, the DB is the memory" conclusion is **re-affirmed for ambient, not rewritten**
+(ticks hours apart outrun even the hour) — §8 amended, and a new superseding row appended to its
+§12 rather than editing the 2026-07-18 one. Fork C, whose turns are minutes apart, sits *inside* the
+corrected hour and must re-derive `--resume` instead of inheriting the ruling.
 
 **2026-08-09 (issue #18, diff hardening):** the PR-diff code fence in `PrThreadFormat.body` is now
 DYNAMIC (`codeFence`, private) — length `max(3, longest interior backtick run + 1)`, always strictly
