@@ -78,6 +78,12 @@ object RealCommandRunner : CommandRunner {
 class JailRuntime(
     private val props: JailProperties,
     private val githubToolsEnabled: Boolean,
+    /**
+     * The same `aiforum.llm.github-mcp-config` [ProcessLlmClient] reads. Both halves are needed here for the
+     * same reason they are needed there: blank config means no `--mcp-config` on the argv, which means no gh
+     * tools in the container — see [githubToolsActive].
+     */
+    private val githubMcpConfig: String = "",
     private val runner: CommandRunner = RealCommandRunner,
     /** Seam: the tests point this at a temp dir so they never touch the real `~/.ai_forum` or `~/.claude`. */
     private val homeDir: String = System.getProperty("user.home"),
@@ -95,7 +101,16 @@ class JailRuntime(
     constructor(
         props: JailProperties,
         @Value("\${aiforum.llm.github-tools-enabled:false}") githubToolsEnabled: Boolean,
-    ) : this(props, githubToolsEnabled, RealCommandRunner)
+        @Value("\${aiforum.llm.github-mcp-config:}") githubMcpConfig: String,
+    ) : this(props, githubToolsEnabled, githubMcpConfig, RealCommandRunner)
+
+    /**
+     * Whether a jailed run will really carry gh tools — the same conjunction [ProcessLlmClient] applies
+     * when it decides to emit `--mcp-config`. Kept in step deliberately: the switch on its own mounts
+     * nothing, and a token forwarded for tools that don't exist is a live credential sitting in the
+     * container for no purpose.
+     */
+    private fun githubToolsActive(): Boolean = githubToolsEnabled && githubMcpConfig.isNotBlank()
 
     private val log = LoggerFactory.getLogger(JailRuntime::class.java)
 
@@ -108,6 +123,10 @@ class JailRuntime(
         const val DOCKER_TIMEOUT_MILLIS = 60_000L
         /** The cancel path runs on a generation thread — `docker kill` is fast or it is not happening. */
         const val KILL_TIMEOUT_MILLIS = 2_000L
+        /** Enough attempts to outlast container creation losing a race with cancel; few enough to stay a blink. */
+        const val KILL_ATTEMPTS = 3
+        /** Total retry sleep is bounded at ~1s — this is a generation thread mid-cancel, not a background job. */
+        const val KILL_RETRY_MILLIS = 500L
         /** `gh auth token` shells out to the host CLI; short, and failure is a non-event. */
         const val GH_TIMEOUT_MILLIS = 10_000L
 
@@ -140,7 +159,22 @@ class JailRuntime(
 
         // The network first: the proxy is attached to it, and `docker network create` is idempotent only
         // in the sense that a second call errors — so inspect, then create if genuinely absent.
-        if (docker(JailLauncher.networkInspectArgv(props)).exit != 0) {
+        //
+        // The inspect reports `{{.Internal}}`, not merely existence, because the NAME is not the guarantee:
+        // a pre-existing network of this name that was created WITHOUT `--internal` has a gateway, and
+        // reusing it would hand every jailed container a direct route off the host — the proxy would still
+        // start, still filter, and mean nothing, because nothing would have to go through it. That is the
+        // whole egress-by-topology design forfeited silently, so it is fatal rather than a warning. We do
+        // not auto-recreate: `docker network rm` fails while containers are attached, so the operator has to
+        // decide what to do with them.
+        val existing = docker(JailLauncher.networkInspectArgv(props))
+        if (existing.exit == 0) {
+            require(existing.stdout.trim() == "true") {
+                "docker network ${props.network} exists but is NOT --internal, so containers on it would " +
+                    "have a route off the host and the egress proxy would be optional. Remove it with " +
+                    "`docker network rm ${props.network}` (detach anything using it first) and restart."
+            }
+        } else {
             val created = docker(JailLauncher.networkCreateArgv(props))
             require(created.exit == 0) { "docker network create failed: ${created.stderr.trim()}" }
         }
@@ -184,13 +218,13 @@ class JailRuntime(
      *
      * An env FILE rather than `-e NAME=value` because argv is world-readable through `ps`. The tokens
      * themselves are read from the app's own environment (claude) and from `gh auth token` (GitHub, and
-     * only when the persona gh tools are actually mounted — we don't hand out a token nothing will use).
-     * Nothing to write => no file and no `--env-file` flag.
+     * only when the persona gh tools are ACTUALLY mounted — [githubToolsActive], both halves, not just the
+     * switch: we don't hand out a token nothing will use). Nothing to write => no file and no `--env-file`.
      */
     private fun writeSideChannels(): JailInvocation {
         val vars = buildList {
             TOKEN_VARS.forEach { name -> env(name)?.takeIf { it.isNotBlank() }?.let { add("$name=$it") } }
-            if (githubToolsEnabled) {
+            if (githubToolsActive()) {
                 val token = runner.run(listOf("gh", "auth", "token"), GH_TIMEOUT_MILLIS)
                 if (token.exit == 0 && token.stdout.isNotBlank()) add("GH_TOKEN=${token.stdout.trim()}")
             }
@@ -230,9 +264,38 @@ class JailRuntime(
      * Stop a jailed container by name. Best-effort and short-bounded on purpose: this runs on the cancel
      * and timeout paths, where the caller is already destroying the `docker run` client — which the
      * daemon does not treat as a reason to stop the container, hence this call existing at all.
+     *
+     * Two ways a single `docker kill` silently does nothing, both of which leave a persona running or a
+     * husk behind, and neither of which the swallowed exit code would have told us about:
+     *
+     * - **Cancel wins the race with container creation.** `docker run` has been spawned but the daemon has
+     *   not created the container yet, so the kill reports "No such container" and stops nothing — and the
+     *   container then materialises and runs the persona unattended with its whole memory reservation. The
+     *   short retry covers that window.
+     * - **A container killed before it ran stays as a `Created` husk.** `--rm` only cleans up after a
+     *   container that actually started, so the trailing [JailLauncher.rmContainerArgv] is what removes it.
+     *
+     * The `rm -f` therefore runs ALWAYS, not just after a failed kill: it is also the last catch for a
+     * container that appeared after the final retry. On the normal path `--rm` got there first and the rm
+     * is a no-such-container error, swallowed with everything else — nothing here may throw into a cancel.
+     *
+     * The happy path is one fast call plus one fast error. The retry budget only accrues against a daemon
+     * that is refusing to answer, where the alternative to waiting is leaving the persona running.
      */
     fun killContainer(name: String) {
-        runCatching { runner.run(JailLauncher.killContainerArgv(name), KILL_TIMEOUT_MILLIS) }
+        for (attempt in 0 until KILL_ATTEMPTS) {
+            val killed = runCatching { runner.run(JailLauncher.killContainerArgv(name), KILL_TIMEOUT_MILLIS) }
+            if (killed.getOrNull()?.exit == 0 || attempt == KILL_ATTEMPTS - 1) break
+            try {
+                Thread.sleep(KILL_RETRY_MILLIS)
+            } catch (_: InterruptedException) {
+                // Never swallowed: the caller may be shutting the app down, and the flag is how it knows.
+                // Stop retrying, but still fall through to the rm — the container is the thing at stake.
+                Thread.currentThread().interrupt()
+                break
+            }
+        }
+        runCatching { runner.run(JailLauncher.rmContainerArgv(name), KILL_TIMEOUT_MILLIS) }
     }
 
     private fun docker(argv: List<String>): ExecResult = runner.run(argv, DOCKER_TIMEOUT_MILLIS)

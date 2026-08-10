@@ -207,10 +207,21 @@ clause) is unchanged. **Absent flag means absent tools** — the rewrite never i
 
 ## 7. Lifecycle and failure taxonomy
 
+- **A pre-existing network is reused only if it is genuinely `--internal`.** The boot inspect is
+  `docker network inspect -f {{.Internal}}`, not a bare existence check: a network of this name created
+  without `--internal` has a gateway, so reusing it would hand every jailed container a direct route off
+  the host and reduce the proxy to a step the process could simply decline to take — the entire
+  egress-by-topology guarantee, forfeited silently. `false` is therefore FATAL
+  (`llm.jail.startup_failed`, raised before any proxy work) and the message names `docker network rm`
+  rather than auto-recreating, because `rm` fails while containers are still attached.
 - **Cancel / timeout kills the CONTAINER first, then the process.** `docker run` is a client; killing it
   does *not* stop the container the daemon owns. `ProcessLlmClient.kill` therefore calls
   `JailRuntime.killContainer(name)` (2-second bound, errors swallowed) *before* `destroyForcibly` — the
-  deterministic `aiforum-jail-<invocationId>` name exists for exactly this.
+  deterministic `aiforum-jail-<invocationId>` name exists for exactly this. The kill is retried (3 attempts
+  over ~1s) and **always** followed by a best-effort `docker rm -f`: a cancel can beat the daemon to
+  *creating* the container, where a single kill is a no-op that reports failure and the container then
+  materialises and runs unattended; and a container killed before it ran stays as a `Created` husk that
+  `--rm` never cleans up. On the normal path the `rm` is a harmless no-such-container error.
 - **Three deadlines, nested.** The request timeout (app, `awaitProcess`) → `timeout --kill-after=10 900`
   inside the container → `--rm` on exit. The middle one is the backstop for the case where the app dies
   mid-generation and never gets to kill anything.
@@ -260,8 +271,9 @@ Read this section before concluding anything is contained.
 
 | Tier | What | Where |
 |---|---|---|
-| **Tier 0** | The entire containment posture as strings: 21 cases over the docker argv and the squid config — mounts, caps, tmpfs, caps/limits, the mcp rewrite, the allowlist, config injection. No daemon. | `tier0/JailLauncherTest` |
-| **Tier 1** | `JailRuntime`'s conversation with the host — boot sequence order, generated file contents and 0600 perms, credential resolution, kill bound, the log contract — over a recording `CommandRunner` fake and a temp HOME. Plus what `ProcessLlmClient` actually spawns when jailed, the container kill on cancel, and **the disabled-mode byte-identity pin**. | `tier1/client/JailRuntimeTest`, `tier1/client/JailedProcessLlmClientTest` |
+| **Tier 0** | The entire containment posture as strings: 22 cases over the docker argv and the squid config — mounts, caps, tmpfs, caps/limits, the mcp rewrite, the allowlist, config injection, the internal-network inspect, the kill/rm pair. No daemon. | `tier0/JailLauncherTest` |
+| **Tier 1** | `JailRuntime`'s conversation with the host — boot sequence order, the non-internal network refusal, generated file contents and 0600 perms, credential resolution, the gh token only when tools are really mounted, the kill retry + trailing `rm -f` and their bounds, the log contract — over a recording `CommandRunner` fake and a temp HOME. Plus what `ProcessLlmClient` actually spawns when jailed, the container kill on cancel, and **the disabled-mode byte-identity pin**. | `tier1/client/JailRuntimeTest`, `tier1/client/JailedProcessLlmClientTest` |
+| **Tier 2** | That the two copies of the egress policy agree: the `aiforum.llm.jail` block bound from the real `application.yml` (a `@SpringBootTest` under the `test` profile) equals `JailProperties()`. | `tier2/config/JailYmlContractTest` |
 | **Contract (opt-in)** | Whether Docker honours any of it. Builds the real image, stands up the real topology, runs probes inside real containers using argv from the real `wrap()`. | `jailcontract/JailContractTest` — `./gradlew jailContract` |
 
 The contract suite's six cases: (1) an allowlisted host is reachable — the control, so (2) is meaningful;
@@ -270,11 +282,23 @@ succeeds — so (2)'s red is policy, not breakage; (4) with `--noproxy '*'` ther
 (5) rootfs read-only, `/work` writable, no host filesystem in `/proc/self/mounts`, no docker socket;
 (6) a **dummy** credential file survives the tmpfs home.
 
-**Mutation-verified, both run:**
+**Which copy case 2 tripwires, exactly:** the **Kotlin defaults** — `JailContractTest.shipped` is a literal
+`JailProperties()`. The allowlist a running app binds is the *explicit* `egress-allowlist:` list in
+`application.yml`, which replaces the default rather than merging with it, and nothing else reads it. So
+widening the yml — the natural way to widen policy, and where every comment and instinct points — would
+move the real perimeter while case 2 stayed green, reporting on a list no app uses.
+`tier2/config/JailYmlContractTest` closes that by pinning the two copies to each other (whole block, with
+`egressAllowlist` and `enabled` called out); widen the yml deliberately and it tells you to re-scope the
+contract suite at the same time.
+
+**Mutation-verified, all three run:**
 
 - Add `"example.com"` to `JailProperties.egressAllowlist`'s default → jailContract case 2 goes red
   (`expected: not equal but was: <0>`) and **only** case 2; revert → green. So the deny is the shipped
   policy, not an accident of the network.
+- Add `example.com` to `application.yml`'s `egress-allowlist:` → `JailYmlContractTest` goes red
+  (`expected: <[api.anthropic.com, api.github.com]> but was: <[api.anthropic.com, api.github.com,
+  example.com]>`); revert → green. That is the widening the tripwire alone would have missed.
 - Remove the `if (!jail.enabled) return spawn(argv)` short-circuit in `launchClaude` → the byte-identity
   test reddens.
 

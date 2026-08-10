@@ -178,8 +178,15 @@ object JailLauncher {
         }.joinToString("\n", postfix = "\n")
     }
 
+    /**
+     * Asks TWO questions in one call: does a network of this name exist (exit code), and is it `--internal`
+     * (`{{.Internal}}` on stdout, `true`/`false`). Existence alone is not the answer worth having — a
+     * network of the right NAME created without `--internal` has a gateway, so every container on it routes
+     * off the host directly and the squid sidecar degrades from the perimeter to a politeness. [JailRuntime]
+     * treats `false` as fatal for exactly that reason.
+     */
     fun networkInspectArgv(props: JailProperties): List<String> =
-        listOf("docker", "network", "inspect", props.network)
+        listOf("docker", "network", "inspect", "-f", "{{.Internal}}", props.network)
 
     /**
      * `--internal` is the load-bearing flag of the whole design: docker attaches no gateway to an
@@ -219,6 +226,17 @@ object JailLauncher {
      */
     fun killContainerArgv(containerName: String): List<String> =
         listOf("docker", "kill", containerName)
+
+    /**
+     * The follow-up to [killContainerArgv], and it names the same container [wrap] started. A kill can miss
+     * in two ways the cancel path has to survive: it can arrive before the daemon has created the container
+     * (nothing to kill, and the container then materialises unattended), and it can leave a `Created` husk
+     * that never ran. `rm -f` answers both — it removes a container in any state, including one that showed
+     * up between the last kill attempt and this call. On the normal path `--rm` has already removed it, so
+     * this is a no-such-container error and is swallowed.
+     */
+    fun rmContainerArgv(containerName: String): List<String> =
+        listOf("docker", "rm", "-f", containerName)
 }
 
 /**
