@@ -103,9 +103,15 @@ object PrThreadFormat {
         return "`".repeat(maxOf(3, longestBacktickRun + 1))
     }
 
-    /** A line that (up to 3 leading spaces) opens a backtick or tilde fence — a run of 3+ of the same
-     *  character, optionally followed by an info string. */
-    private val FENCE_OPEN = Regex("^ {0,3}(`{3,}|~{3,}).*$")
+    /** A backtick fence opener: 3+ backticks whose info string contains NO further backticks —
+     *  commonmark rejects those, so a line like ```foo``` is inline code in a paragraph, not a fence.
+     *  Treating it as an opener would append a spurious closer that commonmark parses as a NEW opener,
+     *  swallowing the machine sections — the very capture this helper exists to prevent. */
+    private val BACKTICK_OPEN = Regex("^ {0,3}(`{3,})[^`]*$")
+
+    /** A tilde fence opener: 3+ tildes, then anything — tilde info strings MAY contain backticks and
+     *  tildes (the asymmetry is commonmark's, not ours; pinned by a Tier-0 case). */
+    private val TILDE_OPEN = Regex("^ {0,3}(~{3,}).*$")
 
     /** A line that (up to 3 leading spaces) is ONLY a run of backticks, nothing else but trailing spaces. */
     private val CLOSE_BACKTICK_RUN = Regex("^ {0,3}(`+)[ \t]*$")
@@ -120,17 +126,18 @@ object PrThreadFormat {
      * [description] byte-identical (already-closed fences are left untouched).
      *
      * Tracks fence state line-by-line, per commonmark: a fence OPENS on a line with up to 3 leading
-     * spaces then a run of 3+ backticks or tildes (optionally followed by an info string); it CLOSES on
-     * a LATER line of the SAME character, a run at least as LONG as the opener, up to 3 leading spaces,
-     * and nothing else but trailing spaces. Only one fence is open at a time — while inside one, every
-     * other line (including one that merely looks like a fence opener) is just the fence's content.
+     * spaces then a run of 3+ backticks (info string free of further backticks) or 3+ tildes (info
+     * string unrestricted); it CLOSES on a LATER line of the SAME character, a run at least as LONG as
+     * the opener, up to 3 leading spaces, and nothing else but trailing spaces. Only one fence is open
+     * at a time — while inside one, every other line (including one that merely looks like a fence
+     * opener) is just the fence's content.
      */
     private fun closeDanglingFence(description: String): String {
         var openChar: Char? = null
         var openLen = 0
         for (line in description.lines()) {
             if (openChar == null) {
-                val opener = FENCE_OPEN.matchEntire(line) ?: continue
+                val opener = BACKTICK_OPEN.matchEntire(line) ?: TILDE_OPEN.matchEntire(line) ?: continue
                 val marker = opener.groupValues[1]
                 openChar = marker[0]
                 openLen = marker.length

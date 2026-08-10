@@ -190,6 +190,32 @@ class PrThreadFormatTest {
     }
 
     @Test
+    fun `a description line with backticks in its info string is not a fence opener, so nothing is appended`() {
+        // Commonmark: a BACKTICK fence's info string may not contain further backticks — a line like
+        // ```foo``` is inline code in a paragraph, NOT an opener. Treating it as one would append a
+        // spurious ``` closer that commonmark then parses as a NEW opener, swallowing the meta line and
+        // both machine sections into a code block — the very capture this helper exists to prevent.
+        val description = "Renders as inline code:\n```foo```\nand the doc goes on."
+        val body = PrThreadFormat.body(pull(body = description))
+        assertTrue(
+            body.startsWith("$description\n\n**[PR #"),
+            "a non-opener backtick line must leave the description untouched — no appended fence:\n$body",
+        )
+    }
+
+    @Test
+    fun `a tilde opener's info string may contain backticks and still opens a fence that gets closed`() {
+        // The asymmetry is commonmark's, pinned so nobody "simplifies" the two openers back into one:
+        // tilde info strings MAY contain backticks (and tildes), so this line IS an opener.
+        val description = "See:\n~~~kotlin ```odd``` info\nfun x() = 1"
+        val body = PrThreadFormat.body(pull(body = description))
+        assertTrue(
+            body.startsWith("$description\n~~~\n\n**[PR #"),
+            "a dangling tilde fence with backticks in its info string must still be closed:\n$body",
+        )
+    }
+
+    @Test
     fun `a description ending in a dangling 5-backtick fence gets a closer at least as long`() {
         val description = "Look:\n`````\nsome unclosed content"
         val body = PrThreadFormat.body(pull(body = description))
