@@ -1044,18 +1044,36 @@ mark.quoted:hover, mark.quoted.is-open { background: color-mix(in srgb, var(--sp
 }
 /* hljs-theme.css puts its own horizontal scroll on `pre code.hljs` — neutralized here so `pre` above is
    the SINGLE scroll container; two nested auto-overflow boxes would double-scroll (an inner bar plus an
-   outer one) instead of one clean one. */
-.reply .body pre code.hljs, .thread__body pre code.hljs {
+   outer one) instead of one clean one.
+   Specificity, not just source order: hljs-theme.css's selector is `[data-theme="x"] pre code.hljs` — an
+   attribute selector counts as a class, so that's (0,2,2). `.reply .body pre code.hljs` is (0,3,2)
+   (three classes) and wins outright regardless of link order. `.thread__body pre code.hljs` is only
+   (0,2,2) — an exact TIE, and hljs-theme.css loads after app.css (layout.kte) so it wins ties: without
+   the `[data-theme]` prefix below, the neutralization silently loses for this site and the double-scroll
+   ships (measured, not assumed — see build/issue-17-harness). `[data-theme]` is always set on <html>
+   before first paint (layout.kte's inline theme script) — the same attribute hljs-theme.css itself keys
+   off — so prefixing with it can only ever be at least as specific as hljs-theme.css's own rule, by
+   construction; no made-up class to keep in sync.
+   width:max-content + min-width:100% (mirrored on the code:not(.hljs) rule below, and at both other
+   sites) makes code's own background/padding box grow to the content's actual width instead of sitting
+   pinned at the pre's client width — otherwise, once overflow-x is visible, a long line's glyphs paint
+   past the right edge of that box: a bare-text seam past where the highlight fill stops. box-sizing is
+   already border-box globally (line 172) — set again here so this rule's correctness doesn't quietly
+   depend on that surviving unnoticed. */
+.reply .body pre code.hljs, [data-theme] .thread__body pre code.hljs {
+  display: block; width: max-content; min-width: 100%; box-sizing: border-box;
   font-family: var(--mono); font-size: 12.5px; line-height: 1.5;
   overflow-x: visible;
 }
 /* A fence with no language, or a language hljs doesn't recognise, never gets the .hljs class — so NONE
-   of hljs-theme.css's rules (padding, block display, horizontal scroll) reach it. Before this it sat
-   flush against the border with a long line silently clipped by the pre above rather than scrollable.
-   Match the highlighted block's inset; overflow is left at its visible default so the pre above catches
-   and scrolls it, the same as the neutralized .hljs case just above. */
+   of hljs-theme.css's rules (padding, block display, horizontal scroll) reach it — no tie to break here,
+   hljs-theme.css has no rule for code:not(.hljs) at all. Before this it sat flush against the border with
+   a long line silently clipped by the pre above rather than scrollable. Match the highlighted block's
+   inset; overflow is left at its visible default so the pre above catches and scrolls it, the same as the
+   neutralized .hljs case just above — including the same width:max-content background-box fix. */
 .reply .body pre code:not(.hljs), .thread__body pre code:not(.hljs) {
-  display: block; padding: 1em;
+  display: block; width: max-content; min-width: 100%; box-sizing: border-box;
+  padding: 1em;
   font-family: var(--mono); font-size: 12.5px; line-height: 1.5;
 }
 /* Inline code (a `span` of code, never inside a <pre>). */
@@ -1543,13 +1561,18 @@ mark.nav-hit {
   overflow: auto; /* scrolls AND clips the inner content to the rounded corners — see the reply/thread
                      pre rule above for why auto (not hidden) still clips to the border-radius */
 }
-/* Same single-scroll-container + unhighlighted-fence pairing as the reply/thread pre rules above. */
-.attachment__caption pre code.hljs {
+/* Same single-scroll-container + unhighlighted-fence pairing as the reply/thread pre rules above,
+   including the same [data-theme] specificity-tie fix: `.attachment__caption pre code.hljs` is (0,2,2),
+   an exact tie with hljs-theme.css's `[data-theme="x"] pre code.hljs` — see the reply/thread rule above
+   for the full specificity accounting and the width:max-content background-box rationale. */
+[data-theme] .attachment__caption pre code.hljs {
+  display: block; width: max-content; min-width: 100%; box-sizing: border-box;
   font-family: var(--mono); font-size: 12px; line-height: 1.5;
   overflow-x: visible;
 }
 .attachment__caption pre code:not(.hljs) {
-  display: block; padding: 1em;
+  display: block; width: max-content; min-width: 100%; box-sizing: border-box;
+  padding: 1em;
   font-family: var(--mono); font-size: 12px; line-height: 1.5;
 }
 .attachment__caption :not(pre) > code {

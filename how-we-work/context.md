@@ -445,6 +445,55 @@ Durable learnings, the close-out audit's and the review's yield (plan doc §10.3
   - **No new acceptance scenario.** A CSS-only change adds no new markup, class, or `data-*` hook for an
     HTTP-level probe to assert against — "the class is present" would be a test that cannot fail. Floor
     left untouched (S4b lens: what implementation would make this assertion red? none).
+  - **Addendum, 2026-08-10 — the "across all three sites" neutralization claim above was wrong for two of
+    them.** Measured, not assumed: hljs-theme.css's rule is `[data-theme="x"] pre code.hljs` — an
+    attribute selector counts as a class, so its specificity is (0,2,2). `.reply .body pre code.hljs` is
+    (0,3,2) (three classes: `.reply`, `.body`, `.hljs`) and wins outright, any link order.
+    `.thread__body pre code.hljs` and `.attachment__caption pre code.hljs` are each only (0,2,2) — an
+    exact TIE, and hljs-theme.css links AFTER app.css (`layout.kte`), so it wins ties: the neutralization
+    was DEAD on those two sites, `overflow-x` stayed `auto`, and a highlighted block double-scrolled there
+    (an inner bar on `code.hljs` plus the outer one on `pre`) exactly as issue #17 was meant to prevent.
+    The gap shipped unnoticed because the verification harness only ever probed
+    `.reply .body pre code.hljs`'s `overflow-x` (`shoot.mjs`'s old `codeHljsOverflowX` field) — never the
+    other two sites — and neither the thread-body nor the caption fixture in the harness had a case wide
+    enough to overflow horizontally at all, so the tie had nothing to visibly fail against even by eye.
+    Fixed by raising the two tied selectors' specificity with an always-true `[data-theme]` prefix (the
+    same attribute hljs-theme.css itself keys off, so it can only ever be at least as specific, no made-up
+    class to keep in sync) — `.reply .body pre code.hljs` deliberately left unprefixed, verified not to
+    need it. Verified by reverting just the prefix and re-running the harness probe: `thread_hljsSeam`/
+    `caption_hljsSeam` `overflowX` regressed from `visible` to `auto` on both `data-theme` values,
+    confirming the tie is real and the fix closes it; reply's stayed `visible` either way. Also closed a
+    second, related gap while fixing the first: even where the neutralization did apply, `code.hljs`/
+    `code:not(.hljs)` sat at the `pre`'s client width while its content could be wider — once
+    `overflow-x` is `visible`, a long line's glyphs painted past the right edge of the element's own
+    background/padding box, a bare-text seam past where the theme's highlight fill stopped. Fixed with
+    `width: max-content; min-width: 100%; box-sizing: border-box` on all six neutralized rules (`.hljs`
+    and `:not(.hljs)`, all three sites) — the box now grows to the content's real width instead of sitting
+    pinned. Verified numerically (a `Range` over each element's text vs. its own
+    `getBoundingClientRect`, not eyeballed) at all three sites, both `.hljs` and plain variants, both
+    themes: zero bare-text overhang. Screenshot proof:
+    `build/issue-17-harness/screenshots/dark-2c-thread-longline-SCROLLED-seam-proof.png` (thread-OP long
+    single-line case, scrolled to the far right, dark theme) — the background box runs edge-to-edge with
+    the text, no seam. The harness (regenerated; `build/` is gitignored so it isn't tracked) gained the
+    horizontal-overflow fixtures the thread/caption sites never had (2c/2d, 3c/3d) — without them this
+    exact regression could ship again unmeasured, the same way it shipped the first time.
+  - **Addendum, 2026-08-10 — Part 1's pin was itself re-verified and reworked.** The "share a call
+    counter" mechanism described above (`ThreadRepliesTest`'s controlled-interleaving test) only pins the
+    read order for an implementation making EXACTLY two collaborator calls: a shared ordinal counter with
+    a `> 1` cutoff can't tell WHICH accessor ran first, only how-manyth the call was — one extra
+    stubbed-accessor call ahead of the real DB read absorbs the "first read" slot and can rescue a
+    DB-first implementation into a false green. Reworked to key on CAUSALITY instead of a raw count: the
+    registry accessor (`inFlightViews`) always returns the pre-settle draft but records that it ran; the
+    DB accessor (`threadComments`) returns the persisted row only if that flag is already set when it's
+    called, else the pre-settle empty list — robust to how many times either is called. RED-FIRST
+    verified: temporarily swapped the two reads in `ThreadReplies.read`, reran — red 3/3
+    (`AssertionFailedError: ... expected: <POSTED> but was: <DRAFTING>`, at a state assertion the
+    id-only check alone would have missed, since a settled node under the DB-first order still shows up
+    as a stale draft rather than vanishing from `replies.all` entirely) — reverted (`git checkout`,
+    verified zero diff against the pre-swap file), reran green. Class KDoc updated to match; the
+    "order-SENSITIVE by construction" sentence softened to state the pinned invariant precisely: the
+    fixture is sensitive to whether the registry read causally precedes the tree-feeding DB read, not to
+    call count.
 
 ## Open threads / near-term
 
