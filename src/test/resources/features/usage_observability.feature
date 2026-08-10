@@ -36,6 +36,16 @@ Feature: Usage observability — cost and tool-call history surfaced in the admi
     When the owner triggers an ambient tick
     Then the ambient run list shows the cost "$0.1200"
 
+  Scenario: An owner summon's tool calls count toward the strip, but its cost does not
+    Given a thread "Scaling SQLite" exists
+    And a persona "sol" exists
+    And the LLM will respond with "The checkpoint path is where it changes" using tools:
+      | tool | input                      | output                              |
+      | Read | {"file_path":"/src/wal.c"} | static int walCheckpoint(Wal *pWal) |
+    When the owner summons "sol"
+    Then the reply is "posted"
+    And the usage strip's 24h tool-call count includes the owner's summon, and its 24h cost stays absent
+
   Scenario: The tool-call view lists what a generation ran
     Given a thread "Scaling SQLite" exists
     And a persona "sol" exists

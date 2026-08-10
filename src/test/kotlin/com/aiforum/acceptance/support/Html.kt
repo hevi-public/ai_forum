@@ -52,6 +52,17 @@ object Html {
     }
 
     /**
+     * The WHOLE `<li>…</li>` block of the most recent ambient-run row (admin_ambient.kte lists
+     * newest-first, so the first `<li data-ambient-run="…">` in document order is the latest tick), or
+     * null when no ambient-run row exists yet. Mirrors [latestStanceChangeRow]/[liBlock]: a row is read
+     * as a self-contained unit so a probe meant to pin the ROW's own rendered cost can't be satisfied by
+     * the usage strip's prose living elsewhere on the same page — both legitimately render the same
+     * dollar figure after a single tick (a page-wide `Html.contains` measurably passed with the row's
+     * own cost span deleted; this is the fix).
+     */
+    fun latestAmbientRunRow(html: String): String? = liBlock(html, "data-ambient-run=\"[^\"]*\"")
+
+    /**
      * The WHOLE `<li>…</li>` block of the most recent stance-change row (S4a; admin_stances.kte lists
      * newest-first, so the first `<li data-stance-change="…">` in document order is the latest change),
      * or null when the history is empty. Returns the block rather than a single attribute because an

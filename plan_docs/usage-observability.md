@@ -32,18 +32,24 @@ iteration order.
 
 ## 2. The ceiling — what is NOT observable, and why
 
+(researched 2026-08-09; sources: code.claude.com/docs/en/costs and the headless docs
+(code.claude.com/docs/en/headless) — see also `work-fork-direction.md` §3.4, a sibling PR's
+investigation of the same ceiling, which carries the dated source notes)
+
 **The 5-hour and weekly subscription plan-limit bars cannot be read programmatically, and this is a
 structural fact about the tooling, not a gap this app failed to close.** Recorded here so it is not
 re-investigated and re-concluded again in six months:
 
-- There is no API and no headless flag that returns the plan-limit windows. `/usage` is an
-  **interactive TUI** that computes its bars from **local session history** on the machine running
-  Claude Code — it is a client-side view over files on disk, not a server-queryable resource, and it
-  has no non-interactive or scriptable form.
+- There is no API and no headless flag that returns the plan-limit windows
+  (code.claude.com/docs/en/costs, code.claude.com/docs/en/headless). `/usage` is an **interactive
+  TUI**; the docs describe its bars as computed from **local session history** on the machine running
+  Claude Code — a client-side view over files on disk, not a server-queryable resource, with no
+  non-interactive or scriptable form.
 - OTel export (`OTEL_METRICS_EXPORTER` / `CLAUDE_CODE_ENABLE_TELEMETRY`) gives **tokens and cost per
-  invocation** — the same shape of figure `total_cost_usd` already gives us — but it does **not**
-  surface the account-level 5-hour/weekly plan windows either. Telemetry and the plan-limit bars are
-  two different data sources inside Claude Code, and only one of them is exported.
+  invocation** (code.claude.com/docs/en/costs) — the same shape of figure `total_cost_usd` already
+  gives us — but it does **not** surface the account-level 5-hour/weekly plan windows either.
+  Telemetry and the plan-limit bars are two different data sources inside Claude Code, and only one of
+  them is exported.
 - **Conclusion: per-invocation cost from the stream (`total_cost_usd`, captured since V21 and rendered
   by this slice) is the maximum observability available to this application.** There is no deeper
   figure to go get. If the owner wants to know "how close am I to the plan limit," the answer today is
@@ -85,8 +91,18 @@ free when it may not have been.
   `resp.usage?.costUsd` IS computed for them — but it is only ever attached transiently to the returned
   `ReplyView.costUsd` for the settle-triggered-growth hook to read; nothing persists it, because there
   is no `ambient_run` row for an owner-driven generation to attach to either. Net effect: **the owner's
-  own LLM usage is invisible to `/admin/ambient` entirely** — the run list and the usage strip cover
-  ONLY ambient-tick-dispatched generations, never what the owner's own summons/retries/regenerates cost.
+  own LLM *spend* is invisible to `/admin/ambient`'s cost figures** — the run list's per-row `cost_usd`
+  and the usage strip's `cost24h`/`cost7d` (`AmbientRunRepository.costSince`) cover ONLY ambient-tick-
+  dispatched generations, never what the owner's own summons/retries/regenerates cost.
+  **Tool-call VOLUME does not share that scope, and this is worth stating precisely rather than folding
+  it into the sentence above: `GenerationToolCallRepository.countSince` (§4) counts every
+  `generation_tool_call` row with no ambient-vs-owner filter — `run_id` carries no origin marker at all
+  (§4, V30's header) — and `settleOne` writes a trace for every generation it settles, owner summons
+  included.** So the strip's `toolCalls24h`/`toolCalls7d` and `/admin/tools` DO surface the owner's own
+  tool calls; only the *spend* half of `/admin/ambient` is ambient-only. `usage_observability.feature`'s
+  "An owner summon's tool calls count toward the strip, but its cost does not" scenario pins exactly this
+  split — written adversarially, asserting the OLD (wrong) "ambient-only" reading first and confirming it
+  reddened (`expected: <0> but was: <1>`) before landing the correct assertion.
 - **A settle that throws records no trace.** `GenerationService.settleOne`'s exception branch
   deliberately captures nothing — the tool calls (and cost) a turn made before it died live only inside
   the parser owned by the seam that just threw, and smuggling them out through the exception would put
@@ -119,13 +135,17 @@ single parent table could hold the reference.
   list: `<section data-usage-aggregates data-cost-24h data-cost-7d data-tool-calls-24h
   data-tool-calls-7d>` with human-readable prose and a link to `/admin/tools`. `data-cost-24h`/`-7d` are
   omitted (not `"0.0000"`) when every run in the window is unpriced; the tool-call counts always render
-  — 0 is a real, known count, never an unknown.
+  — 0 is a real, known count, never an unknown. The two halves have DIFFERENT populations, and the prose
+  now says so ("N tool calls (all generations)"): cost is ambient-runs-only (`costSince`), tool-call
+  counts are every `generation_tool_call` row regardless of origin (`countSince`) — see §3.
 - **`/admin/tools?comment={id}`** — the new trace view. Newest-call-first, each row (`<li
   data-tool-call data-tool-run data-tool-comment data-tool-seq data-tool-name data-tool-error>`) carries
   its hooks on ONE element; input/output summaries render as child text (never in an attribute — free
-  text in a `data-*` value can truncate every hook after it on the tag, per the S6 rule), with plain
-  inline wrap styling (no dependency on, or duplication of, issue #17's global `pre`-containment CSS,
-  which lives on a different branch). `data-tool-comment` is omitted for an unlinked (failed-run) trace.
+  text in a `data-*` value can truncate every hook after it on the tag, per the S6 rule), styled by
+  `.admin-list__tool-text` (mono, wrapped, `max-height: 40vh; overflow-y: auto` — this page's own class,
+  not a dependency on or duplication of issue #17's global `pre`-containment CSS, which lives on a
+  different branch; the two merge cleanly later). `data-tool-comment` is omitted for an unlinked
+  (failed-run) trace.
 - Linked from `/admin`'s index page (`data-admin-link="tools"`) alongside the other drill-downs.
 
 ## 6. Deferred
@@ -139,7 +159,7 @@ for whichever slice needs it.
 
 | Date | Decision | Why |
 |---|---|---|
-| 2026-08-09 | **The plan-limit bars (5h/weekly) are NOT programmatically observable** — no API, no headless flag; `/usage` is an interactive TUI over local session history; OTel export carries tokens/cost but not plan windows. Per-run stream cost is the ceiling. | Recorded so this is not re-investigated and re-concluded again later; see §2. |
+| 2026-08-09 | **The plan-limit bars (5h/weekly) are NOT programmatically observable** — no API, no headless flag; `/usage` is an interactive TUI over local session history; OTel export carries tokens/cost but not plan windows. Per-run stream cost is the ceiling. | Recorded so this is not re-investigated and re-concluded again later; see §2 (researched 2026-08-09; code.claude.com/docs/en/costs, code.claude.com/docs/en/headless — also `work-fork-direction.md` §3.4, which carries the dated source notes). |
 | 2026-08-09 | **NULL renders as an absent attribute / omitted prose figure, never a claimed `0.0000`/`0`** — cost fields (never known-zero) and, on the strip, cost specifically (tool-call counts DO render `0`, since a count has no "unknown" case). | Continues #15's absent-means-unknown idiom to the aggregate layer; a coalesced zero would tell the owner a tick was free when it may not have been. |
 | 2026-08-09 | **Per-reply cost is NOT displayed on forum pages** — `ReplyView.costUsd` stays a settle-time carrier read only by the ambient growth hook; admin run/tool views are the only rendered surface. | Rendering a per-reply price tag would create exactly the member-attached, rankable magnitude the V24–V28 no-numbers guardrail exists to refuse — a cost is an operator-accounting fact about an invocation, not a score hung on a persona. |
 | 2026-08-09 | **`/admin/tools` filters flat by `?comment=`, not a per-run drilldown from `/admin/ambient`.** | No run→generation join exists, by design (V30's header): `generation_tool_call.run_id` carries no FK because one tick fans out N generations plus a growth round, and an owner summon has no tick at all — there is no single parent id to drill down from. |

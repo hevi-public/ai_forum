@@ -214,8 +214,9 @@ tasks.register<Test>("acceptance") {
         println("acceptance: $executed Cucumber scenarios executed")
         // Ratchet, not just a zero-check: ONLY catches "some scenarios silently stopped running" if it
         // tracks the real count. Bump to the actual executed count whenever a scenario is added (last
-        // bumped 290 -> 295 by issue #16's five usage_observability.feature scenarios).
-        val floor = 295
+        // bumped 295 -> 296 by the issue #16 review's population-claim pin — an owner summon's tool
+        // calls land in the strip's count but not its cost; usage_observability.feature now has six).
+        val floor = 296
         if (executed < floor && !discoveryMode)
             throw GradleException(
                 "acceptance executed only $executed of a floor of $floor Cucumber scenarios (green would lie) — " +

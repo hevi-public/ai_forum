@@ -1707,6 +1707,17 @@ mark.nav-hit {
   color: var(--sage-ink); background: var(--sage-2); border-radius: 4px; padding: 1px 6px;
 }
 
+/* The /admin/ambient usage strip (issue #16 review fix) and the per-run cost figure. A THIRD instance of
+   the same house mistake the two notes below already record — .admin-ambient__usage/-usage-line and
+   .admin-ambient__cost shipped with zero CSS and rendered unstyled. This time the strip's own text rides
+   the already-styled .admin-list__meta pattern (see the <p> in admin_ambient.kte) rather than opening yet
+   another unstyled namespace, so only the section's spacing is genuinely new — mirroring
+   .admin-list__trigger's shape below. The per-row cost span is renamed .admin-list__cost (matching
+   plan_docs/usage-observability.md §5) and gets a real rule: tabular-nums so a column of dollar figures
+   lines up, and .admin-list__item's own ink color so a cost doesn't read as muted metadata. */
+.admin-ambient__usage { margin: 0 0 16px; }
+.admin-list__cost { font-variant-numeric: tabular-nums; color: var(--ink); }
+
 /* Stance-change audit rows (/admin/stances, plan_docs/ambient-slice-4a.md). Extends .admin-list rather
    than opening a namespace of its own — .admin-ambient__* shipped with no CSS at all and rendered
    unstyled, so anything new here has to hang off classes that already have rules. A row is not a line:
@@ -1884,9 +1895,20 @@ mark.nav-hit {
 .admin-list__item--memory p { margin: 0; }
 
 /* /admin/tools rows (issue #16): same "ride .admin-list__* wholesale, add only the row-variant" shape
-   as --memory above. The input/output blocks carry their own inline wrap styling (see admin_tools.kte —
-   deliberately not a shared class here, so this stays the one rule the page needs). */
+   as --memory above. */
 .admin-list__item--tools { display: flex; flex-direction: column; gap: 4px; padding: 12px 4px; }
+
+/* /admin/tools input/output previews (issue #16 review fix): mono, wrapped pre-text — up to 50 rows x a
+   2000/4000-char input/output each, previously inline-styled in admin_tools.kte with NO cap on how tall
+   one trace could render. That is the exact uncontained-output gap issue #17 fixed for thread bodies,
+   reproduced here because #17's CSS lives on a different branch this one doesn't have. Scoped to this
+   page's own class rather than reusing #17's selectors on purpose, so the two merge cleanly later.
+   max-height + overflow-y is the load-bearing addition: one huge trace scrolls inside itself instead of
+   stretching the admin page. */
+.admin-list__tool-text {
+  white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px;
+  color: var(--muted); margin-top: 4px; max-height: 40vh; overflow-y: auto;
+}
 
 /* ------------------------------------------------------- native file input */
 /* The bare OS control sat unstyled inside the polished composer; dress its button like a ghost .btn. */

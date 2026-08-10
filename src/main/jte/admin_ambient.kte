@@ -14,13 +14,20 @@
         <form class="admin-ambient__trigger" method="post" action="/admin/ambient/tick" data-ambient-trigger>
             <button class="btn" type="submit">Run a tick now ▸</button>
         </form>
-        <%-- The usage strip (issue #16): rolling 24h/7d spend + tool-call counts, computed live from the
-             SAME rows the run list below shows — no separate ledger. data-cost-24h/7d follow the run
-             row's own data-cost-usd idiom: JTE omits a null-valued attribute, so an all-unpriced window
-             renders NO attribute (never a misleading "0.0000") while the tool-call counts, which are
-             never unknown, always render — see UsageAggregatesView's KDoc. --%>
+        <%-- The usage strip (issue #16): rolling 24h/7d spend + tool-call counts, computed live off TWO
+             DIFFERENT populations — a review-caught false claim on this branch (it used to read as one
+             population), now stated precisely (plan_docs/usage-observability.md §3). data-cost-24h/-7d
+             come from AmbientRunRepository.costSince, AMBIENT RUNS ONLY (the same rows the run list below
+             shows — no separate ledger for those), and follow the run row's own data-cost-usd idiom: JTE
+             omits a null-valued attribute, so an all-unpriced window renders NO attribute (never a
+             misleading "0.0000"). data-tool-calls-24h/-7d come from
+             GenerationToolCallRepository.countSince, which counts EVERY generation_tool_call row with no
+             ambient-vs-owner filter (owner summons record traces too — see UsageAggregatesView's KDoc)
+             and, being a plain COUNT, is never unknown — it always renders, a real zero included. The
+             prose below says "(all generations)" so an operator doesn't inherit the same false
+             ambient-only reading the plan doc corrected. --%>
         <section class="admin-ambient__usage" data-usage-aggregates data-cost-24h="${usage.cost24h}" data-cost-7d="${usage.cost7d}" data-tool-calls-24h="${usage.toolCalls24h}" data-tool-calls-7d="${usage.toolCalls7d}">
-            <p class="admin-ambient__usage-line">Last 24h: ${if (usage.cost24h != null) "$" + usage.cost24h else "—"} · ${usage.toolCalls24h} tool calls — Last 7d: ${if (usage.cost7d != null) "$" + usage.cost7d else "—"} · ${usage.toolCalls7d} tool calls · <a href="/admin/tools" data-tools-link>Tool calls →</a></p>
+            <p class="admin-list__meta admin-ambient__usage-line">Last 24h: ${if (usage.cost24h != null) "$" + usage.cost24h else "—"} · ${usage.toolCalls24h} tool calls (all generations) — Last 7d: ${if (usage.cost7d != null) "$" + usage.cost7d else "—"} · ${usage.toolCalls7d} tool calls (all generations) · <a href="/admin/tools" data-tools-link>Tool calls →</a></p>
         </section>
         @if(runs.isEmpty())
             <p class="admin-list__empty" data-admin-list-empty="true">No ambient ticks yet — run one above.</p>
@@ -68,7 +75,7 @@
                                  placeholder convention for the same fact. --%>
                             @if(run.costUsd != null)
                                 <span class="admin-list__sep">·</span>
-                                <span class="admin-ambient__cost">$${run.costUsd}</span>
+                                <span class="admin-list__cost">$${run.costUsd}</span>
                             @endif
                             <span class="admin-list__sep">·</span>
                             <span class="admin-list__ago">${run.ago}</span>

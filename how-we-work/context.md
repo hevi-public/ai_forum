@@ -532,6 +532,45 @@ issue #17's global `pre`-containment CSS (different branch). Two things worth ca
 Acceptance floor 290 → **295** (`usage_observability.feature`, five scenarios). Full `verifyAll` green
 (tier0 480, tier1 304, tier2 177, acceptance 295; jsTest + both MCP test tasks unaffected by this slice).
 
+**Review-fix addendum (same day):** an adversarial review of this slice caught two problems in its OWN
+tests and docs — both empirically confirmed red before being fixed, not just patched on inspection:
+
+- **The per-row cost scenario was vacuous.** "the ambient run list shows the cost {string}" asserted with
+  a page-wide `Html.contains(body, cost)`, which the usage strip's own prose satisfies whenever the
+  window holds exactly one priced tick (true of that scenario) — the row's own cost span could be deleted
+  entirely and the scenario stayed green. Fixed by adding `Html.latestAmbientRunRow` (mirrors
+  `latestStanceChangeRow`/`liBlock`) and scoping the step to that row's own `<li>` block, which the strip
+  (a `<section>` above the `<ul>`) can never satisfy. Measured RED with the span deleted — `expected the
+  /admin/ambient latest run ROW to show "$0.1200" visibly … ==> expected: <true> but was: <false>` —
+  then GREEN with it restored.
+- **The strip's two aggregates have different populations, and §3 claimed they were one.** It read "the
+  run list and the usage strip cover ONLY ambient-tick-dispatched generations" — true of the COST
+  aggregates (`AmbientRunRepository.costSince`), false of the TOOL-CALL counts
+  (`GenerationToolCallRepository.countSince`, which has no ambient-vs-owner filter — `run_id` carries no
+  origin marker by design, V30's header — and counts every `generation_tool_call` row; `settleOne`
+  records a trace for every generation it settles, owner summons included). Reworded in the three places
+  that made the claim (`usage-observability.md` §3, `admin_ambient.kte`'s strip comment, `UsageSteps`'
+  KDoc on `usageStripShows`), and the strip's rendered prose now says "(all generations)" next to the
+  tool-call counts so an operator doesn't inherit the same false reading. Pinned with a new scenario, "An
+  owner summon's tool calls count toward the strip, but its cost does not" — written adversarially: the
+  first version of the assertion trusted the OLD claim (expecting the owner summon to leave the 24h count
+  at 0) and reddened for real (`expected: <0> but was: <1>`), which is the empirical proof the claim was
+  wrong, before landing the correct assertion (count includes it, cost stays absent).
+- Also folded in: §2's plan-limit-bars ceiling now carries its sources inline
+  (code.claude.com/docs/en/costs, code.claude.com/docs/en/headless — mirrored in the §7 decision-log row,
+  and cross-referenced from `work-fork-direction.md` §3.4, a sibling PR's independent investigation of the
+  same ceiling) instead of being stated as bare fact; the usage strip and the per-row cost span had ridden
+  ZERO CSS — a THIRD instance of the exact `.admin-ambient__*`-ships-unstyled mistake app.css's own
+  comments already record twice — fixed by hanging the strip's text off the existing `.admin-list__meta`
+  pattern and renaming the per-row span to `admin-list__cost` (matching the plan doc's own §5 naming) with
+  real rules; and `/admin/tools`' input/output previews lost their uncapped inline styling for a real
+  `.admin-list__tool-text` class carrying `max-height: 40vh; overflow-y: auto` — the same
+  uncontained-output gap issue #17 fixed for threads, reproduced here because this branch predates #17's
+  CSS (kept as this page's own class on purpose, so the two merge cleanly later rather than colliding).
+
+Acceptance floor 295 → **296** (the owner-summon population-claim scenario). Full `verifyAll` green
+(tier0 480, tier1 304, tier2 177, acceptance 296; jsTest + both MCP test tasks unaffected).
+
 ## Open threads / near-term
 
 - **What's next, from the record rather than invention** (re-read 2026-07-30). S6 landed 2026-07-27

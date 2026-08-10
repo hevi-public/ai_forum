@@ -194,21 +194,36 @@ class UsageSteps(
         jdbc.update("UPDATE generation_tool_call SET started_at = ?", backdated)
     }
 
-    /** Pins the human-visible half of #15's cost figure — the attribute was already pinned by #15's own
-     *  scenarios; this proves an operator can actually SEE it, not just grep the markup for it. */
+    /**
+     * Pins the human-visible half of #15's cost figure — the attribute was already pinned by #15's own
+     * scenarios; this proves an operator can actually SEE it, not just grep the markup for it.
+     *
+     * Scoped to the LATEST RUN ROW's own block, not a page-wide [Html.contains]: the /admin/ambient usage
+     * strip renders the SAME dollar figure in its own prose whenever the window holds exactly one priced
+     * tick (as this scenario's does), so a page-wide probe is satisfiable by the strip alone with the
+     * row's own cost span deleted entirely — a vacuous scenario that measurably went green with no
+     * per-row cost markup at all. [Html.latestAmbientRunRow] excludes the strip (a `<section>` above the
+     * `<ul>`, outside any `<li>`), so only the row itself can satisfy this.
+     */
     @Then("the ambient run list shows the cost {string}")
     fun ambientRunListShowsCost(cost: String) {
-        val body = awaitAmbientPage { Html.contains(it, cost) }
+        val body = awaitAmbientPage { Html.latestAmbientRunRow(it)?.contains(cost) == true }
+        val row = Html.latestAmbientRunRow(body)
         assertTrue(
-            Html.contains(body, cost),
-            "expected the /admin/ambient run list to show \"$cost\" visibly (after ${POLL_TIMEOUT_MS}ms) in:\n$body",
+            row != null && row.contains(cost),
+            "expected the /admin/ambient latest run ROW to show \"$cost\" visibly (after ${POLL_TIMEOUT_MS}ms) in:\n" +
+                (row ?: "<no ambient-run row found>\n$body"),
         )
     }
 
     /**
      * The usage strip's own four numbers — the 24h/7d cost + tool-call-count aggregates
-     * (`AmbientController.usageAggregates`), independently computed from `costSince`/`countSince` over
-     * the SAME `ambient_run`/`generation_tool_call` rows the run list and /admin/tools render from.
+     * (`AmbientController.usageAggregates`). NOT one population: `cost24h`/`cost7d`
+     * (`AmbientRunRepository.costSince`) cover ONLY the ambient-run rows the run list below shows, but
+     * `toolCalls24h`/`toolCalls7d` (`GenerationToolCallRepository.countSince`) count EVERY
+     * `generation_tool_call` row with no ambient-vs-owner filter — a prior version of this comment
+     * conflated the two as "the same rows"; that was the false claim [usageStripCountsOwnerSummonToolCallsButNotCost]
+     * below now pins against (see plan_docs/usage-observability.md §3).
      */
     @Then("the usage strip shows a 24h cost of {double} with {int} tool calls, and a 7d cost of {double} with {int} tool calls")
     fun usageStripShows(cost24h: Double, calls24h: Int, cost7d: Double, calls7d: Int) {
@@ -219,6 +234,33 @@ class UsageSteps(
         assertEquals(fmt7, Html.usageAggregatesAttr(body, "data-cost-7d"), "7d cost on the usage strip:\n$body")
         assertEquals(calls24h.toString(), Html.usageAggregatesAttr(body, "data-tool-calls-24h"), "24h tool-call count:\n$body")
         assertEquals(calls7d.toString(), Html.usageAggregatesAttr(body, "data-tool-calls-7d"), "7d tool-call count:\n$body")
+    }
+
+    /**
+     * The vetted pin for the review's population-claim fix (issue #16): an owner summon is not an
+     * ambient tick, so it never touches `ambient_run.cost_usd` — the strip's 24h cost stays absent, same
+     * as [usageStripShowsHonestUnknown]'s all-unpriced-window case. But
+     * `GenerationToolCallRepository.countSince` counts every `generation_tool_call` row with no
+     * ambient-vs-owner filter (`run_id` carries no origin marker — V30's header), and `settleOne` records
+     * a trace for EVERY generation it settles, owner summons included — so the owner's own tool call DOES
+     * land in `toolCalls24h`. Written adversarially first: an assertion that trusted the plan doc's old
+     * (now-corrected) "ambient-tick generations only" claim — that this summon would leave the count at 0
+     * — reddened against the real count of 1 (`expected: <0> but was: <1>`), which is the empirical proof
+     * the claim was wrong, not just a doc nit. See plan_docs/usage-observability.md §3.
+     */
+    @Then("the usage strip's 24h tool-call count includes the owner's summon, and its 24h cost stays absent")
+    fun usageStripCountsOwnerSummonToolCallsButNotCost() {
+        val body = awaitAmbientPage { Html.usageAggregatesAttr(it, "data-tool-calls-24h") == "1" }
+        assertEquals(
+            "1", Html.usageAggregatesAttr(body, "data-tool-calls-24h"),
+            "expected the owner summon's own tool call to land in the strip's 24h count (countSince has " +
+                "no ambient-vs-owner filter) after ${POLL_TIMEOUT_MS}ms, in:\n$body",
+        )
+        assertNull(
+            Html.usageAggregatesAttr(body, "data-cost-24h"),
+            "an owner summon never writes ambient_run.cost_usd (no tick behind it, so no row to charge), " +
+                "so the strip's 24h cost must stay absent, but it rendered in:\n$body",
+        )
     }
 
     /**

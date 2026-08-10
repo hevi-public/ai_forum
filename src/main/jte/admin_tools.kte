@@ -49,14 +49,16 @@
                         <%-- Input/output render as CHILD TEXT ONLY, never as an attribute value (the
                              same S6 reason as the comment above). ${} HTML-escapes: this is untrusted
                              text a tool produced (a fetched page, a diff, a model-composed argument
-                             blob), never routed through $unsafe{}. Plain inline styling only — #17's
-                             global pre-containment CSS lives on a different branch; this neither depends
-                             on it nor tries to duplicate it. --%>
+                             blob), never routed through $unsafe{}. .admin-list__tool-text (app.css) is
+                             THIS page's own class, not #17's global pre-containment CSS (a different
+                             branch) — it carries the same mono/wrap styling plus a max-height +
+                             overflow-y cap, so up to 50 rows of 2000/4000-char traces can't stretch the
+                             admin page into one long scroll. --%>
                             @if(row.inputSummary != null)
-                                <div class="admin-list__tool-text" style="white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:4px;"><b>in:</b> ${row.inputSummary}</div>
+                                <div class="admin-list__tool-text"><b>in:</b> ${row.inputSummary}</div>
                             @endif
                             @if(row.outputSummary != null)
-                                <div class="admin-list__tool-text" style="white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:4px;"><b>out:</b> ${row.outputSummary}</div>
+                                <div class="admin-list__tool-text"><b>out:</b> ${row.outputSummary}</div>
                             @endif
                     </li>
                 @endfor
