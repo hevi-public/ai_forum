@@ -4,6 +4,7 @@ import com.aiforum.dto.AdminAttachmentRow
 import com.aiforum.dto.AdminCommentRow
 import com.aiforum.dto.Snippet
 import com.aiforum.repo.AdminQueryRepository
+import com.aiforum.repo.GenerationToolCallRepository
 import com.aiforum.repo.RoutingEventRepository
 import com.aiforum.repo.StatsRepository
 import com.aiforum.service.RoutingOutcome
@@ -66,6 +67,27 @@ data class RoutingStatsView(
 )
 
 /**
+ * One row on the /admin/tools trace view (issue #16): what ONE generation reached for. [authorId]/
+ * [threadId] are the joined-in comment fields — present for a POSTED reply's trace, both null for an
+ * unlinked (failed-run) trace, which is the honest account of a call nobody can attribute to a persona
+ * or a thread. [ago], like [AdminCommentView.ago], is null when [GenerationToolCallRepository.ToolCallRow.startedAt]
+ * fails to parse — one malformed row costs its own line a timestamp, never the whole page.
+ */
+data class AdminToolCallView(
+    val id: Long,
+    val runId: String,
+    val commentId: String?,
+    val seq: Int,
+    val toolName: String,
+    val inputSummary: String?,
+    val outputSummary: String?,
+    val isError: Boolean,
+    val authorId: String?,
+    val threadId: String?,
+    val ago: String?,
+)
+
+/**
  * The admin pages — all read-only, all public (the app is single-owner/local-first with no auth layer
  * yet; gate /admin when an owner/auth boundary actually lands):
  *  - GET /admin                  — the statistics dashboard, each figure linking to the items behind it.
@@ -76,12 +98,19 @@ data class RoutingStatsView(
  *                                  plus the headline PARSE-MISS RATE,
  *                                  `WIDENED_NO_MATCH / (MATCHED + WIDENED_NO_MATCH)` — how often
  *                                  name-matching silently widened a decision the model may have narrowed.
+ *  - GET /admin/tools             — what generations actually reached for (issue #16, plan_docs/
+ *                                  usage-observability.md): the newest `generation_tool_call` rows,
+ *                                  optionally scoped to one generation via `?comment=`. Lives here rather
+ *                                  than on AmbientController because a tool call belongs to a GENERATION,
+ *                                  not to a tick — an owner summon has no ambient run behind it at all
+ *                                  (V30's header).
  */
 @Controller
 class AdminController(
     private val stats: StatsRepository,
     private val query: AdminQueryRepository,
     private val routingEvents: RoutingEventRepository,
+    private val toolCalls: GenerationToolCallRepository,
     private val clock: Clock,
 ) {
 
@@ -154,6 +183,15 @@ class AdminController(
         return "admin/stats"
     }
 
+    @GetMapping("/admin/tools")
+    fun tools(@RequestParam(required = false) comment: String?, model: Model): String {
+        val now = clock.instant()
+        val rows = toolCalls.recent(TOOL_CALL_LIMIT, comment)
+        model.addAttribute("listTitle", if (comment != null) "Tool calls · comment $comment" else "Tool calls")
+        model.addAttribute("rows", rows.map { it.toView(now) })
+        return "admin_tools"
+    }
+
     private fun AdminCommentRow.toView(now: Instant) = AdminCommentView(
         id = id,
         threadId = threadId,
@@ -178,11 +216,26 @@ class AdminController(
         filename = originalFilename,
     )
 
+    private fun GenerationToolCallRepository.ToolCallRow.toView(now: Instant) = AdminToolCallView(
+        id = id,
+        runId = runId,
+        commentId = commentId,
+        seq = seq,
+        toolName = toolName,
+        inputSummary = inputSummary,
+        outputSummary = outputSummary,
+        isError = isError,
+        authorId = authorId,
+        threadId = threadId,
+        ago = RelativeTime.agoOrNull(startedAt, now),
+    )
+
     private companion object {
         const val SNIPPET_LEN = 100
 
         const val WINDOW_DAYS = 7L
         const val RECENT_MISS_LIMIT = 10
+        const val TOOL_CALL_LIMIT = 50
 
         // Fixed display order + human labels for the four routing outcomes (the enum stays the machine name).
         val OUTCOME_LABELS = linkedMapOf(
